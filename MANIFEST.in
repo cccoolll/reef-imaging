@@ -1,0 +1,5 @@
+include reef_imaging/icon/*
+include reef_imaging/images/*
+include reef_imaging/control/*
+include reef_imaging/configurations/*
+

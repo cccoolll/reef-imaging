@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+
+[project]
+name = "reef-imaging"
+version = "0.1.0"
+readme = "README.md"
+description = "REEF Microscopy Imaging Farm Control Software"
+dependencies = [
+    "squid-control",
+]
+[project.optional-dependencies]
+all = [
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["reef_imaging*"]
+exclude = ["tests*", "scripts*"]
+
+[options.entry_points]
+console_scripts = [
+    "reef-imaging = reef_imaging.__main__:main",
+]
