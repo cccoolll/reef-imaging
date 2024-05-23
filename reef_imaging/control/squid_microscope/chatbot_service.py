@@ -1,28 +1,13 @@
-import os 
 import logging
 
-
-import pyqtgraph.dockarea as dock
-import time
 from tools.hypha_storage import HyphaDataStore
 import argparse
 import asyncio
-import fractions
 
 import numpy as np
-#from av import VideoFrame
 from imjoy_rpc.hypha import login, connect_to_server, register_rtc_service
-from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription, RTCConfiguration
 
-from aiortc.contrib.media import MediaPlayer, MediaRelay, MediaStreamTrack
-from aiortc.rtcrtpsender import RTCRtpSender
-from av import VideoFrame
-import fractions
-import json
-import webbrowser
 from squid_control.squid_controller import SquidController
-#import squid_control.squid_chatbot as chatbot
-import cv2
 login_required=True
 current_x, current_y = 0,0
 

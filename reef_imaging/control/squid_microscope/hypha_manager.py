@@ -1,27 +1,18 @@
 import os 
-import logging
 
 
-import pyqtgraph.dockarea as dock
 import time
 from tools.hypha_storage import HyphaDataStore
-import argparse
 import asyncio
 import fractions
 
 import numpy as np
-#from av import VideoFrame
-from imjoy_rpc.hypha import login, connect_to_server, register_rtc_service
-from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription, RTCConfiguration
+from aiortc import MediaStreamTrack
 
-from aiortc.contrib.media import MediaPlayer, MediaRelay, MediaStreamTrack
-from aiortc.rtcrtpsender import RTCRtpSender
+from aiortc.contrib.media import MediaStreamTrack
 from av import VideoFrame
 import fractions
 import json
-import webbrowser
-from squid_control.squid_controller import SquidController
-#import squid_control.squid_chatbot as chatbot
 import cv2
 
 current_x, current_y = 0,0
@@ -140,7 +131,7 @@ class HyphaManager:
         """
         if not self.check_permission(context.get("user")):
             return "You don't have permission to use the chatbot, please contact us and wait for approval"
-        is_success, x_pos, y_pos,z_pos, x_des, y_des, z_des =self.squidController.move_by_distance_safely(x,y,z)
+        is_success, x_pos, y_pos,z_pos, x_des, y_des, z_des =self.squidController.move_by_distance_limited(x,y,z)
         if is_success:
             result = f'The stage moved ({x},{y},{z})mm through x,y,z axis, from ({x_pos},{y_pos},{z_pos})mm to ({x_des},{y_des},{z_des})mm'
             print(result)
@@ -173,21 +164,21 @@ class HyphaManager:
         if not self.check_permission(context.get("user")):
             return "You don't have permission to use the chatbot, please contact us and wait for approval"
         if x != 0:
-            is_success, x_pos, y_pos,z_pos, x_des = self.squidController.move_x_to_safely(x)
+            is_success, x_pos, y_pos,z_pos, x_des = self.squidController.move_x_to_limited(x)
             if not is_success:
                 result = f'The stage can not move to position ({x},{y},{z})mm from ({x_pos},{y_pos},{z_pos})mm because out of the limit of X axis.'
                 print(result)
                 return(result)
                 
         if y != 0:        
-            is_success, x_pos, y_pos, z_pos, y_des = self.squidController.move_y_to_safely(y)
+            is_success, x_pos, y_pos, z_pos, y_des = self.squidController.move_y_to_limited(y)
             if not is_success:
                 result = f'X axis moved successfully, the stage is now at ({x_pos},{y_pos},{z_pos})mm. But aimed position is out of the limit of Y axis and the stage can not move to position ({x},{y},{z})mm.'
                 print(result)
                 return(result)
                 
         if z != 0:    
-            is_success, x_pos, y_pos, z_pos, z_des = self.squidController.move_z_to_safely(z)
+            is_success, x_pos, y_pos, z_pos, z_des = self.squidController.move_z_to_limited(z)
             if not is_success:
                 result = f'X and Y axis moved successfully, the stage is now at ({x_pos},{y_pos},{z_pos})mm. But aimed position is out of the limit of Z axis and stage can not move to position ({x},{y},{z})mm.'
                 print(result)
