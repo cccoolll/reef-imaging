@@ -245,6 +245,7 @@ class HyphaManager:
         if self.squidController.microcontroller.is_busy():
             time.sleep(0.05)
         gray_img = self.squidController.camera.read_frame()
+        gray_img = cv2.resize(gray_img, (512, 512), interpolation=cv2.INTER_AREA)
         time.sleep(0.05)
         #squidController.liveController.set_illumination(0,0)
         if self.squidController.microcontroller.is_busy():
