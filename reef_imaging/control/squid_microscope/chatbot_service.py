@@ -12,6 +12,7 @@ login_required=True
 current_x, current_y = 0,0
 
 from hypha_manager import HyphaManager
+from distutils.util import strtobool
 
 # hyphaManager = HyphaManager()
 
@@ -178,7 +179,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Squid microscope control services for Hypha."
     )
-    parser.add_argument("--simulation", type=bool, default=True, help="The simulation mode")
+    parser.add_argument("--simulation", type=lambda x: bool(strtobool(x)), default=True, help="The simulation mode")
     parser.add_argument("--service-id", type=str, default="squid-control", help="The service id")
     parser.add_argument("--verbose", "-v", action="count")
     args = parser.parse_args()
