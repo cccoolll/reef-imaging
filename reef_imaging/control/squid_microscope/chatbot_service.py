@@ -17,7 +17,8 @@ from hypha_manager import HyphaManager
 
 
 # Now define chatbot services
-
+global datastore
+datastore = HyphaDataStore()
 
 def get_schema(context=None):
     return {
@@ -120,14 +121,14 @@ def auto_focus_schema(config, context=None):
     hyphaManager.auto_focus(context=context)
     return {"result": "Auto focused!"}
 
-def snap_image_schema(config, context=None):
+def snap_image_schema(config, datastore=datastore,context=None):
     if config["exposure"] is None:
         config["exposure"] = 100
     if config["channel"] is None:
         config["channel"] = 0
     if config["intensity"] is None:
         config["intensity"] = 15
-    squid_image_url = hyphaManager.snap(config["exposure"], config["channel"], config["intensity"],context=context)
+    squid_image_url = hyphaManager.snap(config["exposure"], config["channel"], config["intensity"],datastore=datastore, context=context)
     resp = f"![Image]({squid_image_url})"
     return resp
 
@@ -166,8 +167,7 @@ async def setup():
     token = await login({"server_url": server_url})
     server = await connect_to_server({"server_url": server_url, "token": token})
     svc = await server.register_service(chatbot_extension)
-    global datastore
-    datastore = HyphaDataStore()
+
     await datastore.setup(server, service_id="data-store")
 
     print(f"Extension service registered with id: {svc.id}, you can visit the service at:\n https://bioimage.io/chat?server={server_url}&extension={svc.id}&assistant=Skyler")

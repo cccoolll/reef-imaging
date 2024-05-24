@@ -21,7 +21,6 @@ current_x, current_y = 0,0
 class HyphaManager:
     def __init__(self, squidController,login_required=True):
         self.squidController = squidController
-        self.datastore = HyphaDataStore()
         self.squidController = squidController
         self.login_required = login_required
         self.authorized_emails = None
@@ -131,7 +130,7 @@ class HyphaManager:
         """
         if not self.check_permission(context.get("user")):
             return "You don't have permission to use the chatbot, please contact us and wait for approval"
-        is_success, x_pos, y_pos,z_pos, x_des, y_des, z_des =self.squidController.move_by_distance_limited(x,y,z)
+        is_success, x_pos, y_pos,z_pos, x_des, y_des, z_des =self.squidController.move_by_distance_safely(x,y,z)
         if is_success:
             result = f'The stage moved ({x},{y},{z})mm through x,y,z axis, from ({x_pos},{y_pos},{z_pos})mm to ({x_des},{y_des},{z_des})mm'
             print(result)
@@ -164,21 +163,21 @@ class HyphaManager:
         if not self.check_permission(context.get("user")):
             return "You don't have permission to use the chatbot, please contact us and wait for approval"
         if x != 0:
-            is_success, x_pos, y_pos,z_pos, x_des = self.squidController.move_x_to_limited(x)
+            is_success, x_pos, y_pos,z_pos, x_des = self.squidController.move_x_to_safely(x)
             if not is_success:
                 result = f'The stage can not move to position ({x},{y},{z})mm from ({x_pos},{y_pos},{z_pos})mm because out of the limit of X axis.'
                 print(result)
                 return(result)
                 
         if y != 0:        
-            is_success, x_pos, y_pos, z_pos, y_des = self.squidController.move_y_to_limited(y)
+            is_success, x_pos, y_pos, z_pos, y_des = self.squidController.move_y_to_safely(y)
             if not is_success:
                 result = f'X axis moved successfully, the stage is now at ({x_pos},{y_pos},{z_pos})mm. But aimed position is out of the limit of Y axis and the stage can not move to position ({x},{y},{z})mm.'
                 print(result)
                 return(result)
                 
         if z != 0:    
-            is_success, x_pos, y_pos, z_pos, z_des = self.squidController.move_z_to_limited(z)
+            is_success, x_pos, y_pos, z_pos, z_des = self.squidController.move_z_to_safely(z)
             if not is_success:
                 result = f'X and Y axis moved successfully, the stage is now at ({x_pos},{y_pos},{z_pos})mm. But aimed position is out of the limit of Z axis and stage can not move to position ({x},{y},{z})mm.'
                 print(result)
@@ -227,7 +226,7 @@ class HyphaManager:
         return bgr_img
 
 
-    def snap(self, exposure_time, channel, intensity,context=None):
+    def snap(self, exposure_time, channel, intensity,datastore, context=None):
         """
         Get the current frame from the camera, converted to a 3-channel BGR image.
         """
@@ -264,9 +263,9 @@ class HyphaManager:
         bgr_img = np.stack((gray_img,)*3, axis=-1)  # Duplicate grayscale data across 3 channels to simulate BGR format.
         _, png_image = cv2.imencode('.png', bgr_img)
         # Store the PNG image
-        file_id = self.datastore.put('file', png_image.tobytes(), 'snapshot.png', "Captured microscope image in PNG format")
-        print(f'The image is snapped and saved as {self.datastore.get_url(file_id)}')
-        return self.datastore.get_url(file_id)
+        file_id = datastore.put('file', png_image.tobytes(), 'snapshot.png', "Captured microscope image in PNG format")
+        print(f'The image is snapped and saved as {datastore.get_url(file_id)}')
+        return datastore.get_url(file_id)
 
 
     def open_illumination(self, context=None):
