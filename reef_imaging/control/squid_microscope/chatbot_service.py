@@ -170,7 +170,7 @@ async def setup():
     datastore = HyphaDataStore()
     await datastore.setup(server, service_id="data-store")
 
-    print(f"Extension service registered with id: {svc.id}, you can visit the service at: https://bioimage.io/chat?server={server_url}&extension={svc.id}")
+    print(f"Extension service registered with id: {svc.id}, you can visit the service at:\n https://bioimage.io/chat?server={server_url}&extension={svc.id}&assistant=Skyler")
 
 
 
