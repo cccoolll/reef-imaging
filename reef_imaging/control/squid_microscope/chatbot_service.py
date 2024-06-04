@@ -179,12 +179,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Squid microscope control services for Hypha."
     )
-    parser.add_argument("--simulation", type=lambda x: bool(strtobool(x)), default=True, help="The simulation mode")
+    parser.add_argument("--simulation", type=lambda x: bool(strtobool(x)), default=False, help="The simulation mode")
     parser.add_argument("--service-id", type=str, default="squid-control", help="The service id")
     parser.add_argument("--verbose", "-v", action="count")
     args = parser.parse_args()
 
-    squidController = SquidController(is_simulation=args.simulation)
+    try:
+        squidController = SquidController(is_simulation=args.simulation)
+    except Exception as e:
+        print(f"Failed to initialize Squid Controller.\n Eorror:\n{e}\n ========================================================\nUse simulation mode instead.")
+        squidController = SquidController(is_simulation=True)
     hyphaManager = HyphaManager(squidController, args.service_id)
 
     if args.verbose:
