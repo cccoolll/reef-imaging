@@ -170,3 +170,4 @@ cython_debug/
 #.idea/
 
 configuration_HCS_v2.ini
+config_parameters.txt
