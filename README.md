@@ -23,4 +23,6 @@ pip install -e .
 To run the software, use the following command:
 ```
 python -m reef_imaging.hypha_service
+
 ```
+(Setup python path for folder 'reef_imaging' and 'squid-control')
