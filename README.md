@@ -32,13 +32,9 @@ Before start, make sure you installed docker and docker-compose.
  * Create a docker network by running: `docker network create hypha-app-engine`
  * Start the application containers: `docker-compose up -d`
  * Start traefik: `cd traefik && docker-compose up -d`
- * Wait for a minutes and you should get your site running, to test it you can visit https://ai.imjoy.io/engine with your web browser.
+ * Wait for a minutes and you should get your site running, to test it you can visit https://reef.aicell.io with your web browser.
   
 
-Start a hypha in production, you need to use docker compose
-```
-
-```
 #### Start Hypha Services
 
 To run the software, use the following command:
