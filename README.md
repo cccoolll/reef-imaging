@@ -20,6 +20,27 @@ pip install -e .
 
 ### Usage
 
+#### Start Hypha Server
+
+Before start, make sure you installed docker and docker-compose.
+
+ * Git clone this repo 
+ * **IMPORTANT**: Change permission for HTTPS
+   Run `chmod 600 traefik/acme/acme.json`
+ * Create an `.env` file and fill in with keys defined in the template file `.env-template`. 
+ * Change host name and other settings in the `docker-compose.yaml` file.
+ * Create a docker network by running: `docker network create hypha-app-engine`
+ * Start the application containers: `docker-compose up -d`
+ * Start traefik: `cd traefik && docker-compose up -d`
+ * Wait for a minutes and you should get your site running, to test it you can visit https://ai.imjoy.io/engine with your web browser.
+  
+
+Start a hypha in production, you need to use docker compose
+```
+
+```
+#### Start Hypha Services
+
 To run the software, use the following command:
 ```
 python -m reef_imaging.hypha_service
