@@ -42,6 +42,7 @@ services:
       redis:
         condition: service_healthy
     labels:
+      - "traefik.enable=true"
       - "traefik.http.routers.hypha.rule=Host(`reef.aicell.io`)"
       - "traefik.http.routers.hypha.entrypoints=websecure"
       - "traefik.http.routers.hypha.tls.certresolver=leresolver"
@@ -102,4 +103,4 @@ services:
 
 networks:
   hypha-app-engine:
-    external: false
+    external: true
