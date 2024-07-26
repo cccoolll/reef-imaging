@@ -11,7 +11,7 @@ services:
       - --log.level=DEBUG
       - --log.filePath=/logs/traefik.log
       - --api
-      # - --certificatesresolvers.leresolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory
+      - --certificatesresolvers.leresolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory
       - --certificatesresolvers.leresolver.acme.email=oeway007@gmail.com
       - --certificatesresolvers.leresolver.acme.storage=/acme/acme.json
       - --certificatesResolvers.leresolver.acme.tlschallenge=true
@@ -33,4 +33,4 @@ services:
       - "./logs:/logs"
 networks:
   hypha-app-engine:
-    external: false
+    external: true
