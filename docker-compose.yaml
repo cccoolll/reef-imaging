@@ -42,9 +42,9 @@ services:
       redis:
         condition: service_healthy
     labels:
-      - "traefik.enable=true"
       - "traefik.http.routers.hypha.rule=Host(`reef.aicell.io`)"
       - "traefik.http.routers.hypha.entrypoints=websecure"
+      - "traefik.http.routers.hypha.tls=true"
       - "traefik.http.routers.hypha.tls.certresolver=leresolver"
       - "traefik.http.services.hypha.loadbalancer.server.port=9520"
       # - "traefik.http.routers.api.tls.domains[0].main=imjoy.io"
@@ -103,4 +103,4 @@ services:
 
 networks:
   hypha-app-engine:
-    external: true
+    external: false

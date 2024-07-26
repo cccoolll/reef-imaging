@@ -33,4 +33,4 @@ services:
       - "./logs:/logs"
 networks:
   hypha-app-engine:
-    external: true
+    external: false
