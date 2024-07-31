@@ -4,14 +4,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebRTC demo</title>
+    <title>WebRTC Microscope Control</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/imjoy-rpc@0.5.36/dist/hypha-rpc-websocket.min.js"></script>
     <script src="https://lib.imjoy.io/imjoy-loader.js"></script>
     <style>
-        body,
-        html {
+        body, html {
             margin: 0;
             padding: 0;
             font-family: Arial, sans-serif;
@@ -19,109 +18,139 @@
 
         #app {
             padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
         }
 
         #title {
-            font-size: 1.5em;
+            font-size: 2em;
             margin-bottom: 20px;
         }
 
         #viewer-section {
-            display: flex; /* Use flexbox for layout */
-            justify-content: left; /* Center the children horizontally */
-            align-items: start; /* Align items to the start of the cross axis */
-            flex-wrap: wrap; /* Allow items to wrap as needed */
-            max-width: 100%; /* Ensure the section does not overflow the viewport width */
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
         }
 
         #media {
-            flex-grow: 1; /* Allow the video container to grow and take up space */
-            max-width: 480px; /* Adjust based on desired size of video output */
-            max-height: 480px; /* Adjust height automatically */
+            flex: 1 1 480px;
+            max-width: 480px;
         }
 
         #control-panel {
-            flex-grow: 1; /* Allow the control panel to grow */
-            max-width: 15%; /* Adjust based on desired size of the control panel */
-            margin-left: 20px; /* Add some space between the video and control panel */
-            align-items: center; /* Center items horizontally (since it's a column layout) */
-            padding: 10px;
-            background-color: rgba(255, 255, 255, 0.8);
-            border-radius: 5px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            flex: 1 1 300px;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
 
-        /* Ensure the video fills the container */
+        .control-group {
+            margin-bottom: 15px;
+        }
+
+        .btn-group-vertical > .btn {
+            margin-bottom: 5px;
+        }
+
+        #well-plate-svg {
+            margin-top: 20px;
+        }
+
         video {
             width: 100%;
             height: auto;
+            border-radius: 10px;
         }
-
     </style>
 </head>
 
 <body>
     <div id="app">
-        <h1 id="title" class="text-center mb-4">WebRTC Hypha Demo</h1>
+        <h1 id="title" class="text-center">WebRTC Microscope Control</h1>
+        
         <div class="form-group">
-            <label for="service-id">WebRTC service id: </label>
-            <input id="service-id" type="text" value="squid-control-service-simulation" class="form-control" />
+            <label for="service-id">WebRTC service id:</label>
+            <input id="service-id" type="text" value="squid-control-service-simulation-2" class="form-control" />
         </div>
-        <div class="d-flex mb-3">
-            <div class="form-group">
-                <label for="x-move">X Movement (mm): </label>
-                <input id="x-move" type="number" value="1" class="form-control" />
-            </div>
-            <div class="form-group">
-                <label for="y-move">Y Movement (mm): </label>
-                <input id="y-move" type="number" value="1" class="form-control" />
-            </div>
-            <div class="form-group">
-                <label for="z-move">Z Movement (mm): </label>
-                <input id="z-move" type="number" value="1" class="form-control" />
-            </div>
-                
-        </div>
-        <div id="viewer-section" class="position-relative">
-            
-            <div id="media" class="shadow-lg">
+        
+        <div id="viewer-section">
+            <div id="media" class="shadow">
                 <audio id="audio" autoplay="true"></audio>
                 <video id="video" autoplay="true" playsinline="true"></video>
-               
             </div>
-            <div id="control-panel" class="d-flex flex-column align-items-center justify-content-center">
-                <button id="startStopButton" class="btn btn-primary" onclick="window.methods.toggleLive()">
-                    <span id="startStopIcon" class="fas fa-play"></span>
-                </button>
-                <br>
-                <button class="btn btn-secondary mb-2" onclick="window.methods.moveMicroscope('y', 1)"><i class="fas fa-arrow-up"></i></button>
-                <div class="d-flex justify-content-between">
-                    <button class="btn btn-secondary mr-2" onclick="window.methods.moveMicroscope('x', -1)"><i class="fas fa-arrow-left"></i></button>
-                    <button class="btn btn-secondary ml-2" onclick="window.methods.moveMicroscope('x', 1)"><i class="fas fa-arrow-right"></i></button>
-                </div>
-                <button class="btn btn-secondary mt-2" onclick="window.methods.moveMicroscope('y', -1)"><i class="fas fa-arrow-down"></i></button>
-                <button id="toggleLightButton" class="btn btn-warning mt-2" onclick="window.methods.toggleLight()">
-                    <span id="toggleLightIcon" class="fas fa-lightbulb"></span>
-                </button>
-                <button id="scanPlateButton" class="btn btn-info mt-2" onclick="window.methods.startPlateScan()">
-                    <span id="scanPlateIcon" class="fas fa-microscope"></span> Scan Plate
-                </button>
-
-                
-            </div>
-            </div>
-            <svg id="well-plate-svg" style="width: 300px; height: 200px;"> <!-- Adjust size as needed -->
-                <image href="images/96-Well_plate.svg" width="100%" height="100%"/>
-                
-                <circle id="stage-indicator" cx="120" cy="100" r="9" fill="red" visibility="visible"/> <!-- Red dot -->
-            </svg>
-            <label for="current_location">Current location of stage </label>
             
+            <div id="control-panel">
+                <div class="control-group">
+                    <button id="startStopButton" class="btn btn-primary btn-block" onclick="window.methods.toggleLive()">
+                        <span id="startStopIcon" class="fas fa-play"></span> Start/Stop
+                    </button>
+                </div>
+                
+                <div class="control-group">
+                    <label>Stage Movement:</label>
+                    <div class="input-group mb-2">
+                        <input id="x-move" type="number" value="1" class="form-control" placeholder="X (mm)">
+                        <input id="y-move" type="number" value="1" class="form-control" placeholder="Y (mm)">
+                        <input id="z-move" type="number" value="0.1" class="form-control" placeholder="Z (mm)">
+                    </div>
+                    <div class="btn-group-vertical btn-block">
+                        <button class="btn btn-secondary" onclick="window.methods.moveMicroscope('y', 1)"><i class="fas fa-arrow-up"></i> Y+</button>
+                        <div class="btn-group">
+                            <button class="btn btn-secondary" onclick="window.methods.moveMicroscope('x', -1)"><i class="fas fa-arrow-left"></i> X-</button>
+                            <button class="btn btn-secondary" onclick="window.methods.moveMicroscope('x', 1)"><i class="fas fa-arrow-right"></i> X+</button>
+                        </div>
+                        <button class="btn btn-secondary" onclick="window.methods.moveMicroscope('y', -1)"><i class="fas fa-arrow-down"></i> Y-</button>
+                        <div class="btn-group">
+                            <button class="btn btn-secondary" onclick="window.methods.moveMicroscope('z', -1)"><i class="fas fa-arrow-down"></i> Z-</button>
+                            <button class="btn btn-secondary" onclick="window.methods.moveMicroscope('z', 1)"><i class="fas fa-arrow-up"></i> Z+</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="control-group">
+                    <button id="toggleLightButton" class="btn btn-warning btn-block" onclick="window.methods.toggleLight()">
+                        <span id="toggleLightIcon" class="fas fa-lightbulb"></span> Toggle Light
+                    </button>
+                </div>
+                
+                <div class="control-group">
+                    <button id="scanPlateButton" class="btn btn-info btn-block" onclick="window.methods.startPlateScan()">
+                        <span id="scanPlateIcon" class="fas fa-microscope"></span> Scan Plate
+                    </button>
+                </div>
+                
+                <div class="control-group">
+                    <label for="illumination-intensity">Illumination Intensity:</label>
+                    <input type="range" id="illumination-intensity" class="form-control-range" min="0" max="100" value="50" oninput="window.methods.setIllumination()">
+                    <span id="illumination-intensity-value">50%</span>
+                </div>
+                
+                <div class="control-group">
+                    <label for="illumination-channel">Illumination Channel:</label>
+                    <select id="illumination-channel" class="form-control" onchange="window.methods.setIllumination()">
+                        <option value="0">BF LED matrix full</option>
+                        <option value="11">Fluorescence 405 nm Ex</option>
+                        <option value="12">Fluorescence 488 nm Ex</option>
+                        <option value="14">Fluorescence 561nm Ex</option>
+                        <option value="13">Fluorescence 638nm Ex</option>
+                        <option value="15">Fluorescence 730nm Ex</option>
+                    </select>
+                </div>
+                
+                <div class="control-group">
+                    <label for="camera-exposure">Camera Exposure (ms):</label>
+                    <input type="number" id="camera-exposure" class="form-control" value="100" min="1" max="1000" onchange="window.methods.setCameraExposure()">
+                </div>
+            </div>
         </div>
-
-    
-
         
+        <svg id="well-plate-svg" style="width: 300px; height: 200px;">
+            <image href="images/96-Well_plate.svg" width="100%" height="100%"/>
+            <circle id="stage-indicator" cx="120" cy="100" r="9" fill="red" visibility="visible"/>
+        </svg>
+        <label for="current_location">Current location of stage</label>
     </div>
 
     <!-- This is the main entry point of the ImJoy app
@@ -241,6 +270,7 @@
                 const hostCanvas = document.createElement('canvas');
                 const service_id = document.getElementById('service-id').value;
                 const server = await hyphaWebsocketClient.connectToServer({ "name": "js-client", "server_url": "https://ai.imjoy.io", "method_timeout": 10 })
+                console.log('Connected to server:', server);
                 async function on_init(peerConnection){
                     // connect audio / video
                     peerConnection.addEventListener('track', function (evt) {
@@ -404,9 +434,47 @@
         console.error("Error in moveMicroscope:", error);
                 }
 
+            },
+
+            setIllumination: function() {
+                const intensity = document.getElementById('illumination-intensity').value;
+                const channelElement = document.getElementById('illumination-channel');
+                const channelNumber = parseInt(channelElement.value);
+                const channelName = channelElement.options[channelElement.selectedIndex].text;
+            
+                document.getElementById('illumination-intensity-value').textContent = intensity + '%';
+                if (window.microscopeControl) {
+                    window.microscopeControl.set_illumination({
+                        channel: channelNumber,  // Send the integer value
+                        intensity: parseInt(intensity),
+                        _rkwargs: true,
+                        context: context
+                    });
+                }
+                console.log(`Set illumination: Channel ${channelName} (${channelNumber}), Intensity ${intensity}%`);
+            },
+
+            setCameraExposure: function() {
+                const exposure = document.getElementById('camera-exposure').value;
+                if (window.microscopeControl) {
+                    window.microscopeControl.set_camera_exposure({exposure: parseInt(exposure), _rkwargs: true, context: context});
+                }
+            },
+
+            moveZAxis: function(direction) {
+                const zStep = 0.1; // Adjust this value as needed
+                if (window.microscopeControl) {
+                    window.microscopeControl.move_by_distance({x: 0, y: 0, z: direction * zStep, _rkwargs: true, context: context});
+                }
             }
 
+
         };
+
+        // Event listeners for new controls
+        document.getElementById('illumination-intensity').addEventListener('input', window.methods.setIllumination);
+        document.getElementById('illumination-channel').addEventListener('change', window.methods.setIllumination);
+        document.getElementById('camera-exposure').addEventListener('change', window.methods.setCameraExposure);
 
 
         // Start the ImJoy app
