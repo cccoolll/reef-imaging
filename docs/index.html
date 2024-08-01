@@ -191,7 +191,7 @@
                 app.addMenuItem({
                     label: "Squid Control Chatbot",
                     async callback() {
-                        //const chatbot = await api.createWindow({src: "https://reef.aicell.io/2hDGvySiiyHU3fuGNeLmU3/apps/bioimageio-chatbot-client/index"})
+                        //const chatbot = await api.createWindow({src: "https://ai.imjoy.io/2hDGvySiiyHU3fuGNeLmU3/apps/bioimageio-chatbot-client/index"})
                         // Prompt the user to input the src URL
                         const userSrc = prompt("Please enter the URL for the microscope control chatbot:", "https://raw.githubusercontent.com/aicell-lab/squid-control/dorna-squid/imjoy_plugin/squid-microscope-chatbot.imjoy.html");
                         // Create the window with the provided src URL
@@ -209,9 +209,62 @@
             });
         }
 
+        function enableUI() {
+            // Enable all buttons and inputs that depend on the microscope control
+            document.querySelectorAll('button, input, select').forEach(el => el.disabled = false);
+        }
 
+        async function initializeService() {
+            try {
+                const service_id = document.getElementById('service-id').value;
+                const server = await hyphaWebsocketClient.connectToServer({ "name": "js-client", "server_url": "https://ai.imjoy.io", "method_timeout": 10 });
+                console.log('Connected to server:', server);
+                
+                // Initialize WebRTC service
+                window.pc = await hyphaWebsocketClient.getRTCService(
+                    server,
+                    'squid-control-service-simulation-2',
+                    {on_init: onInit}
+                );
+                
+                // Initialize WebRPC service
+                const mc = await server.get_service("microscope-control-squid");
+                console.log('==========microscope control=========>', mc);
+                window.microscopeControl = mc;
+                
+                console.log('Service initialization completed successfully');
+            } catch (error) {
+                console.error('Error initializing services:', error);
+                throw error;
+            }
+        }
 
+        function onInit(peerConnection) {
+            peerConnection.addEventListener('track', function (evt) {
+                if (evt.track.kind == 'video')
+                    document.getElementById('video').srcObject = evt.streams[0];
+                else
+                    document.getElementById('audio').srcObject = evt.streams[0];
+            });
         
+            peerConnection.addEventListener('datachannel', event => {
+                const dataChannel = event.channel;
+                if (dataChannel.label === "microscopeStatus") {
+                    dataChannel.onopen = () => console.log('Data channel for stageStatus is open');
+                    dataChannel.onclose = () => console.log('Data channel for stageStatus is closed');
+                    dataChannel.onmessage = e => {
+                        try {
+                            const squidStatus = JSON.parse(e.data);
+                            console.log('microscope status:', squidStatus);
+                            updateStageIndicator(squidStatus.x, squidStatus.y);
+                        } catch (error) {
+                            console.error('Error parsing stage location data:', error);
+                        }
+                    };
+                }
+            });
+        }
+
         const queryString = window.location.search;
         const urlParams = new URLSearchParams(queryString);
 
@@ -246,7 +299,7 @@
             toggleLive: async function() {
                 const button = document.getElementById('startStopButton');
                 const icon = document.getElementById('startStopIcon');
-
+            
                 if (!this.liveRunning) {
                     button.classList.remove('btn-primary');
                     button.classList.add('btn-danger');
@@ -260,67 +313,33 @@
                     button.classList.add('btn-primary');
                     icon.classList.remove('fa-stop');
                     icon.classList.add('fa-play');
-                    this.stop();
+                    // Stop video stream here
+                    const video = document.getElementById('video');
+                    if (video.srcObject) {
+                        const stream = video.srcObject;
+                        const tracks = stream.getTracks();
+                        tracks.forEach(function(track) {
+                            track.stop();
+                        });
+                        video.srcObject = null;
+                    }
                 }
-
+            
                 this.liveRunning = !this.liveRunning;
             },
 
             start: async function() {
-                const hostCanvas = document.createElement('canvas');
-                const service_id = document.getElementById('service-id').value;
-                const server = await hyphaWebsocketClient.connectToServer({ "name": "js-client", "server_url": "https://ai.imjoy.io", "method_timeout": 10 })
-                console.log('Connected to server:', server);
-                async function on_init(peerConnection){
-                    // connect audio / video
-                    peerConnection.addEventListener('track', function (evt) {
-                        if (evt.track.kind == 'video')
-                            document.getElementById('video').srcObject = evt.streams[0];
-                        else
-                            document.getElementById('audio').srcObject = evt.streams[0];
-                    });
-
-                    const frameRate = 20;
-                    // need to call getContext for Firefox: https://bugzilla.mozilla.org/show_bug.cgi?id=1572422
-                    const context = hostCanvas.getContext('2d');
-                    const stream = hostCanvas.captureStream(frameRate);
-                    for(let track of stream.getVideoTracks()){
-                        await peerConnection.addTrack(track, stream);
-                    };
-
-                    // send stage location to the other side
-                    peerConnection.addEventListener('datachannel', event => {
-                        const dataChannel = event.channel;
-
-                        if (dataChannel.label === "microscopeStatus") {
-                            dataChannel.onopen = () => console.log('Data channel for stageStatus is open');
-                            dataChannel.onclose = () => console.log('Data channel for stageStatus is closed');
-                            dataChannel.onmessage = e => {
-                                try {
-                                    const squidStatus = JSON.parse(e.data);
-                                    console.log('microscope status:', squidStatus);
-                                    updateStageIndicator(squidStatus.x, squidStatus.y);
-                                } catch (error) {
-                                    console.error('Error parsing stage location data:', error);
-                                }
-                            };
-                        }
-                    });
-
-
+                if (!window.pc) {
+                    console.error("WebRTC service is not initialized.");
+                    return;
                 }
-                
-                pc = await hyphaWebsocketClient.getRTCService(
-                    server,
-                    service_id,
-                    {on_init},
-                );
-                // now we can access the services using the webrtc peer-to-peer connection
-                // the rpc calls will go through webrtc instead of the websocket
-                const mc = await pc.get_service("microscope-control-squid");
-                console.log('==========microscope control=========>', mc)
-                // expose it to window so the button click can call it
-                window.microscopeControl = mc;
+                const hostCanvas = document.createElement('canvas');
+                const frameRate = 20;
+                const context = hostCanvas.getContext('2d');
+                const stream = hostCanvas.captureStream(frameRate);
+                for(let track of stream.getVideoTracks()){
+                    await window.pc.addTrack(track, stream);
+                }
             },
 
             stop: function() {
@@ -395,6 +414,7 @@
             moveMicroscope: function(direction, multiplier) {
                 if (!window.microscopeControl) {
                     console.error("Microscope control is not initialized.");
+                    alert("Microscope control is not initialized. Please refresh the page and try again.");
                     return;
                 }
                 else {
@@ -480,6 +500,22 @@
         // Start the ImJoy app
         document.addEventListener('DOMContentLoaded', function() {
             setupImJoyApp();
+            initializeService().then(() => {
+                console.log('Services initialized, enabling UI');
+                enableUI(); // We'll create this function to enable UI elements
+            }).catch(error => {
+                console.error('Failed to initialize services:', error);
+                // Optionally display an error message to the user
+            });
+        });
+
+        window.addEventListener('beforeunload', function() {
+            if (window.pc) {
+                window.pc.close();
+            }
+            if (window.microscopeControl) {
+                // Add any necessary cleanup for the microscope control service
+            }
         });
     </script>
 </body>
