@@ -12,7 +12,7 @@ from distutils.util import strtobool
 
 from tools.hypha_storage import HyphaDataStore
 from tools.chatbot.aask import aask
-from imjoy_rpc.hypha import login, connect_to_server, register_rtc_service
+from hypha_rpc import login, connect_to_server, register_rtc_service
 from squid_control.squid_controller import SquidController
 from hypha_manager import HyphaManager
 

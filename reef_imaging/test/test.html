@@ -1,0 +1,187 @@
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC demo</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/hypha-rpc@0.1.10/dist/hypha-rpc-websocket.min.js"></script>
+    <style>
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+
+        #app {
+            padding: 20px;
+        }
+
+        #title {
+            font-size: 1.5em;
+            margin-bottom: 20px;
+        }
+
+        #media {
+            max-width: 1280px;
+            height: 50vh;
+            position: relative;
+        }
+
+        audio,
+        video {
+            width: 100%;
+            height: 50vh;
+        }
+
+        #viewer-section {
+            max-width: 800px;
+            margin-top: 20px;
+        }
+
+        .viewer-container {
+            position: relative;
+        }
+
+        #control-panel {
+            position: absolute;
+            z-index: 10;
+            top: 60px;
+            right: 10px;
+            width: 100px;
+            height: 100px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+        }
+
+        #control-panel .btn-group {
+            display: flex;
+            justify-content: space-between;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app">
+        <h1 id="title" class="text-center mb-4">WebRTC Hypha Demo</h1>
+        <div class="form-group">
+            <label for="service-id">WebRTC service id: </label>
+            <input id="service-id" type="text" value="aiortc-demo" class="form-control" />
+        </div>
+        <div class="d-flex justify-content-center mb-3">
+            
+        </div>
+        <div id="viewer-section" class="position-relative">
+            <div id="control-panel" class="d-flex flex-column align-items-center justify-content-center">
+                <button id="startStopButton" class="btn btn-primary" onclick="window.methods.toggleLive()">
+                    <span id="startStopIcon" class="fas fa-play"></span>
+                </button>
+                <br>
+                <button class="btn btn-secondary mb-2" onclick="microscopeControl.move({value: 100, axis: 'X', is_absolute: true, is_blocking: true, _rkwargs: true})"><i class="fas fa-arrow-up"></i></button>
+                <div class="d-flex justify-content-between">
+                    <button class="btn btn-secondary mr-2" onclick="microscopeControl.move({value: -100, axis: 'X', is_absolute: true, is_blocking: true, _rkwargs: true})"><i class="fas fa-arrow-left"></i></button>
+                    <button class="btn btn-secondary ml-2" onclick="microscopeControl.move({value: 100, axis: 'Y', is_absolute: true, is_blocking: true, _rkwargs: true})"><i class="fas fa-arrow-right"></i></button>
+                </div>
+                <button class="btn btn-secondary mt-2" onclick="microscopeControl.move({value: -100, axis: 'Y', is_absolute: true, is_blocking: true, _rkwargs: true})"><i class="fas fa-arrow-down"></i></button>
+            </div>
+            <div id="media" class="shadow-lg">
+                <audio id="audio" autoplay="true"></audio>
+                <video id="video" autoplay="true" playsinline="true"></video>
+               
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const queryString = window.location.search;
+        const urlParams = new URLSearchParams(queryString);
+
+        if (urlParams.get('service_id')) {
+            document.getElementById('service-id').value = urlParams.get('service_id');
+        }
+
+        function assert(condition, message) {
+            if (!condition) {
+                throw new Error(message || "Assertion failed");
+            }
+        }
+
+        let pc;
+        window.methods = {
+            liveRunning: false,
+
+            toggleLive: async function() {
+                const button = document.getElementById('startStopButton');
+                const icon = document.getElementById('startStopIcon');
+
+                if (!this.liveRunning) {
+                    button.classList.remove('btn-primary');
+                    button.classList.add('btn-danger');
+                    icon.classList.remove('fa-play');
+                    icon.classList.add('fa-stop');
+                    button.disabled = true;
+                    await this.start();
+                    button.disabled = false;
+                } else {
+                    button.classList.remove('btn-danger');
+                    button.classList.add('btn-primary');
+                    icon.classList.remove('fa-stop');
+                    icon.classList.add('fa-play');
+                    this.stop();
+                }
+
+                this.liveRunning = !this.liveRunning;
+            },
+
+            start: async function() {
+                const hostCanvas = document.createElement('canvas');
+                const service_id = document.getElementById('service-id').value;
+                const server = await hyphaWebsocketClient.connectToServer({ "name": "js-client", "server_url": "http://reef.aicell.io:9527", "method_timeout": 10 })
+                async function on_init(peerConnection){
+                    // connect audio / video
+                    peerConnection.addEventListener('track', function (evt) {
+                        if (evt.track.kind == 'video')
+                            document.getElementById('video').srcObject = evt.streams[0];
+                        else
+                            document.getElementById('audio').srcObject = evt.streams[0];
+                    });
+
+                    const frameRate = 20;
+                    // need to call getContext for Firefox: https://bugzilla.mozilla.org/show_bug.cgi?id=1572422
+                    const context = hostCanvas.getContext('2d');
+                    const stream = hostCanvas.captureStream(frameRate);
+                    for(let track of stream.getVideoTracks()){
+                        await peerConnection.addTrack(track, stream);
+                    };
+                }
+                
+                pc = await hyphaWebsocketClient.getRTCService(
+                    server,
+                    service_id,
+                    {on_init},
+                );
+                // now we can access the services using the webrtc peer-to-peer connection
+                // the rpc calls will go through webrtc instead of the websocket
+                const mc = await pc.get_service("microscope-control");
+                console.log('==========microscope control=========>', mc)
+                // expose it to window so the button click can call it
+                window.microscopeControl = mc;
+            },
+
+            stop: function() {
+                pc.close();
+            }
+        };
+    </script>
+</body>
+
+</html>

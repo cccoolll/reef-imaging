@@ -8,7 +8,6 @@
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/hypha-rpc@0.1.10/dist/hypha-rpc-websocket.min.js"></script>
-    <script src="https://lib.imjoy.io/imjoy-loader.js"></script>
     <style>
         body, html {
             margin: 0;
@@ -72,7 +71,7 @@
         
         <div class="form-group">
             <label for="service-id">WebRTC service id:</label>
-            <input id="service-id" type="text" value="squid-control-service-simulation-2" class="form-control" />
+            <input id="service-id" type="text" value="squid-control-rtc" class="form-control" />
         </div>
         
         <div id="viewer-section">
@@ -162,148 +161,6 @@
 
     <script>
 
-        function setupImJoyApp(){
-            loadImJoyBasicApp({
-                process_url_query: true,
-                show_window_title: false,
-                show_progress_bar: true,
-                show_empty_window: true,
-                menu_style: { position: "absolute", right: 0, top: "2px" },
-                window_style: {width: '100%', height: '100%'},
-                main_container: null,
-                menu_container: "menu-container",
-                window_manager_container: "window-container",
-                imjoy_api: { } // override some imjoy API functions here
-            }).then(async app => {
-                // get the api object from the root plugin
-                const api = app.imjoy.api;
-                // if you want to let users to load new plugins, add a menu item
-                app.addMenuItem({
-                    label: "➕ Load Plugin",
-                    callback() {
-                    const uri = prompt(
-                        `Please type a ImJoy plugin URL`,
-                        "https://raw.githubusercontent.com/aicell-lab/squid-control/dorna-squid/imjoy_plugin/squid-microscope-chatbot.imjoy.html"
-                    );
-                    if (uri) app.loadPlugin(uri);
-                    },
-                });
-                // add a menu item to show the plugin info
-                app.addMenuItem({
-                    label: "Squid Control Chatbot",
-                    async callback() {
-                        //const chatbot = await api.createWindow({src: "https://ai.imjoy.io/2hDGvySiiyHU3fuGNeLmU3/apps/bioimageio-chatbot-client/index"})
-                        // Prompt the user to input the src URL
-                        const userSrc = prompt("Please enter the URL for the microscope control chatbot:", "https://raw.githubusercontent.com/aicell-lab/squid-control/dorna-squid/imjoy_plugin/squid-microscope-chatbot.imjoy.html");
-                        // Create the window with the provided src URL
-                        if(userSrc) {
-                            const chatbot = await api.createWindow({src: userSrc})
-                            // ... [rest of your existing code]
-                        } else {
-                            alert("No URL provided. Window creation cancelled.");
-                        }
-
-                    },
-                });
-
-            
-            });
-        }
-
-        async function initializeService() {
-            try {
-                const service_id = document.getElementById('service-id').value;
-                
-                // Connect to the server
-                const server = await hyphaWebsocketClient.connectToServer({"server_url": "http://reef.aicell.io:9527"});
-                console.log('Connected to server:', server);
-                // Initialize WebRPC service
-                window.microscopeControl = await server.getService("microscope-control-squid-2");
-                console.log('Service initialization completed successfully');
-                // Initialize WebRTC service
-                window.pc = await hyphaWebsocketClient.getRTCService(
-                    server,
-                    service_id,
-                    {
-                        on_init: onInit,
-                    }
-                );
-                
-
-                enableUI(); // Enable UI elements after successful initialization
-            } catch (error) {
-                console.error('Error initializing services:', error);
-                alert('Failed to initialize services. Please check your connection and try again.');
-                throw error;
-            }
-        } 
-
-        function onInit(pc) {
-            pc.addEventListener('connectionstatechange', () => {
-                console.log('Connection state changed:', pc.connectionState);
-                if (pc.connectionState === 'failed') {
-                    console.error('Connection failed. Ice connection state:', pc.iceConnectionState);
-                    pc.close();
-                    reject(new Error('WebRTC Connection failed'));
-                }
-            });
-
-            pc.addEventListener('icecandidateerror', (event) => {
-                console.error('ICE candidate error:', event);
-            });
-            
-            pc.addEventListener('track', function (evt) {
-                if (evt.track.kind == 'video')
-                    document.getElementById('video').srcObject = evt.streams[0];
-                else
-                    document.getElementById('audio').srcObject = evt.streams[0];
-            });
-        
-            pc.addEventListener('datachannel', event => {
-                const dataChannel = event.channel;
-                if (dataChannel.label === "microscopeStatus") {
-                    dataChannel.onopen = () => console.log('Data channel for microscopeStatus is open');
-                    dataChannel.onclose = () => console.log('Data channel for microscopeStatus is closed');
-                    dataChannel.onmessage = e => {
-                        try {
-                            const squidStatus = JSON.parse(e.data);
-                            console.log('Microscope status:', squidStatus);
-                            updateStageIndicator(squidStatus.x, squidStatus.y);
-                        } catch (error) {
-                            console.error('Error parsing microscope status data:', error);
-                        }
-                    };
-                }
-            });
-        }
-        const queryString = window.location.search;
-        const urlParams = new URLSearchParams(queryString);
-
-        if (urlParams.get('service_id')) {
-            document.getElementById('service-id').value = urlParams.get('service_id');
-        }
-
-        function assert(condition, message) {
-            if (!condition) {
-                throw new Error(message || "Assertion failed");
-            }
-        }
-
-        // Function to update the position of the red dot
-        function updateStageIndicator(x, y) {
-            const stageIndicator = document.getElementById('stage-indicator');
-            stageIndicator.setAttribute('cx', x);
-            stageIndicator.setAttribute('cy', y);
-            stageIndicator.setAttribute('visibility', 'visible');
-        }
-
-        let pc;
-        let context = {
-            user: { is_anonymous: false, email: "example@email.com" },
-            login_url: "your_login_url",
-            report_url: "your_report_url",
-            key: "your_key"
-        };
         window.methods = {
             liveRunning: false,
 
@@ -340,27 +197,39 @@
             },
 
             start: async function() {
-                if (!window.pc) {
-                    console.error("WebRTC service is not initialized.");
-                    return;
-                }
                 const hostCanvas = document.createElement('canvas');
-                const frameRate = 20;
-                const context = hostCanvas.getContext('2d');
-                const stream = hostCanvas.captureStream(frameRate);
-                for(let track of stream.getVideoTracks()){
-                    await window.pc.addTrack(track, stream);
+                const service_id = document.getElementById('service-id').value;
+                const server = await hyphaWebsocketClient.connectToServer({ "name": "js-client", "server_url": "http://reef.aicell.io:9527", "method_timeout": 10 })
+                async function on_init(peerConnection){
+                    peerConnection.addEventListener('track', function (evt) {
+                        if (evt.track.kind == 'video')
+                            document.getElementById('video').srcObject = evt.streams[0];
+                        else
+                            document.getElementById('audio').srcObject = evt.streams[0];
+                    });
+
+                    const frameRate = 20;
+                    const context = hostCanvas.getContext('2d');
+                    const stream = hostCanvas.captureStream(frameRate);
+                    for(let track of stream.getVideoTracks()){
+                        await peerConnection.addTrack(track, stream);
+                    };
                 }
+                
+                pc = await hyphaWebsocketClient.getRTCService(
+                    server,
+                    "squid-control-rtc",
+                    {on_init},
+                );
+                const mc = await pc.get_service("microscope-control-squid-2");
+                console.log('==========microscope control=========>', mc)
+                window.microscopeControl = mc;
             },
 
             stop: function() {
-                if (window.microscopeControl) {
-                    window.microscopeControl.off_illumination({_rkwargs: true, context: context});
-                }
-                if (window.pc) {
-                    window.pc.close();
-                }
+                if (pc) pc.close();
             },
+
         
             lightOn: false,
 
@@ -506,19 +375,14 @@
 
         };
 
+
+        
+
         // Event listeners for new controls
         document.getElementById('illumination-intensity').addEventListener('input', window.methods.setIllumination);
         document.getElementById('illumination-channel').addEventListener('change', window.methods.setIllumination);
         document.getElementById('camera-exposure').addEventListener('change', window.methods.setCameraExposure);
 
-
-        document.addEventListener('DOMContentLoaded', function() {
-            setupImJoyApp();
-            initializeService().catch(error => {
-                console.error('Failed to initialize services:', error);
-                // Optionally display an error message to the user
-            });
-        });
         
         // Add this function to enable UI elements
         function enableUI() {
