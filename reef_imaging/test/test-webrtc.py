@@ -35,14 +35,14 @@ class VideoTransformTrack(MediaStreamTrack):
     
 async def start_service(service_id, workspace=None, token=None):
     client_id = service_id + "-client"
-    token = await login({"server_url": "http://reef.aicell.io:9527",})
+    token = await login({"server_url": "https://hypha.aicell.io"})
     print(f"Starting service...")
     server = await connect_to_server(
         {
             "client_id": client_id,
-            "server_url": "http://reef.aicell.io:9527",
+            "server_url": "https://hypha.aicell.io",
             "workspace": workspace,
-            "token": token,
+            "token": token
         }
     )
     
@@ -82,7 +82,7 @@ async def start_service(service_id, workspace=None, token=None):
     # coturn = await server.get_service("coturn")
     # ice_servers = await coturn.get_rtc_ice_servers()
     # print("ICE servers:", ice_servers)
-    # obtain it from http://reef.aicell.io:9527/public/services/coturn/get_rtc_ice_servers
+    # obtain it from https://hypha.aicell.io/public/services/coturn/get_rtc_ice_servers
     # ice_servers = [{"username":"1688956731:gvo9P4j7vs3Hhr6WqTUnen","credential":"yS9Vjds2jQg0qfq7xtlbwWspZQE=","urls":["turn:ai.imjoy.io:3478","stun:ai.imjoy.io:3478"]}]
 
     await register_rtc_service(
@@ -100,9 +100,9 @@ async def start_service(service_id, workspace=None, token=None):
     # await mc.move("left")
 
     print(
-        f"Service (client_id={client_id}, service_id={service_id}) started successfully, available at http://reef.aicell.io:9527/{server.config.workspace}/services"
+        f"Service (client_id={client_id}, service_id={service_id}) started successfully, available at https://hypha.aicell.io{server.config.workspace}/services"
     )
-    print(f"You can access the webrtc stream at https://oeway.github.io/webrtc-hypha-demo/?service_id={service_id}")
+    #print(f"You can access the webrtc stream at https://oeway.github.io/webrtc-hypha-demo/?service_id={service_id}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

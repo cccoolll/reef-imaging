@@ -2,7 +2,7 @@ import asyncio
 from hypha_rpc import *
 
 async def main():
-    server = await connect_to_server({"server_url": "http://reef.aicell.io:9527"})
+    server = await connect_to_server({"server_url": "https://ai.imjoy.io"})
 
     # Get an existing service
     # Since "hello-world" is registered as a public service, we can access it using only the name "hello-world"

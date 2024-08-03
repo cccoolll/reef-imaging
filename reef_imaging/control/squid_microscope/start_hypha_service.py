@@ -541,7 +541,7 @@ async def start_hypha_service(server, service_id):
         },
     )
     print(
-        f"Service (service_id={service_id}) started successfully, available at http://reef.aicell.io:9527/{server.config.workspace}/services"
+        f"Service (service_id={service_id}) started successfully, available at https://hypha.aicell.io/{server.config.workspace}/services"
     )
     print(f"You can access the webrtc stream at https://cccoolll.github.io/reef-imaging/?service_id={service_id}")
     
@@ -580,14 +580,14 @@ async def start_chatbot_service(server, service_id):
     await server.register_service(chatbot_extension, overwrite=True)
     
 
-    print(f"You can access the chatbot at https://bioimage.io/chat?server=http://reef.aicell.io:9527&extension={chatbot_extension['id']}&assistant=Skyler")
+    print(f"You can access the chatbot at https://bioimage.io/chat?server=https://hypha.aicell.io&extension={chatbot_extension['id']}&assistant=Skyler")
 
 
 
 
 async def setup(simulation=True):
     
-    hypha_server_url = "http://reef.aicell.io:9527"
+    hypha_server_url = "https://hypha.aicell.io"
     hypha_server = await connect_to_server({"server_url": hypha_server_url})
     rtc_service_id = "squid-control-rtc"# if simulation else "squid-control-service"
     await start_hypha_service(hypha_server, rtc_service_id)
