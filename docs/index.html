@@ -5,9 +5,9 @@
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>WebRTC demo</title>
-        <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
+        <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/latest/css/bootstrap.min.css">
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
-        <script src="https://cdn.jsdelivr.net/npm/imjoy-rpc@latest/dist/hypha-rpc-websocket.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/hypha-rpc@latest/dist/hypha-rpc-websocket.min.js"></script>
         <style>
             body,
             html {
@@ -142,7 +142,7 @@
                 start: async function() {
                     const hostCanvas = document.createElement('canvas');
                     const service_id = document.getElementById('service-id').value;
-                    const server = await hyphaWebsocketClient.connectToServer({ "name": "js-client", "server_url": "https://ai.imjoy.io", "method_timeout": 10 })
+                    const server = await hyphaWebsocketClient.connectToServer({ "name": "js-client", "server_url": "https://hypha.aicell.io", "method_timeout": 10 })
                     async function on_init(peerConnection){
                         // connect audio / video
                         peerConnection.addEventListener('track', function (evt) {
