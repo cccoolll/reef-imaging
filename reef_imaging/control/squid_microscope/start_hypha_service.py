@@ -541,7 +541,7 @@ async def start_hypha_service(server, service_id, rtc_service_id):
         },
     )
     print(
-        f"Service (service_id={service_id}) started successfully, available at https://hypha.aicell.io/{server.config.workspace}/services"
+        f"Service (service_id={service_id}) started successfully, available at http://localhost:9528/{server.config.workspace}/services"
     )
     print(f"You can access the webrtc stream at https://cccoolll.github.io/reef-imaging/?service_id={service_id}")
     
