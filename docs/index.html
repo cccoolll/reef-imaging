@@ -1,43 +1,39 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebRTC Microscope Control</title>
+    <title>Microscope Control</title>
+    <script src="https://cdn.jsdelivr.net/npm/imjoy-rpc@0.5.48-post1/dist/hypha-rpc-websocket.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/17.0.2/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/17.0.2/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/6.26.0/babel.min.js"></script>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/hypha-rpc@0.1.10/dist/hypha-rpc-websocket.min.js"></script>
- 
     <style>
         body, html {
             margin: 0;
             padding: 0;
             font-family: Arial, sans-serif;
         }
-
         #app {
             padding: 20px;
             max-width: 1200px;
             margin: 0 auto;
         }
-
         #title {
             font-size: 2em;
             margin-bottom: 20px;
         }
-
         #viewer-section {
             display: flex;
             flex-wrap: wrap;
             gap: 20px;
         }
-
         #media {
             flex: 1 1 480px;
             max-width: 480px;
         }
-
         #control-panel {
             flex: 1 1 300px;
             padding: 20px;
@@ -45,360 +41,257 @@
             border-radius: 10px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-
         .control-group {
             margin-bottom: 15px;
         }
-
         .btn-group-vertical > .btn {
             margin-bottom: 5px;
         }
-
         #well-plate-svg {
             margin-top: 20px;
         }
-
-        video {
+        img {
             width: 100%;
             height: auto;
             border-radius: 10px;
         }
     </style>
 </head>
-
 <body>
-    <div id="app">
-        <h1 id="title" class="text-center">WebRTC Microscope Control</h1>
-        
-        <div class="form-group">
-            <label for="service-id">WebRTC service id:</label>
-            <input id="service-id" type="text" value="squid-control-rtc" class="form-control" />
-        </div>
-        
-        <div id="viewer-section">
-            <div id="media" class="shadow">
-                <audio id="audio" autoplay="true"></audio>
-                <video id="video" autoplay="true" playsinline="true"></video>
-            </div>
-            
-            <div id="control-panel">
-                <div class="control-group">
-                    <button id="startStopButton" class="btn btn-primary btn-block" onclick="window.methods.toggleLive()">
-                        <span id="startStopIcon" class="fas fa-play"></span> Start/Stop
-                    </button>
-                </div>
+<div id="app"></div>
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+
+const MicroscopeControl = () => {
+    const [microscopeControl, setMicroscopeControl] = useState(null);
+    const [snapshotImage, setSnapshotImage] = useState(null);
+    const [illuminationIntensity, setIlluminationIntensity] = useState(50);
+    const [illuminationChannel, setIlluminationChannel] = useState("0");
+    const [cameraExposure, setCameraExposure] = useState(100);
+    const [xMove, setXMove] = useState(1);
+    const [yMove, setYMove] = useState(1);
+    const [zMove, setZMove] = useState(0.1);
+    const [isLightOn, setIsLightOn] = useState(false);
+    const [isPlateScanRunning, setIsPlateScanRunning] = useState(false);
+    const [log, setLog] = useState('');
+
+    const appendLog = (message) => {
+        setLog(prevLog => prevLog + message + '\n');
+    };
+
+    useEffect(() => {
+        const initializeWebRPC = async () => {
+            try {
+                appendLog('Connecting to server...');
+                const server = await hyphaWebsocketClient.connectToServer({ 
+                    "name": "js-client", 
+                    "server_url": "https://ai.imjoy.io", 
+                    "method_timeout": 10 
+                });
+                appendLog('Server connected.');
                 
-                <div class="control-group">
-                    <label>Stage Movement:</label>
-                    <div class="input-group mb-2">
-                        <input id="x-move" type="number" value="1" class="form-control" placeholder="X (mm)">
-                        <input id="y-move" type="number" value="1" class="form-control" placeholder="Y (mm)">
-                        <input id="z-move" type="number" value="0.1" class="form-control" placeholder="Z (mm)">
-                    </div>
-                    <div class="btn-group-vertical btn-block">
-                        <button class="btn btn-secondary" onclick="window.methods.moveMicroscope('y', 1)"><i class="fas fa-arrow-up"></i> Y+</button>
-                        <div class="btn-group">
-                            <button class="btn btn-secondary" onclick="window.methods.moveMicroscope('x', -1)"><i class="fas fa-arrow-left"></i> X-</button>
-                            <button class="btn btn-secondary" onclick="window.methods.moveMicroscope('x', 1)"><i class="fas fa-arrow-right"></i> X+</button>
-                        </div>
-                        <button class="btn btn-secondary" onclick="window.methods.moveMicroscope('y', -1)"><i class="fas fa-arrow-down"></i> Y-</button>
-                        <div class="btn-group">
-                            <button class="btn btn-secondary" onclick="window.methods.moveMicroscope('z', -1)"><i class="fas fa-arrow-down"></i> Z-</button>
-                            <button class="btn btn-secondary" onclick="window.methods.moveMicroscope('z', 1)"><i class="fas fa-arrow-up"></i> Z+</button>
-                        </div>
-                    </div>
-                </div>
+                appendLog('Getting microscope-control-squid-2 service...');
+                const mc = await server.get_service("microscope-control-squid-2");
+                appendLog('Service acquired.');
                 
-                <div class="control-group">
-                    <button id="toggleLightButton" class="btn btn-warning btn-block" onclick="window.methods.toggleLight()">
-                        <span id="toggleLightIcon" class="fas fa-lightbulb"></span> Toggle Light
-                    </button>
-                </div>
-                
-                <div class="control-group">
-                    <button id="scanPlateButton" class="btn btn-info btn-block" onclick="window.methods.startPlateScan()">
-                        <span id="scanPlateIcon" class="fas fa-microscope"></span> Scan Plate
-                    </button>
-                </div>
-                
-                <div class="control-group">
-                    <label for="illumination-intensity">Illumination Intensity:</label>
-                    <input type="range" id="illumination-intensity" class="form-control-range" min="0" max="100" value="50" oninput="window.methods.setIllumination()">
-                    <span id="illumination-intensity-value">50%</span>
-                </div>
-                
-                <div class="control-group">
-                    <label for="illumination-channel">Illumination Channel:</label>
-                    <select id="illumination-channel" class="form-control" onchange="window.methods.setIllumination()">
-                        <option value="0">BF LED matrix full</option>
-                        <option value="11">Fluorescence 405 nm Ex</option>
-                        <option value="12">Fluorescence 488 nm Ex</option>
-                        <option value="14">Fluorescence 561nm Ex</option>
-                        <option value="13">Fluorescence 638nm Ex</option>
-                        <option value="15">Fluorescence 730nm Ex</option>
-                    </select>
-                </div>
-                
-                <div class="control-group">
-                    <label for="camera-exposure">Camera Exposure (ms):</label>
-                    <input type="number" id="camera-exposure" class="form-control" value="100" min="1" max="1000" onchange="window.methods.setCameraExposure()">
-                </div>
-            </div>
-        </div>
-        
-        <svg id="well-plate-svg" style="width: 300px; height: 200px;">
-            <image href="images/96-Well_plate.svg" width="100%" height="100%"/>
-            <circle id="stage-indicator" cx="120" cy="100" r="9" fill="red" visibility="visible"/>
-        </svg>
-        <label for="current_location">Current location of stage</label>
-    </div>
-
-    <!-- This is the main entry point of the ImJoy app
-     You can also load the ImJoy app from a remote URL
-     by setting the `src` attribute of the script tag -->
-    
-    <div id="window-container"></div>
-    <div id="menu-container"></div>
-
-    <script>
-
-        window.methods = {
-            liveRunning: false,
-
-            toggleLive: async function() {
-                const button = document.getElementById('startStopButton');
-                const icon = document.getElementById('startStopIcon');
-            
-                if (!this.liveRunning) {
-                    button.classList.remove('btn-primary');
-                    button.classList.add('btn-danger');
-                    icon.classList.remove('fa-play');
-                    icon.classList.add('fa-stop');
-                    button.disabled = true;
-                    await this.start();
-                    button.disabled = false;
-                } else {
-                    button.classList.remove('btn-danger');
-                    button.classList.add('btn-primary');
-                    icon.classList.remove('fa-stop');
-                    icon.classList.add('fa-play');
-                    // Stop video stream here
-                    const video = document.getElementById('video');
-                    if (video.srcObject) {
-                        const stream = video.srcObject;
-                        const tracks = stream.getTracks();
-                        tracks.forEach(function(track) {
-                            track.stop();
-                        });
-                        video.srcObject = null;
-                    }
-                }
-            
-                this.liveRunning = !this.liveRunning;
-            },
-
-            start: async function() {
-                const hostCanvas = document.createElement('canvas');
-                const service_id = document.getElementById('service-id').value;
-                const server = await hyphaWebsocketClient.connectToServer({ "name": "js-client", "server_url": "https://hypha.aicell.io", "method_timeout": 10 })
-                async function on_init(peerConnection){
-                    peerConnection.addEventListener('track', function (evt) {
-                        if (evt.track.kind == 'video')
-                            document.getElementById('video').srcObject = evt.streams[0];
-                        else
-                            document.getElementById('audio').srcObject = evt.streams[0];
-                    });
-
-                    const frameRate = 20;
-                    const context = hostCanvas.getContext('2d');
-                    const stream = hostCanvas.captureStream(frameRate);
-                    for(let track of stream.getVideoTracks()){
-                        await peerConnection.addTrack(track, stream);
-                    };
-                }
-                
-                pc = await hyphaWebsocketClient.getRTCService(
-                    server,
-                    "squid-control-rtc",
-                    {on_init},
-                );
-                const mc = await pc.get_service("microscope-control-squid-2");
-                console.log('==========microscope control=========>', mc)
-                window.microscopeControl = mc;
-            },
-
-            stop: function() {
-                if (pc) pc.close();
-            },
-
-        
-            lightOn: false,
-
-            toggleLight: async function() {
-                const button = document.getElementById('toggleLightButton');
-                const icon = document.getElementById('toggleLightIcon');
-                // Check if microscopeControl is initialized, if not, call start
-                if (!window.microscopeControl) {
-                    await this.start();
-                }
-                if (!this.lightOn) {
-                    button.classList.add('btn-success');
-                    button.classList.remove('btn-warning');
-                    icon.classList.add('fa-lightbulb-on');
-                    icon.classList.remove('fa-lightbulb');
-                    await window.microscopeControl.on_illumination({_rkwargs: true, context: context});
-                } else {
-                    button.classList.add('btn-warning');
-                    button.classList.remove('btn-success');
-                    icon.classList.remove('fa-lightbulb-on');
-                    icon.classList.add('fa-lightbulb');
-                    await window.microscopeControl.off_illumination({_rkwargs: true, context: context});
-                }
-
-                this.lightOn = !this.lightOn;
-            },
-
-            plateScanRunning: false,
-
-            startPlateScan: function() {
-                const button = document.getElementById('scanPlateButton');
-                const icon = document.getElementById('scanPlateIcon');
-
-                if (!this.plateScanRunning) {
-                    // Change button to active state
-                    button.classList.add('btn-success');
-                    button.classList.remove('btn-info');
-                    icon.classList.add('fa-check');
-                    icon.classList.remove('fa-microscope');
-
-                    // Add the logic to start the 96 well plate scanning
-                    console.log("Starting 96 well plate scanning...");
-                    // Example: Call a function from your microscope control
-                if (window.microscopeControl) {
-                    window.microscopeControl.scan_well_plate({_rkwargs: true, context: context});
-                }
-                } else {
-                    // Change button back to initial state
-                    button.classList.remove('btn-success');
-                    button.classList.add('btn-info');
-                    icon.classList.remove('fa-check');
-                    icon.classList.add('fa-microscope');
-
-                    // Add logic to stop the 96 well plate scanning
-                    console.log("Stopping 96 well plate scanning...");
-                    // Example: Call a function from your microscope control
-                    if (window.microscopeControl) {
-                        window.microscopeControl.stop_scan({_rkwargs: true, context: context});
-                    }
-                }
-
-                this.plateScanRunning = !this.plateScanRunning;
-            },
-
-
-            moveMicroscope: function(direction, multiplier) {
-                if (!window.microscopeControl) {
-                    console.error("Microscope control is not initialized.");
-                    alert("Microscope control is not initialized. Please refresh the page and try again.");
-                    return;
-                }
-                else {
-                    console.log("Microscope control is initialized.");
-                }
-                try{
-                    const xMove = parseFloat(document.getElementById('x-move').value);
-                    const yMove = parseFloat(document.getElementById('y-move').value);
-                    const zMove = parseFloat(document.getElementById('z-move').value); // If Z movement is needed
-                    let moveX = 0, moveY = 0, moveZ = 0;
-
-                    if (isNaN(xMove) || isNaN(yMove) || isNaN(zMove)) {
-                        console.error("Invalid movement parameters.");
-                        return;
-                    }
-
-                    if (direction === 'x') {
-                        moveX = xMove * multiplier;
-                        moveY = 0;
-                        moveZ = 0;
-                    } else if (direction === 'y') {
-                        moveY = yMove * multiplier;
-                        moveX = 0;
-                        moveZ = 0;
-                    }
-                    // Example of handling Z movement
-                    if (direction === 'z') {
-                        moveZ = zMove * multiplier;
-
-                        moveX = 0;
-                        moveY = 0;
-                    }
-                    console.log("Moving by: ", moveX, moveY, moveZ);
-                    
-                    window.microscopeControl.move_by_distance({x: moveX, y: moveY, z: moveZ, _rkwargs: true, context: context});
-                }catch (error) {
-        console.error("Error in moveMicroscope:", error);
-                }
-
-            },
-
-            setIllumination: function() {
-                const intensity = document.getElementById('illumination-intensity').value;
-                const channelElement = document.getElementById('illumination-channel');
-                const channelNumber = parseInt(channelElement.value);
-                const channelName = channelElement.options[channelElement.selectedIndex].text;
-            
-                document.getElementById('illumination-intensity-value').textContent = intensity + '%';
-                if (window.microscopeControl) {
-                    window.microscopeControl.set_illumination({
-                        channel: channelNumber,  // Send the integer value
-                        intensity: parseInt(intensity),
-                        _rkwargs: true,
-                        context: context
-                    });
-                }
-                console.log(`Set illumination: Channel ${channelName} (${channelNumber}), Intensity ${intensity}%`);
-            },
-
-            setCameraExposure: function() {
-                const exposure_time = document.getElementById('camera-exposure').value;
-                if (window.microscopeControl) {
-                    window.microscopeControl.set_camera_exposure({exposure_time: parseInt(exposure_time), _rkwargs: true, context: context});
-                }
-            },
-
-            moveZAxis: function(direction) {
-                const zStep = 0.1; // Adjust this value as needed
-                if (window.microscopeControl) {
-                    window.microscopeControl.move_by_distance({x: 0, y: 0, z: direction * zStep, _rkwargs: true, context: context});
-                }
+                setMicroscopeControl(mc);
+            } catch (error) {
+                appendLog(`Error: ${error.message}`);
             }
-
-
         };
 
+        initializeWebRPC();
+    }, []);
 
-        
-
-        // Event listeners for new controls
-        document.getElementById('illumination-intensity').addEventListener('input', window.methods.setIllumination);
-        document.getElementById('illumination-channel').addEventListener('change', window.methods.setIllumination);
-        document.getElementById('camera-exposure').addEventListener('change', window.methods.setCameraExposure);
-
-        
-        // Add this function to enable UI elements
-        function enableUI() {
-            document.querySelectorAll('button, input, select').forEach(el => el.disabled = false);
+    const snapImage = async () => {
+        if (!microscopeControl) return;
+        try {
+            appendLog('Snapping image...');
+            const imageUrl = await microscopeControl.snap(
+                parseInt(cameraExposure),
+                parseInt(illuminationChannel),
+                parseInt(illuminationIntensity)
+            );
+            setSnapshotImage(imageUrl);
+            appendLog('Image snapped successfully.');
+            appendLog(`Image URL: ${imageUrl}`);
+        } catch (error) {
+            appendLog(`Error snapping image: ${error.message}`);
         }
+    };
 
-        window.addEventListener('beforeunload', function() {
-            if (window.pc) {
-                window.pc.close();
+    const moveMicroscope = async (direction, multiplier) => {
+        if (!microscopeControl) return;
+        try {
+            let moveX = 0, moveY = 0, moveZ = 0;
+            if (direction === 'x') moveX = xMove * multiplier;
+            else if (direction === 'y') moveY = yMove * multiplier;
+            else if (direction === 'z') moveZ = zMove * multiplier;
+            
+            appendLog(`Moving by: ${moveX}, ${moveY}, ${moveZ}`);
+            await microscopeControl.move_by_distance(moveX, moveY, moveZ);
+            appendLog('Move completed.');
+        } catch (error) {
+            appendLog(`Error in moveMicroscope: ${error.message}`);
+        }
+    };
+
+    const toggleLight = async () => {
+        if (!microscopeControl) return;
+        try {
+            if (!isLightOn) {
+                await microscopeControl.on_illumination();
+                appendLog('Light turned on.');
+            } else {
+                await microscopeControl.off_illumination();
+                appendLog('Light turned off.');
             }
-            if (window.microscopeControl) {
-                // Add any necessary cleanup for the microscope control service
+            setIsLightOn(!isLightOn);
+        } catch (error) {
+            appendLog(`Error toggling light: ${error.message}`);
+        }
+    };
+
+    const startPlateScan = async () => {
+        if (!microscopeControl) return;
+        try {
+            if (!isPlateScanRunning) {
+                await microscopeControl.scan_well_plate();
+                appendLog('Plate scan started.');
+            } else {
+                await microscopeControl.stop_scan();
+                appendLog('Plate scan stopped.');
             }
-        });
-    </script>
+            setIsPlateScanRunning(!isPlateScanRunning);
+        } catch (error) {
+            appendLog(`Error in plate scan: ${error.message}`);
+        }
+    };
+
+    const setIllumination = async () => {
+        if (!microscopeControl) return;
+        try {
+            await microscopeControl.set_illumination(
+                parseInt(illuminationChannel),
+                parseInt(illuminationIntensity)
+            );
+            appendLog(`Illumination set: Channel ${illuminationChannel}, Intensity ${illuminationIntensity}%`);
+        } catch (error) {
+            appendLog(`Error setting illumination: ${error.message}`);
+        }
+    };
+
+    const setCameraExposureTime = async () => {
+        if (!microscopeControl) return;
+        try {
+            await microscopeControl.set_camera_exposure(parseInt(cameraExposure));
+            appendLog(`Camera exposure set to ${cameraExposure}ms`);
+        } catch (error) {
+            appendLog(`Error setting camera exposure: ${error.message}`);
+        }
+    };
+
+    return (
+        <div>
+            <h1 id="title" className="text-center">WebRTC Microscope Control</h1>
+            
+            <div id="viewer-section">
+                <div id="media" className="shadow">
+                    {snapshotImage ? (
+                        <img src={snapshotImage} alt="Snapshot" />
+                    ) : (
+                        <div className="bg-light" style={{height: "360px", display: "flex", alignItems: "center", justifyContent: "center"}}>
+                            <span>No image available</span>
+                        </div>
+                    )}
+                </div>
+                
+                <div id="control-panel">
+                    <div className="control-group">
+                        <button className="btn btn-primary btn-block" onClick={snapImage} disabled={!microscopeControl}>
+                            <span className="fas fa-camera"></span> Snap Image
+                        </button>
+                    </div>
+                    
+                    <div className="control-group">
+                        <label>Stage Movement:</label>
+                        <div className="input-group mb-2">
+                            <input type="number" value={xMove} onChange={(e) => setXMove(parseFloat(e.target.value))} className="form-control" placeholder="X (mm)" />
+                            <input type="number" value={yMove} onChange={(e) => setYMove(parseFloat(e.target.value))} className="form-control" placeholder="Y (mm)" />
+                            <input type="number" value={zMove} onChange={(e) => setZMove(parseFloat(e.target.value))} className="form-control" placeholder="Z (mm)" />
+                        </div>
+                        <div className="btn-group-vertical btn-block">
+                            <button className="btn btn-secondary" onClick={() => moveMicroscope('y', 1)} disabled={!microscopeControl}><i className="fas fa-arrow-up"></i> Y+</button>
+                            <div className="btn-group">
+                                <button className="btn btn-secondary" onClick={() => moveMicroscope('x', -1)} disabled={!microscopeControl}><i className="fas fa-arrow-left"></i> X-</button>
+                                <button className="btn btn-secondary" onClick={() => moveMicroscope('x', 1)} disabled={!microscopeControl}><i className="fas fa-arrow-right"></i> X+</button>
+                            </div>
+                            <button className="btn btn-secondary" onClick={() => moveMicroscope('y', -1)} disabled={!microscopeControl}><i className="fas fa-arrow-down"></i> Y-</button>
+                            <div className="btn-group">
+                                <button className="btn btn-secondary" onClick={() => moveMicroscope('z', -1)} disabled={!microscopeControl}><i className="fas fa-arrow-down"></i> Z-</button>
+                                <button className="btn btn-secondary" onClick={() => moveMicroscope('z', 1)} disabled={!microscopeControl}><i className="fas fa-arrow-up"></i> Z+</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div className="control-group">
+                        <button className={`btn btn-block ${isLightOn ? 'btn-success' : 'btn-warning'}`} onClick={toggleLight} disabled={!microscopeControl}>
+                            <span className={`fas ${isLightOn ? 'fa-lightbulb-on' : 'fa-lightbulb'}`}></span> Toggle Light
+                        </button>
+                    </div>
+                    
+                    <div className="control-group">
+                        <button className={`btn btn-block ${isPlateScanRunning ? 'btn-success' : 'btn-info'}`} onClick={startPlateScan} disabled={!microscopeControl}>
+                            <span className={`fas ${isPlateScanRunning ? 'fa-check' : 'fa-microscope'}`}></span> {isPlateScanRunning ? 'Stop Plate Scan' : 'Scan Plate'}
+                        </button>
+                    </div>
+                    
+                    <div className="control-group">
+                        <label htmlFor="illumination-intensity">Illumination Intensity:</label>
+                        <input type="range" id="illumination-intensity" className="form-control-range" min="0" max="100" value={illuminationIntensity} onChange={(e) => setIlluminationIntensity(e.target.value)} />
+                        <span>{illuminationIntensity}%</span>
+                    </div>
+                    
+                    <div className="control-group">
+                        <label htmlFor="illumination-channel">Illumination Channel:</label>
+                        <select id="illumination-channel" className="form-control" value={illuminationChannel} onChange={(e) => setIlluminationChannel(e.target.value)}>
+                            <option value="0">BF LED matrix full</option>
+                            <option value="11">Fluorescence 405 nm Ex</option>
+                            <option value="12">Fluorescence 488 nm Ex</option>
+                            <option value="14">Fluorescence 561nm Ex</option>
+                            <option value="13">Fluorescence 638nm Ex</option>
+                            <option value="15">Fluorescence 730nm Ex</option>
+                        </select>
+                    </div>
+                    
+                    <div className="control-group">
+                        <label htmlFor="camera-exposure">Camera Exposure (ms):</label>
+                        <input type="number" id="camera-exposure" className="form-control" value={cameraExposure} min="1" max="1000" onChange={(e) => setCameraExposure(e.target.value)} />
+                    </div>
+
+                    <div className="control-group">
+                        <button className="btn btn-primary btn-block" onClick={setIllumination} disabled={!microscopeControl}>Set Illumination</button>
+                        <button className="btn btn-primary btn-block" onClick={setCameraExposureTime} disabled={!microscopeControl}>Set Camera Exposure</button>
+                    </div>
+                </div>
+            </div>
+            
+            <svg id="well-plate-svg" style={{width: "300px", height: "200px"}}>
+                <image href="images/96-Well_plate.svg" width="100%" height="100%" />
+                <circle id="stage-indicator" cx="120" cy="100" r="9" fill="red" visibility="visible" />
+            </svg>
+            <label htmlFor="current_location">Current location of stage</label>
+
+            <div className="mt-4">
+                <h4>Log:</h4>
+                <pre className="bg-light p-2" style={{maxHeight: "200px", overflowY: "auto"}}>{log}</pre>
+            </div>
+        </div>
+    );
+};
+
+ReactDOM.render(<MicroscopeControl />, document.getElementById('app'));
+</script>
 </body>
-
 </html>

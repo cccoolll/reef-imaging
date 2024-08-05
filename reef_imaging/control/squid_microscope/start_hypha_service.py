@@ -7,11 +7,8 @@ import fractions
 from functools import partial
 import traceback
 import numpy as np
-from hypha_rpc import login, connect_to_server, register_rtc_service
-from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription, RTCConfiguration
-from aiortc.contrib.media import MediaPlayer, MediaRelay, MediaStreamTrack
-from aiortc.rtcrtpsender import RTCRtpSender
-from av import VideoFrame
+from imjoy_rpc.hypha import login, connect_to_server
+
 import json
 import cv2
 
@@ -74,27 +71,6 @@ async def ping(context=None):
         ), "You don't have permission to use the chatbot, please sign up and wait for approval"
     return "pong"
 
-class VideoTransformTrack(MediaStreamTrack):
-    """
-    A video stream track that transforms frames from an another track.
-    """
-
-    kind = "video"
-
-    def __init__(self):
-        super().__init__()  # don't forget this!
-        self.count = 0
-
-    async def recv(self):
-        # frame = await self.track.recv()
-        print("Start snapping an image")
-        img = np.random.randint(0, 155, (150, 300, 3)).astype('uint8')
-        new_frame = VideoFrame.from_ndarray(img, format="bgr24")
-        new_frame.pts = self.count # frame.pts
-        self.count+=1
-        new_frame.time_base = fractions.Fraction(1, 1000)
-        return new_frame
-
 
 
 async def send_status(data_channel, workspace=None, token=None):
@@ -141,8 +117,7 @@ def move_by_distance(x,y,z, context=None):
                 - report_url: the report URL
                 - key: the key for the login
     """
-    if not check_permission(context.get("user")):
-        return "You don't have permission to use the chatbot, please contact us and wait for approval"
+
     is_success, x_pos, y_pos,z_pos, x_des, y_des, z_des =squidController.move_by_distance_limited(x,y,z)
     if is_success:
         result = f'The stage moved ({x},{y},{z})mm through x,y,z axis, from ({x_pos},{y_pos},{z_pos})mm to ({x_des},{y_des},{z_des})mm'
@@ -173,8 +148,7 @@ def move_to_position(x,y,z, context=None):
             For detailes, see: https://ha.amun.ai/#/
 
     """
-    if not check_permission(context.get("user")):
-        return "You don't have permission to use the chatbot, please contact us and wait for approval"
+
     if x != 0:
         is_success, x_pos, y_pos,z_pos, x_des = squidController.move_x_to_limited(x)
         if not is_success:
@@ -232,7 +206,8 @@ def get_status(context=None):
     scan_channel = squidController.multipointController.selected_configurations
     return current_x, current_y, current_z, current_theta, is_illumination_on,scan_channel
 
-    
+
+
 def one_new_frame(context=None):
     print("Start snapping an image")
     gray_img=squidController.snap_image(0,50,100)
@@ -253,9 +228,11 @@ def snap(exposure_time, channel, intensity, context=None):
     """ 
     Get the current frame from the camera, converted to a 3-channel BGR image.
     """
-    if not check_permission(context.get("user")):
-        return "You don't have permission to use the chatbot, please contact us and wait for approval"
+    #TODO: check permission
+    # if not check_permission(context.get("user")):
+    #     return "You don't have permission to use the chatbot, please contact us and wait for approval"
     gray_img=squidController.snap_image(channel,intensity,exposure_time)
+    print('The image is snapped')
     # Rescale the image to span the full 0-255 range
     min_val = np.min(gray_img)
     max_val = np.max(gray_img)
@@ -288,8 +265,7 @@ def open_illumination(context=None):
             - key: the key for the login
         For detailes, see: https://ha.amun.ai/#/
     """
-    if not check_permission(context.get("user")):
-        return "You don't have permission to use the chatbot, please contact us and wait for approval"
+
     squidController.liveController.turn_on_illumination()
 
 def close_illumination(context=None):
@@ -305,8 +281,7 @@ def close_illumination(context=None):
             - key: the key for the login
         For detailes, see: https://ha.amun.ai/#/
     """
-    if not check_permission(context.get("user")):
-        return "You don't have permission to use the chatbot, please contact us and wait for approval"
+
     squidController.liveController.turn_off_illumination()
 
 def scan_well_plate(context=None):
@@ -322,8 +297,7 @@ def scan_well_plate(context=None):
             - key: the key for the login
         For detailes, see: https://ha.amun.ai/#/
     """
-    if not check_permission(context.get("user")):
-        return "You don't have permission to use the chatbot, please contact us and wait for approval"
+
     print("Start scanning well plate")
     squidController.scan_well_plate(action_ID='Test')
 
@@ -334,8 +308,7 @@ def set_illumination(channel,intensity, context=None):
     intensity : float, 0-100
     If you want to know the illumination source's and intensity's number, you can check the 'squid_control/channel_configurations.xml' file.
     """
-    if not check_permission(context.get("user")):
-        return "You don't have permission to use the chatbot, please contact us and wait for approval"
+
     squidController.liveController.set_illumination(channel,intensity)
     print(f'The intensity of the {channel} illumination is set to {intensity}.')
 
@@ -344,8 +317,7 @@ def set_camera_exposure(exposure_time, context=None):
     Set the exposure time of the camera.
     exposure_time : float
     """
-    if not check_permission(context.get("user")):
-        return "You don't have permission to use the chatbot, please contact us and wait for approval"
+
     squidController.camera.set_exposure_time(exposure_time)
     print(f'The exposure time of the camera is set to {exposure_time}.')
 
@@ -370,8 +342,7 @@ def home_stage(context=None):
     """
     Home the stage in z, y, and x axis.
     """
-    if not check_permission(context.get("user")):
-        return "You don't have permission to use the chatbot, please contact us and wait for approval"
+
     squidController.home_stage()
     print('The stage moved to home position in z, y, and x axis')
 
@@ -381,8 +352,7 @@ def move_to_loading_position(context=None):
     Move the stage to the loading position.
 
     """
-    if not check_permission(context.get("user")):
-        return "You don't have permission to use the chatbot, please contact us and wait for approval"
+
     squidController.slidePositionController.move_to_slide_loading_position()
     print('The stage moved to loading position')
 
@@ -391,8 +361,7 @@ def auto_focus(context=None):
     Auto focus the camera.
 
     """
-    if not check_permission(context.get("user")):
-        return "You don't have permission to use the chatbot, please contact us and wait for approval"
+
     squidController.do_autofocus()
     print('The camera is auto focused')
 
@@ -403,8 +372,7 @@ def navigate_to_well(row,col, wellplate_type, context=None):
     col : int
     wellplate_type : str, can be '6', '12', '24', '96', '384'
     """
-    if not check_permission(context.get("user")):
-        return "You don't have permission to use the chatbot, please contact us and wait for approval"
+
     if wellplate_type is None:
         wellplate_type = '96'
     squidController.platereader_move_to_well(row,col,wellplate_type)
@@ -441,6 +409,11 @@ class NavigateToWellInput(BaseModel):
     col: int = Field(..., description="Column number of the well position")
     wellplate_type: str = Field('24', description="Type of the well plate (e.g., '6', '12', '24', '96', '384')")
 
+class ImageInfo(BaseModel):
+    """Image information."""
+    url: str=Field(..., description="The URL of the image.")
+    title: Optional[str]=Field(None, description="The title of the image.")
+    
 # Add chatbot-related functions
 async def inspect_tool(images: List[dict], query: str, context_description: str) -> str:
     image_infos = [ImageInfo(**image) for image in images]
@@ -471,7 +444,7 @@ async def inspect_tool_schema(config: InspectToolInput, context=None):
     return {"result": response}
 
 
-datastore = HyphaDataStore()
+
 
 # Add get_schema function
 def get_schema(context=None):
@@ -487,22 +460,12 @@ def get_schema(context=None):
     }
 
 
-async def on_init(peer_connection):
-    @peer_connection.on("track")
-    def on_track(track):
-        print(f"Track {track.kind} received")
-        peer_connection.addTrack(
-            VideoTransformTrack()
-        )
-        @track.on("ended")
-        async def on_ended():
-            print(f"Track {track.kind} ended")
 
     # data_channel = peer_connection.createDataChannel("microscopeStatus")
     # # Start the task to send stage position periodically
     # asyncio.create_task(send_status(data_channel))
     
-async def start_hypha_service(server, service_id, rtc_service_id):
+async def start_hypha_service(server, service_id):
 
 
 
@@ -532,18 +495,10 @@ async def start_hypha_service(server, service_id, rtc_service_id):
         overwrite=True
     )
     
-    await register_rtc_service(
-        server,
-        service_id=f"{rtc_service_id}",
-        config={
-            "visibility": "public",
-            "on_init": on_init,
-        },
-    )
     print(
         f"Service (service_id={service_id}) started successfully, available at http://localhost:9528/{server.config.workspace}/services"
     )
-    print(f"You can access the webrtc stream at https://cccoolll.github.io/reef-imaging/?service_id={service_id}")
+    print(f"You can access at https://cccoolll.github.io/reef-imaging/?service_id={service_id}")
     
 async def start_chatbot_service(server, service_id):    
     # try:
@@ -580,23 +535,31 @@ async def start_chatbot_service(server, service_id):
     await server.register_service(chatbot_extension, overwrite=True)
     
 
-    print(f"You can access the chatbot at https://bioimage.io/chat?server=https://hypha.aicell.io&extension={chatbot_extension['id']}&assistant=Skyler")
+    print(f"You can access the chatbot at https://bioimage.io/chat?server=https://ai.imjoy.io&extension={chatbot_extension['id']}&assistant=Skyler")
 
 
 
 
 async def setup(simulation=True):
     
-    server_url = "https://hypha.aicell.io"
-    user_info = await login({"server_url": server_url, "profile": True})
-    print(f"Logged in as: {user_info}")
+    server_url = "https://ai.imjoy.io"
+    token = await login({"server_url": server_url,})
     server = await connect_to_server(
-        {"server_url": server_url, "token": user_info.token,}
+        {"server_url": server_url, "token": token,}
     )
-    server.on("connected", lambda info: print("Connected to server: ", info))
-    rtc_service_id = "squid-control-rtc"# if simulation else "squid-control-service"
-    await start_hypha_service(server, service_id="microscope-control-squid-2", rtc_service_id=rtc_service_id)
+    await start_hypha_service(server, service_id="microscope-control-squid-2")
     
+    global datastore
+    datastore = HyphaDataStore()
+    try:
+        await datastore.setup(server, service_id="data-store")
+    except TypeError as e:
+        if "Future" in str(e):
+            # If config is a Future, wait for it to resolve
+            config = await asyncio.wrap_future(server.config)
+            await datastore.setup(server, service_id="data-store", config=config)
+        else:
+            raise e    
     # chatbot_id = "squid-microscope-chatbot-extension"
     # chatbot_server_url = "https://chat.bioimage.io"
     # token = await login({"server_url": chatbot_server_url})
