@@ -5,7 +5,7 @@ import fractions
 
 import numpy as np
 from av import VideoFrame
-from imjoy_rpc.hypha import login, connect_to_server, register_rtc_service
+from hypha_rpc import login, connect_to_server, register_rtc_service
 
 from aiortc import MediaStreamTrack
 
@@ -79,11 +79,11 @@ async def start_service(service_id, workspace=None, token=None):
         }
     )
     
-    coturn = await server.get_service("coturn")
-    ice_servers = await coturn.get_rtc_ice_servers()
-    print("ICE servers:", ice_servers)
+    # coturn = await server.get_service("coturn")
+    # ice_servers = await coturn.get_rtc_ice_servers()
+    # print("ICE servers:", ice_servers)
     # obtain it from https://ai.imjoy.io/public/services/coturn/get_rtc_ice_servers
-    # ice_servers = [{"username":"1688956731:gvo9P4j7vs3Hhr6WqTUnen","credential":"yS9Vjds2jQg0qfq7xtlbwWspZQE=","urls":["turn:ai.imjoy.io:3478","stun:ai.imjoy.io:3478"]}]
+    ice_servers = [{"username":"1688956731:gvo9P4j7vs3Hhr6WqTUnen","credential":"yS9Vjds2jQg0qfq7xtlbwWspZQE=","urls":["turn:ai.imjoy.io:3478","stun:ai.imjoy.io:3478"]}]
 
     await register_rtc_service(
         server,
