@@ -502,7 +502,7 @@ async def on_init(peer_connection):
     # # Start the task to send stage position periodically
     # asyncio.create_task(send_status(data_channel))
     
-async def start_hypha_service(server, service_id):
+async def start_hypha_service(server, service_id, rtc_service_id):
 
 
 
@@ -510,12 +510,12 @@ async def start_hypha_service(server, service_id):
     await server.register_service(
         {
             "name": "Microscope Control Service",
-            "id": "microscope-control-squid-2",
+            "id": service_id,
             "config":{
                 "visibility": "public",
-                #"run_in_executor": True
+                "run_in_executor": True
             },
-            #"type": "echo",
+            "type": "echo",
             "move_by_distance": move_by_distance,
             "snap": snap,
             "off_illumination": close_illumination,
@@ -534,7 +534,7 @@ async def start_hypha_service(server, service_id):
     
     await register_rtc_service(
         server,
-        service_id=f"{service_id}",
+        service_id=f"{rtc_service_id}",
         config={
             "visibility": "public",
             "on_init": on_init,
@@ -587,10 +587,15 @@ async def start_chatbot_service(server, service_id):
 
 async def setup(simulation=True):
     
-    hypha_server_url = "https://hypha.aicell.io"
-    hypha_server = await connect_to_server({"server_url": hypha_server_url})
+    server_url = "https://hypha.aicell.io"
+    user_info = await login({"server_url": server_url, "profile": True})
+    print(f"Logged in as: {user_info}")
+    server = await connect_to_server(
+        {"server_url": server_url, "token": user_info.token,}
+    )
+    server.on("connected", lambda info: print("Connected to server: ", info))
     rtc_service_id = "squid-control-rtc"# if simulation else "squid-control-service"
-    await start_hypha_service(hypha_server, rtc_service_id)
+    await start_hypha_service(server, service_id="microscope-control-squid-2", rtc_service_id=rtc_service_id)
     
     # chatbot_id = "squid-microscope-chatbot-extension"
     # chatbot_server_url = "https://chat.bioimage.io"

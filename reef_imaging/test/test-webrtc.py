@@ -35,16 +35,18 @@ class VideoTransformTrack(MediaStreamTrack):
     
 async def start_service(service_id, workspace=None, token=None):
     client_id = service_id + "-client"
-    token = await login({"server_url": "https://hypha.aicell.io",})
+    user_info = await login({"server_url": "https://hypha.aicell.io","profile": True})
     print(f"Starting service...")
     server = await connect_to_server(
         {
             "client_id": client_id,
             "server_url": "https://hypha.aicell.io",
             "workspace": workspace,
-            "token": token,
+            "token": user_info.token,
         }
     )
+    server.on("connected", lambda info: print("Connected to server: ", info))
+
     
     # print("Workspace: ", workspace, "Token:", await server.generate_token({"expires_in": 3600*24*100}))
     
