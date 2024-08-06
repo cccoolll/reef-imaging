@@ -209,9 +209,8 @@ def get_status(context=None):
 
 
 def one_new_frame(context=None):
-    print("Start snapping an image")
     gray_img=squidController.snap_image(0,50,100)
-    print('The image is snapped')
+
 
     min_val = np.min(gray_img)
     max_val = np.max(gray_img)
@@ -226,28 +225,24 @@ def one_new_frame(context=None):
 
 def snap(exposure_time, channel, intensity, context=None):
     """ 
-    Get the current frame from the camera, converted to a 3-channel BGR image.
+    Get the current frame from the camera as a grayscale image.
     """
-    #TODO: check permission
+    # TODO: check permission
     # if not check_permission(context.get("user")):
     #     return "You don't have permission to use the chatbot, please contact us and wait for approval"
-    gray_img=squidController.snap_image(channel,intensity,exposure_time)
+    
+    gray_img = squidController.snap_image(channel, intensity, exposure_time)
     print('The image is snapped')
-    # Rescale the image to span the full 0-255 range
-    min_val = np.min(gray_img)
-    max_val = np.max(gray_img)
-    if max_val > min_val:  # Avoid division by zero if the image is completely uniform
-        gray_img = (gray_img - min_val) * (255 / (max_val - min_val))
-        gray_img = gray_img.astype(np.uint8)  # Convert to 8-bit image
-    else:
-        gray_img = np.zeros((512, 512), dtype=np.uint8)  # If no variation, return a black image
+    gray_img = gray_img.astype(np.uint8)
     # Resize the image to a standard size
-    resized_img = cv2.resize(gray_img, (1006,759))
-    bgr_img = np.stack((resized_img,)*3, axis=-1)  # Duplicate grayscale data across 3 channels to simulate BGR format.
-    _, png_image = cv2.imencode('.png', bgr_img)
+    resized_img = cv2.resize(gray_img, (2048, 2048))
+    
+    # Encode the image directly to PNG without converting to BGR
+    _, png_image = cv2.imencode('.png', resized_img)
+    
     # Store the PNG image
     file_id = datastore.put('file', png_image.tobytes(), 'snapshot.png', "Captured microscope image in PNG format")
-    data_url= datastore.get_url(file_id)
+    data_url = datastore.get_url(file_id)
     print(f'The image is snapped and saved as {data_url}')
     return data_url
 
