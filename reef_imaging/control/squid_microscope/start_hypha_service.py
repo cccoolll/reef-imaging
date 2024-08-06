@@ -14,12 +14,11 @@ import cv2
 
 import sys
 # Get the absolute path to the directory where squid_control is located
-squid_control_path = os.path.abspath('/squid-control')
-
-# Add this directory to sys.path
-if squid_control_path not in sys.path:
-    sys.path.append(squid_control_path)
-
+workspace_path = os.path.abspath('reef_imaging')
+sys.path.append(workspace_path)
+squid_control_path = os.path.abspath('reef_imaging/control/squid_microscope/squid-control')
+sys.path.append(squid_control_path)
+print(f"Added {squid_control_path} to sys.path")
 # Now you can import squid_control
 from squid_control.squid_controller import SquidController
 from pydantic import Field, BaseModel
@@ -339,8 +338,9 @@ def home_stage(context=None):
     """
 
     squidController.home_stage()
+    
     print('The stage moved to home position in z, y, and x axis')
-
+    return 'The stage moved to home position in z, y, and x axis'
 
 def move_to_loading_position(context=None):
     """
@@ -376,33 +376,45 @@ def navigate_to_well(row,col, wellplate_type, context=None):
 
 #chatbot extension
 class MoveByDistanceInput(BaseModel):
+    """Move the stage by a distance in x, y, z axis."""
     x: float = Field(0, description="Move the stage along X axis")
     y: float = Field(0, description="Move the stage along Y axis")
     z: float = Field(0, description="Move the stage along Z axis")
 
 class MoveToPositionInput(BaseModel):
+    """Move the stage to a position in x, y, z axis."""
     x: Optional[float] = Field(None, description="Move the stage to the X coordinate")
     y: Optional[float] = Field(None, description="Move the stage to the Y coordinate")
     z: float = Field(3.35, description="Move the stage to the Z coordinate")
 
 class AutoFocusInput(BaseModel):
+    """Auto focus the camera."""
     N: int = Field(10, description="Number of discrete focus positions")
     delta_Z: float = Field(1.524, description="Step size in the Z-axis in micrometers")
 
 class SnapImageInput(BaseModel):
+    """Snap an image from the camera."""
     exposure: int = Field(..., description="Exposure time in milliseconds")
     channel: int = Field(..., description="Light source (e.g., 0 for Bright Field, 11 for Fluorescence 405 nm)")
     intensity: int = Field(..., description="Intensity of the illumination source")
 
 class InspectToolInput(BaseModel):
+    """Inspect the images with GPT4-V model."""
     images: List[dict] = Field(..., description="A list of images to be inspected, each with a http url and title")
     query: str = Field(..., description="User query about the image")
-    context_description: str = Field(..., description="Context for the visual inspection task")
+    context_description: str = Field(..., description="Context for the visual inspection task,Inspect images token from microscope")
 
 class NavigateToWellInput(BaseModel):
+    """Navigate to a well position in the well plate."""
     row: str = Field(..., description="Row number of the well position (e.g., 'A')")
     col: int = Field(..., description="Column number of the well position")
     wellplate_type: str = Field('24', description="Type of the well plate (e.g., '6', '12', '24', '96', '384')")
+
+class MoveToLoadingPositionInput(BaseModel):
+    """Move the stage to the loading position."""
+
+class HomeStageInput(BaseModel):
+    """Home the stage in z, y, and x axis."""
 
 class ImageInfo(BaseModel):
     """Image information."""
@@ -438,7 +450,9 @@ async def inspect_tool_schema(config: InspectToolInput, context=None):
     response = await inspect_tool(config.images, config.query, config.context_description)
     return {"result": response}
 
-
+async def home_stage_schema(context=None):
+    response =  home_stage(context)
+    return {"result": response}
 
 
 # Add get_schema function
@@ -446,11 +460,11 @@ def get_schema(context=None):
     return {
         "move_by_distance": MoveByDistanceInput.schema(),
         "move_to_position": MoveToPositionInput.schema(),
-        "home_stage": {"type": "object", "properties": {}},
+        "home_stage": HomeStageInput.schema(),
         "auto_focus": AutoFocusInput.schema(),
         "snap_image": SnapImageInput.schema(),
         "inspect_tool": InspectToolInput.schema(),
-        "move_to_loading_position": {"type": "object", "properties": {}},
+        "move_to_loading_position": MoveToLoadingPositionInput.schema(),
         "navigate_to_well": NavigateToWellInput.schema()
     }
 
@@ -520,17 +534,17 @@ async def start_chatbot_service(server, service_id):
             "move_to_position": move_to_position_schema,
             "auto_focus": auto_focus_schema,
             "snap_image": snap_image_schema,
-            "home_stage": home_stage,
+            "home_stage": home_stage_schema,
             "move_to_loading_position": move_to_loading_position,
             "navigate_to_well": navigate_to_well_schema,
             "inspect_tool": inspect_tool_schema,
         }
     }
 
-    await server.register_service(chatbot_extension, overwrite=True)
+    svc = await server.register_service(chatbot_extension, overwrite=True)
     
 
-    print(f"You can access the chatbot at https://bioimage.io/chat?server=https://ai.imjoy.io&extension={chatbot_extension['id']}&assistant=Skyler")
+    print(f"Extension service registered with id: {svc.id}, you can visit the service at:\n https://bioimage.io/chat?server=https://chat.bioimage.io&extension={svc.id}&assistant=Skyler")
 
 
 
@@ -555,11 +569,11 @@ async def setup(simulation=True):
             await datastore.setup(server, service_id="data-store", config=config)
         else:
             raise e    
-    # chatbot_id = "squid-microscope-chatbot-extension"
-    # chatbot_server_url = "https://chat.bioimage.io"
-    # token = await login({"server_url": chatbot_server_url})
-    # chatbot_server = await connect_to_server({"server_url": chatbot_server_url, "token": token})
-    # await start_chatbot_service(chatbot_server, chatbot_id)
+    chatbot_id = "squid-microscope-chatbot-extension"
+    chatbot_server_url = "https://chat.bioimage.io"
+    token = await login({"server_url": chatbot_server_url})
+    chatbot_server = await connect_to_server({"server_url": chatbot_server_url, "token": token})
+    await start_chatbot_service(chatbot_server, chatbot_id)
 
 
 
