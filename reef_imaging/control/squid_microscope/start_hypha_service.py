@@ -8,7 +8,6 @@ from functools import partial
 import traceback
 import numpy as np
 from imjoy_rpc.hypha import login, connect_to_server
-
 import json
 import cv2
 
@@ -31,6 +30,8 @@ current_x, current_y = 0,0
 current_illumination_channel=None
 current_intensity=None
 
+global chatbot_service_url
+chatbot_service_url = None
 global squidController
 #squidController= SquidController(is_simulation=args.simulation)
 
@@ -97,81 +98,65 @@ async def send_status(data_channel, workspace=None, token=None):
             data_channel.send(json.dumps(squid_status))
         await asyncio.sleep(1)  # Wait for 1 second before sending the next update
 
-
 def move_by_distance(x,y,z, context=None):
-    """
-    Move the stage by a distance in x,y,z axis.
-    ----------------------------------------------------------------
-    Parameters
-    ----------
-    x : float
-        The distance to move in x axis.
-    y : float
-        The distance to move in y axis.
-    z : float
-        The distance to move in z axis.
-    context : dict, optional
-            The context is a dictionary contains the following keys:
-                - login_url: the login URL
-                - report_url: the report URL
-                - key: the key for the login
-    """
-
-    is_success, x_pos, y_pos,z_pos, x_des, y_des, z_des =squidController.move_by_distance_limited(x,y,z)
+    is_success, x_pos, y_pos, z_pos, x_des, y_des, z_des = squidController.move_by_distance_limited(x,y,z)
     if is_success:
         result = f'The stage moved ({x},{y},{z})mm through x,y,z axis, from ({x_pos},{y_pos},{z_pos})mm to ({x_des},{y_des},{z_des})mm'
-        print(result)
-        return(result)
+        return {
+            "success": True,
+            "message": result,
+            "initial_position": {"x": x_pos, "y": y_pos, "z": z_pos},
+            "final_position": {"x": x_des, "y": y_des, "z": z_des}
+        }
     else:
         result = f'The stage can not move ({x},{y},{z})mm through x,y,z axis, from ({x_pos},{y_pos},{z_pos})mm to ({x_des},{y_des},{z_des})mm because out of the range.'
-        print(result)
-        return(result)
+        return {
+            "success": False,
+            "message": result,
+            "initial_position": {"x": x_pos, "y": y_pos, "z": z_pos},
+            "attempted_position": {"x": x_des, "y": y_des, "z": z_des}
+        }
+
         
 def move_to_position(x,y,z, context=None):
-    """
-    Move the stage to a position in x,y,z axis.
-    ----------------------------------------------------------------
-    Parameters
-    ----------
-    x : float
-        The distance to move in x axis.
-    y : float
-        The distance to move in y axis.
-    z : float
-        The distance to move in z axis.
-    context : dict, optional
-            The context is a dictionary contains keys:
-                - login_url: the login URL
-                - report_url: the report URL
-                - key: the key for the login
-            For detailes, see: https://ha.amun.ai/#/
-
-    """
-
+    initial_x, initial_y, initial_z, _, _, _ = get_status()
+    
     if x != 0:
-        is_success, x_pos, y_pos,z_pos, x_des = squidController.move_x_to_limited(x)
+        is_success, x_pos, y_pos, z_pos, x_des = squidController.move_x_to_limited(x)
         if not is_success:
-            result = f'The stage can not move to position ({x},{y},{z})mm from ({x_pos},{y_pos},{z_pos})mm because out of the limit of X axis.'
-            print(result)
-            return(result)
+            return {
+                "success": False,
+                "message": f'The stage can not move to position ({x},{y},{z})mm from ({initial_x},{initial_y},{initial_z})mm because out of the limit of X axis.',
+                "initial_position": {"x": initial_x, "y": initial_y, "z": initial_z},
+                "final_position": {"x": x_pos, "y": y_pos, "z": z_pos}
+            }
             
     if y != 0:        
         is_success, x_pos, y_pos, z_pos, y_des = squidController.move_y_to_limited(y)
         if not is_success:
-            result = f'X axis moved successfully, the stage is now at ({x_pos},{y_pos},{z_pos})mm. But aimed position is out of the limit of Y axis and the stage can not move to position ({x},{y},{z})mm.'
-            print(result)
-            return(result)
+            return {
+                "success": False,
+                "message": f'X axis moved successfully, the stage is now at ({x_pos},{y_pos},{z_pos})mm. But aimed position is out of the limit of Y axis and the stage can not move to position ({x},{y},{z})mm.',
+                "initial_position": {"x": initial_x, "y": initial_y, "z": initial_z},
+                "final_position": {"x": x_pos, "y": y_pos, "z": z_pos}
+            }
             
     if z != 0:    
         is_success, x_pos, y_pos, z_pos, z_des = squidController.move_z_to_limited(z)
         if not is_success:
-            result = f'X and Y axis moved successfully, the stage is now at ({x_pos},{y_pos},{z_pos})mm. But aimed position is out of the limit of Z axis and stage can not move to position ({x},{y},{z})mm.'
-            print(result)
-            return(result)
+            return {
+                "success": False,
+                "message": f'X and Y axis moved successfully, the stage is now at ({x_pos},{y_pos},{z_pos})mm. But aimed position is out of the limit of Z axis and stage can not move to position ({x},{y},{z})mm.',
+                "initial_position": {"x": initial_x, "y": initial_y, "z": initial_z},
+                "final_position": {"x": x_pos, "y": y_pos, "z": z_pos}
+            }
             
-    result = f'The stage moved to position ({x},{y},{z})mm from ({x_pos},{y_pos},{z_pos})mm successfully.'
-    print(result)
-    return(result)
+    return {
+        "success": True,
+        "message": f'The stage moved to position ({x},{y},{z})mm from ({initial_x},{initial_y},{initial_z})mm successfully.',
+        "initial_position": {"x": initial_x, "y": initial_y, "z": initial_z},
+        "final_position": {"x": x_pos, "y": y_pos, "z": z_pos}
+    }
 
 def get_status(context=None):
     """
@@ -373,7 +358,10 @@ def navigate_to_well(row,col, wellplate_type, context=None):
     squidController.platereader_move_to_well(row,col,wellplate_type)
     print(f'The stage moved to well position ({row},{col})')
 
-
+def get_chatbot_url(context=None):
+    global chatbot_service_url
+    print(f"chatbot_service_url: {chatbot_service_url}")
+    return chatbot_service_url
 #chatbot extension
 class MoveByDistanceInput(BaseModel):
     """Move the stage by a distance in x, y, z axis."""
@@ -430,12 +418,13 @@ async def inspect_tool(images: List[dict], query: str, context_description: str)
     response = await aask(image_infos, [context_description, query])
     return response
 
-# Modify existing functions to use Pydantic models
 def move_by_distance_schema(config: MoveByDistanceInput, context=None):
-    return move_by_distance(config.x, config.y, config.z, context)
+    x_pos, y_pos, z_pos, _, _, _ = get_status()
+    return f'The stage moved to position ({config.x},{config.y},{config.z})mm from ({x_pos},{y_pos},{z_pos})mm successfully.'
 
 def move_to_position_schema(config: MoveToPositionInput, context=None):
-    return move_to_position(config.x or 0, config.y or 0, config.z or 0, context)
+    x_pos, y_pos, z_pos, _, _, _ = get_status()
+    return f'The stage moved to position ({config.x or 0},{config.y or 0},{config.z or 0})mm from ({x_pos},{y_pos},{z_pos})mm successfully.'
 
 def auto_focus_schema(config: AutoFocusInput, context=None):
     return auto_focus(context)
@@ -499,30 +488,22 @@ async def start_hypha_service(server, service_id):
             "home_stage": home_stage,
             "move_to_position": move_to_position,      
             "move_to_loading_position": move_to_loading_position,
-            "auto_focus": auto_focus
+            "auto_focus": auto_focus,
+            "get_chatbot_url": get_chatbot_url,
         },
         overwrite=True
     )
     
     print(
-        f"Service (service_id={service_id}) started successfully, available at http://localhost:9528/{server.config.workspace}/services"
+        f"Service (service_id={service_id}) started successfully, available at http://{server_url}/{server.config.workspace}/services"
     )
     print(f"You can access at https://cccoolll.github.io/reef-imaging/?service_id={service_id}")
     
 async def start_chatbot_service(server, service_id):    
-    # try:
-    #     await datastore.setup(server, service_id="data-store")
-    # except TypeError as e:
-    #     if "Future" in str(e):
-    #         # If config is a Future, wait for it to resolve
-    #         config = await asyncio.wrap_future(server.config)
-    #         await datastore.setup(server, service_id="data-store", config=config)
-    #     else:
-    #         raise e
     
     chatbot_extension = {
         "_rintf": True,
-        "id": "squid-microscope-chatbot-extension",
+        "id": service_id,
         "type": "bioimageio-chatbot-extension",
         "name": "Squid Microscope Control",
         "description": "Your role: A chatbot controlling a microscope; Your mission: Answering the user's questions, and executing the commands to control the microscope; Definition of microscope: OBJECTIVES: 20x 'NA':0.4, You have one main camera and one autofocus camera.",
@@ -542,21 +523,21 @@ async def start_chatbot_service(server, service_id):
     }
 
     svc = await server.register_service(chatbot_extension, overwrite=True)
-    
-
-    print(f"Extension service registered with id: {svc.id}, you can visit the service at:\n https://bioimage.io/chat?server=https://chat.bioimage.io&extension={svc.id}&assistant=Skyler")
+    global chatbot_service_url
+    chatbot_service_url = f"https://bioimage.io/chat?server=https://chat.bioimage.io&extension={svc.id}&assistant=Skyler"
+    print(f"Extension service registered with id: {svc.id}, you can visit the service at:\n {chatbot_service_url}")
 
 
 
 
 async def setup(simulation=True):
-    
+    global server_url
     server_url = "https://ai.imjoy.io"
     token = await login({"server_url": server_url,})
     server = await connect_to_server(
         {"server_url": server_url, "token": token,}
     )
-    await start_hypha_service(server, service_id="microscope-control-squid-2")
+    await start_hypha_service(server, service_id="microscope-control-squid-test")
     
     global datastore
     datastore = HyphaDataStore()
@@ -569,7 +550,7 @@ async def setup(simulation=True):
             await datastore.setup(server, service_id="data-store", config=config)
         else:
             raise e    
-    chatbot_id = "squid-microscope-chatbot-extension"
+    chatbot_id = "squid-microscope-control-test"
     chatbot_server_url = "https://chat.bioimage.io"
     token = await login({"server_url": chatbot_server_url})
     chatbot_server = await connect_to_server({"server_url": chatbot_server_url, "token": token})

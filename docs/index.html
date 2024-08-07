@@ -75,6 +75,8 @@ const MicroscopeControl = () => {
     const [isLightOn, setIsLightOn] = useState(false);
     const [isPlateScanRunning, setIsPlateScanRunning] = useState(false);
     const [log, setLog] = useState('');
+    const [chatbotUrl, setChatbotUrl] = useState(null);
+
 
     const appendLog = (message) => {
         setLog(prevLog => prevLog + message + '\n');
@@ -92,7 +94,7 @@ const MicroscopeControl = () => {
                 appendLog('Server connected.');
                 
                 appendLog('Getting microscope-control-squid-2 service...');
-                const mc = await server.get_service("microscope-control-squid-2");
+                const mc = await server.get_service("microscope-control-squid-test");
                 appendLog('Service acquired.');
                 
                 setMicroscopeControl(mc);
@@ -129,14 +131,33 @@ const MicroscopeControl = () => {
             else if (direction === 'y') moveY = yMove * multiplier;
             else if (direction === 'z') moveZ = zMove * multiplier;
             
-            appendLog(`Moving by: ${moveX}, ${moveY}, ${moveZ}`);
-            await microscopeControl.move_by_distance(moveX, moveY, moveZ);
-            appendLog('Move completed.');
+            appendLog(`Attempting to move by: ${moveX}, ${moveY}, ${moveZ}`);
+            const result = await microscopeControl.move_by_distance(moveX, moveY, moveZ);
+            if (result.success) {
+                appendLog(result.message);
+                appendLog(`Moved from (${result.initial_position.x}, ${result.initial_position.y}, ${result.initial_position.z}) to (${result.final_position.x}, ${result.final_position.y}, ${result.final_position.z})`);
+            } else {
+                appendLog(`Move failed: ${result.message}`);
+            }
         } catch (error) {
             appendLog(`Error in moveMicroscope: ${error.message}`);
         }
     };
-
+    const moveToPosition = async () => {
+        if (!microscopeControl) return;
+        try {
+            appendLog(`Attempting to move to position: (${xMove}, ${yMove}, ${zMove})`);
+            const result = await microscopeControl.move_to_position(xMove, yMove, zMove);
+            if (result.success) {
+                appendLog(result.message);
+                appendLog(`Moved from (${result.initial_position.x}, ${result.initial_position.y}, ${result.initial_position.z}) to (${result.final_position.x}, ${result.final_position.y}, ${result.final_position.z})`);
+            } else {
+                appendLog(`Move failed: ${result.message}`);
+            }
+        } catch (error) {
+            appendLog(`Error in moveToPosition: ${error.message}`);
+        }
+    };
     const toggleLight = async () => {
         if (!microscopeControl) return;
         try {
@@ -192,6 +213,26 @@ const MicroscopeControl = () => {
         }
     };
 
+    const openChatbot = async () => {
+        if (!microscopeControl) return;
+        try {
+            appendLog('Getting chatbot URL...');
+            const url = await microscopeControl.get_chatbot_url();
+            setChatbotUrl(url);
+            appendLog(`Chatbot URL: ${url}`);
+            
+            // Open a new window with the chatbot URL
+            const chatWindow = window.open(url, 'ChatbotWindow', 'width=400,height=600,scrollbars=yes');
+            if (chatWindow) {
+                chatWindow.focus();
+            } else {
+                appendLog('Unable to open chatbot window. Please check your pop-up blocker settings.');
+            }
+        } catch (error) {
+            appendLog(`Error opening chatbot: ${error.message}`);
+        }
+    };
+
     return (
         <div>
             <h1 id="title" className="text-center">WebRTC Microscope Control</h1>
@@ -233,6 +274,7 @@ const MicroscopeControl = () => {
                                 <button className="btn btn-secondary" onClick={() => moveMicroscope('z', 1)} disabled={!microscopeControl}><i className="fas fa-arrow-up"></i> Z+</button>
                             </div>
                         </div>
+                        <button className="btn btn-primary btn-block mt-2" onClick={moveToPosition} disabled={!microscopeControl}>Move to Position</button>
                     </div>
                     
                     <div className="control-group">
@@ -273,6 +315,12 @@ const MicroscopeControl = () => {
                     <div className="control-group">
                         <button className="btn btn-primary btn-block" onClick={setIllumination} disabled={!microscopeControl}>Set Illumination</button>
                         <button className="btn btn-primary btn-block" onClick={setCameraExposureTime} disabled={!microscopeControl}>Set Camera Exposure</button>
+                    </div>
+                    
+                    <div className="control-group">
+                        <button className="btn btn-info btn-block" onClick={openChatbot} disabled={!microscopeControl}>
+                            <span className="fas fa-comments"></span> Chat
+                        </button>
                     </div>
                 </div>
             </div>
