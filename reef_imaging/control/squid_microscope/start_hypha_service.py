@@ -573,12 +573,6 @@ if __name__ == "__main__":
         default=True,
         help="Run in simulation mode (default: True)"
     )
-    parser.add_argument(
-        "--no-simulation",
-        dest="simulation",
-        action="store_false",
-        help="Run without simulation mode"
-    )
     parser.add_argument("--verbose", "-v", action="count")
     args = parser.parse_args()
 
