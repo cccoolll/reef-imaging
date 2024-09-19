@@ -362,6 +362,7 @@ def get_chatbot_url(context=None):
     global chatbot_service_url
     print(f"chatbot_service_url: {chatbot_service_url}")
     return chatbot_service_url
+
 #chatbot extension
 class MoveByDistanceInput(BaseModel):
     """Move the stage by a distance in x, y, z axis."""
@@ -381,7 +382,7 @@ class AutoFocusInput(BaseModel):
     delta_Z: float = Field(1.524, description="Step size in the Z-axis in micrometers")
 
 class SnapImageInput(BaseModel):
-    """Snap an image from the camera."""
+    """Snap an image from the camera, and display it in the chatbot."""
     exposure: int = Field(..., description="Exposure time in milliseconds")
     channel: int = Field(..., description="Light source (e.g., 0 for Bright Field, 11 for Fluorescence 405 nm)")
     intensity: int = Field(..., description="Intensity of the illumination source")
@@ -430,7 +431,8 @@ def auto_focus_schema(config: AutoFocusInput, context=None):
     return auto_focus(context)
 
 def snap_image_schema(config: SnapImageInput, context=None):
-    return snap(config.exposure, config.channel, config.intensity, context)
+    image_url = snap(config.exposure, config.channel, config.intensity, context)
+    return f"![Image]({image_url})"
 
 def navigate_to_well_schema(config: NavigateToWellInput, context=None):
     return navigate_to_well(config.row, config.col, config.wellplate_type, context)
