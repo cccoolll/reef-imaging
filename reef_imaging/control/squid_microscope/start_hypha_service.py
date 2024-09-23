@@ -7,7 +7,7 @@ import fractions
 from functools import partial
 import traceback
 import numpy as np
-from imjoy_rpc.hypha import login, connect_to_server
+from imjoy_rpc.hypha import login, connect_to_server, register_rtc_service
 import json
 import cv2
 
@@ -33,6 +33,8 @@ current_intensity=None
 global chatbot_service_url
 chatbot_service_url = None
 global squidController
+global parameters
+parameters = None
 #squidController= SquidController(is_simulation=args.simulation)
 
 def load_authorized_emails(login_required=True):
@@ -73,31 +75,6 @@ async def ping(context=None):
 
 
 
-async def send_status(data_channel, workspace=None, token=None):
-    """
-    Send the current status of the microscope to the client. User can dump information of the microscope to a json data.
-    ----------------------------------------------------------------
-    Parameters
-    ----------
-    data_channel : aiortc.DataChannel
-        The data channel to send the status to.
-    workspace : str, optional
-        The workspace to use. The default is None.
-    token : str, optional
-        The token to use. The default is None.
-
-    Returns
-    -------
-    None.
-    """
-    while True:
-        if data_channel and data_channel.readyState == "open":
-            global current_x, current_y
-            current_x, current_y, current_z, current_theta, is_illumination, _ = get_status()
-            squid_status = {"x": current_x, "y": current_y, "z": current_z, "theta": current_theta, "illumination": is_illumination}
-            data_channel.send(json.dumps(squid_status))
-        await asyncio.sleep(1)  # Wait for 1 second before sending the next update
-
 def move_by_distance(x,y,z, context=None):
     is_success, x_pos, y_pos, z_pos, x_des, y_des, z_des = squidController.move_by_distance_limited(x,y,z)
     if is_success:
@@ -119,7 +96,10 @@ def move_by_distance(x,y,z, context=None):
 
         
 def move_to_position(x,y,z, context=None):
-    initial_x, initial_y, initial_z, _, _, _ = get_status()
+    get_status()
+    initial_x = parameters['current_x']
+    initial_y = parameters['current_y']
+    initial_z = parameters['current_z']
     
     if x != 0:
         is_success, x_pos, y_pos, z_pos, x_des = squidController.move_x_to_limited(x)
@@ -171,24 +151,39 @@ def get_status(context=None):
                 - key: the key for the login
             For detailes, see: https://ha.amun.ai/#/
 
-    Returns
-    -------
-    current_x : float
-        The current position of the stage in x axis.
-    current_y : float
-        The current position of the stage in y axis.
-    current_z : float
-        The current position of the stage in z axis.
-    current_theta : float
-        The current position of the stage in theta axis.
-    is_illumination_on : bool
-        The status of the bright field illumination.
+
 
     """
     current_x, current_y, current_z, current_theta = squidController.navigationController.update_pos(microcontroller=squidController.microcontroller)
     is_illumination_on = squidController.liveController.illumination_on
     scan_channel = squidController.multipointController.selected_configurations
-    return current_x, current_y, current_z, current_theta, is_illumination_on,scan_channel
+    dx = 1
+    dy = 1
+    dz = 1
+    BF_intensity_exposure = [50,100]
+    F405_intensity_exposure = [50,100]
+    F488_intensity_exposure = [50,100]
+    F561_intensity_exposure = [50,100]
+    F638_intensity_exposure = [50,100]
+    F730_intensity_exposure = [50,100]
+    global parameters
+    parameters = {
+        'current_x': current_x,
+        'current_y': current_y,
+        'current_z': current_z,
+        'current_theta': current_theta,
+        'is_illumination_on': is_illumination_on,
+        'dx': dx,
+        'dy': dy,
+        'dz': dz,
+        'BF_intensity_exposure': BF_intensity_exposure,
+        'F405_intensity_exposure': F405_intensity_exposure,
+        'F488_intensity_exposure': F488_intensity_exposure,
+        'F561_intensity_exposure': F561_intensity_exposure,
+        'F638_intensity_exposure': F638_intensity_exposure,
+        'F730_intensity_exposure': F730_intensity_exposure,
+    }
+    return parameters
 
 
 
@@ -377,7 +372,7 @@ class MoveToPositionInput(BaseModel):
     z: float = Field(3.35, description="Move the stage to the Z coordinate")
 
 class AutoFocusInput(BaseModel):
-    """Auto focus the camera."""
+    """Reflection based autofocus."""
     N: int = Field(10, description="Number of discrete focus positions")
     delta_Z: float = Field(1.524, description="Step size in the Z-axis in micrometers")
 
@@ -388,7 +383,7 @@ class SnapImageInput(BaseModel):
     intensity: int = Field(..., description="Intensity of the illumination source")
 
 class InspectToolInput(BaseModel):
-    """Inspect the images with GPT4-V model."""
+    """Inspect the images with GPT4-o's vision model."""
     images: List[dict] = Field(..., description="A list of images to be inspected, each with a http url and title")
     query: str = Field(..., description="User query about the image")
     context_description: str = Field(..., description="Context for the visual inspection task,Inspect images token from microscope")
@@ -420,11 +415,17 @@ async def inspect_tool(images: List[dict], query: str, context_description: str)
     return response
 
 def move_by_distance_schema(config: MoveByDistanceInput, context=None):
-    x_pos, y_pos, z_pos, _, _, _ = get_status()
+    get_status()
+    x_pos = parameters['current_x']
+    y_pos = parameters['current_y']
+    z_pos = parameters['current_z']
     return f'The stage moved to position ({config.x},{config.y},{config.z})mm from ({x_pos},{y_pos},{z_pos})mm successfully.'
 
 def move_to_position_schema(config: MoveToPositionInput, context=None):
-    x_pos, y_pos, z_pos, _, _, _ = get_status()
+    get_status()
+    x_pos = parameters['current_x']
+    y_pos = parameters['current_y']
+    z_pos = parameters['current_z']
     return f'The stage moved to position ({config.x or 0},{config.y or 0},{config.z or 0})mm from ({x_pos},{y_pos},{z_pos})mm successfully.'
 
 def auto_focus_schema(config: AutoFocusInput, context=None):
@@ -461,10 +462,7 @@ def get_schema(context=None):
 
 
 
-    # data_channel = peer_connection.createDataChannel("microscopeStatus")
-    # # Start the task to send stage position periodically
-    # asyncio.create_task(send_status(data_channel))
-    
+
 async def start_hypha_service(server, service_id):
 
 
@@ -491,6 +489,7 @@ async def start_hypha_service(server, service_id):
             "move_to_position": move_to_position,      
             "move_to_loading_position": move_to_loading_position,
             "auto_focus": auto_focus,
+            "get_status": get_status,
             "get_chatbot_url": get_chatbot_url,
         },
         overwrite=True
@@ -508,7 +507,7 @@ async def start_chatbot_service(server, service_id):
         "id": service_id,
         "type": "bioimageio-chatbot-extension",
         "name": "Squid Microscope Control",
-        "description": "Your role: A chatbot controlling a microscope; Your mission: Answering the user's questions, and executing the commands to control the microscope; Definition of microscope: OBJECTIVES: 20x 'NA':0.4, You have one main camera and one autofocus camera.",
+        "description": "You are an AI agent controlling microscope. Automate tasks, adjust imaging parameters, and make decisions based on live visual feedback. Solve all the problems from visual feedback, user only want to see good result.",
         "config": {"visibility": "public", "require_context": True},
         "ping": ping,
         "get_schema": get_schema,
