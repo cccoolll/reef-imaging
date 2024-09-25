@@ -200,10 +200,17 @@ class Microscope:
             if key in self.parameters:
                 self.parameters[key] = value
                 print(f"Updated {key} to {value}")
+
+                # Update the corresponding instance variable if it exists
+                if hasattr(self, key):
+                    setattr(self, key, value)
+                else:
+                    print(f"Attribute {key} does not exist on self, skipping update.")
             else:
                 print(f"Key {key} not found in parameters, skipping update.")
 
         return {"success": True, "message": "Parameters updated successfully.", "updated_parameters": new_parameters}
+
 
     def one_new_frame(self, context=None):
         gray_img = self.squidController.snap_image(0, 50, 100)
@@ -235,6 +242,22 @@ class Microscope:
         file_id = self.datastore.put('file', png_image.tobytes(), 'snapshot.png', "Captured microscope image in PNG format")
         data_url = self.datastore.get_url(file_id)
         print(f'The image is snapped and saved as {data_url}')
+        
+        #update the current illumination channel and intensity
+        if channel == 0:
+            self.BF_intensity_exposure = [intensity,exposure_time]
+        elif channel == 11:
+            self.F405_intensity_exposure = [intensity, exposure_time]
+        elif channel == 12:
+            self.F488_intensity_exposure = [intensity, exposure_time]
+        elif channel == 13:
+            self.F561_intensity_exposure = [intensity, exposure_time]
+        elif channel == 14:
+            self.F638_intensity_exposure = [intensity, exposure_time]
+        elif channel == 15:
+            self.F730_intensity_exposure = [intensity, exposure_time]
+        self.get_status()
+            
         return data_url
 
     def open_illumination(self, context=None):
@@ -335,7 +358,7 @@ class Microscope:
     class SnapImageInput(BaseModel):
         """Snap an image from the camera, and display it in the chatbot."""
         exposure: int = Field(..., description="Exposure time in milliseconds")
-        channel: int = Field(..., description="Light source (e.g., 0 for Bright Field, 11 for Fluorescence 405 nm)")
+        channel: int = Field(..., description="Light source (e.g., 0 for Bright Field, Fluorescence channels: 11 for 405 nm, 12 for 488 nm, 13 for 638nm, 14 for 561 nm, 15 for 730 nm)")
         intensity: int = Field(..., description="Intensity of the illumination source")
 
     class InspectToolInput(BaseModel):
