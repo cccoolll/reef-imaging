@@ -7,7 +7,7 @@ import fractions
 from functools import partial
 import traceback
 import numpy as np
-from imjoy_rpc.hypha import login, connect_to_server, register_rtc_service
+from hypha_rpc import login, connect_to_server, register_rtc_service
 import json
 import cv2
 
@@ -65,7 +65,7 @@ class Microscope:
         self.authorized_emails = self.load_authorized_emails(self.login_required)
         print(f"Authorized emails: {self.authorized_emails}")
         self.datastore = None
-        self.server_url = "https://ai.imjoy.io"
+        self.server_url = "https://hypha.aicell.io/"
 
     def load_authorized_emails(self, login_required=True):
         if login_required:
@@ -468,7 +468,6 @@ class Microscope:
                 "update_parameters_from_client": self.update_parameters_from_client,
                 "get_chatbot_url": self.get_chatbot_url,
             },
-            overwrite=True
         )
 
         print(
@@ -498,7 +497,7 @@ class Microscope:
             }
         }
 
-        svc = await server.register_service(chatbot_extension, overwrite=True)
+        svc = await server.register_service(chatbot_extension)
         self.chatbot_service_url = f"https://bioimage.io/chat?server=https://chat.bioimage.io&extension={svc.id}&assistant=Skyler"
         print(f"Extension service registered with id: {svc.id}, you can visit the service at:\n {self.chatbot_service_url}")
 
