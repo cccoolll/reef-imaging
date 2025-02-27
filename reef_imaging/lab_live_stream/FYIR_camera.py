@@ -6,54 +6,79 @@ import uvicorn
 import numpy as np
 from fastapi import FastAPI, Request
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from threading import Thread, Event
 
 # Get the absolute path to the directory where the script is located
 base_dir = os.path.dirname(os.path.abspath(__file__))
 
 app = FastAPI()
 templates = Jinja2Templates(directory=os.path.join(base_dir, "templates"))
+app.mount("/static", StaticFiles(directory=os.path.join(base_dir, "static")), name="static")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 
 # Camera Index for FYIR Infrared Camera
+camera = cv2.VideoCapture("/dev/video0")
+
+recording_event = Event()
+recording_thread = None
+frame_bytes = None
+
 def gen_frames():
-    camera = cv2.VideoCapture("/dev/video0")
+    global frame_bytes
+    while True:
+        success, frame = camera.read()
+        if not success:
+            logging.error("Failed to capture image")
+            frame_bytes = None  # Clear frame_bytes on error
+            break
+        else:
+            # Convert to grayscale (infrared cameras often work best in grayscale)
+            gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-    
-    if not camera.isOpened():
-        logging.error(f"Failed to open the infrared camera")
-        return
-
-    try:
-        while True:
-            success, frame = camera.read()
-            if not success:
-                logging.error("Failed to capture image")
+            # Compress the image by adjusting the JPEG quality
+            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50]  # Adjust quality as needed (0-100)
+            ret, buffer = cv2.imencode('.jpg', gray_frame, encode_param)
+            if not ret:
+                logging.error("Failed to encode image")
+                frame_bytes = None  # Clear frame_bytes on error
                 break
+
+            frame_bytes = buffer.tobytes()
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+
+        time.sleep(0.1)  # Reduce CPU load
+
+def record_time_lapse():
+    global frame_bytes
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(os.path.join(base_dir, "static", "time_lapse.mp4"), fourcc, 24, (640, 480))
+
+    start_time = time.time()
+    duration = 12 * 60 * 60  # 12 hours
+    interval = 1 / 24 * 240  # 240x speed up
+
+    while time.time() - start_time < duration:
+        if recording_event.is_set():
+            if frame_bytes:
+                frame = cv2.imdecode(np.frombuffer(frame_bytes, np.uint8), cv2.IMREAD_COLOR)
+                out.write(frame)
             else:
-                # Convert to grayscale (infrared cameras often work best in grayscale)
-                gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                camera.open("/dev/video0")
+                success, frame = camera.read()
+                if success:
+                    out.write(frame)
+                camera.release()
+            time.sleep(interval)
+        else:
+            break
 
-                # Increase brightness if needed
-                #bright_frame = cv2.convertScaleAbs(gray_frame, alpha=2, beta=50)  # Adjust alpha/beta as needed
-
-                # Compress the image by adjusting the JPEG quality
-                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50]  # Adjust quality as needed (0-100)
-                ret, buffer = cv2.imencode('.jpg', gray_frame, encode_param)
-                if not ret:
-                    logging.error("Failed to encode image")
-                    break
-
-                frame_bytes = buffer.tobytes()
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-
-            time.sleep(0.1)  # Reduce CPU load
-    finally:
-        camera.release()
-        logging.info("Infrared camera resource released")
+    out.release()
+    logging.info("Time-lapse recording finished")
 
 @app.get('/')
 def index(request: Request):
@@ -69,6 +94,24 @@ async def video_feed(request: Request):
             yield frame
     
     return StreamingResponse(generator(), media_type='multipart/x-mixed-replace; boundary=frame')
+
+@app.post('/start_time_lapse')
+async def start_time_lapse(request: Request):
+    global recording_thread
+    if recording_event.is_set():
+        return JSONResponse(content={"message": "Recording in progress"}, status_code=400)
+    else:
+        recording_event.set()
+        recording_thread = Thread(target=record_time_lapse)
+        recording_thread.start()
+        return JSONResponse(content={"message": "Time-lapse recording started"}, status_code=200)
+
+@app.post('/stop_time_lapse')
+async def stop_time_lapse(request: Request):
+    recording_event.clear()
+    if recording_thread:
+        recording_thread.join()
+    return JSONResponse(content={"message": "Time-lapse recording stopped"}, status_code=200)
 
 if __name__ == '__main__':
     uvicorn.run(app, host='0.0.0.0', port=8002)  # Running on a different port
