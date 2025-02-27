@@ -26,11 +26,6 @@ def gen_frames():
         logging.error(f"Failed to open the infrared camera")
         return
 
-    # Set manual exposure (adjust based on your environment)
-    # camera.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)  # 0.25 for manual mode
-    # camera.set(cv2.CAP_PROP_EXPOSURE, -5)  # Adjust between -13 (dark) to -1 (bright)
-    # camera.set(cv2.CAP_PROP_GAIN, 10)  # Increase gain if too dark
-
     try:
         while True:
             success, frame = camera.read()
@@ -55,7 +50,7 @@ def gen_frames():
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
-            time.sleep(0.03)  # Reduce CPU load
+            time.sleep(0.1)  # Reduce CPU load
     finally:
         camera.release()
         logging.info("Infrared camera resource released")
