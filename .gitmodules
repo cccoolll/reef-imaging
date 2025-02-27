@@ -1,7 +1,3 @@
 [submodule "reef_imaging/control/squid_microscope/squid-control"]
 	path = reef_imaging/control/squid_microscope/squid-control
 	url = https://github.com/cccoolll/squid-control.git
-
-[submodule "reef_imaging/agent-lens"]
-	path = reef_imaging/agent-lens
-	url = https://github.com/cccoolll/agent-lens.git
