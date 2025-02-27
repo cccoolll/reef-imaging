@@ -39,7 +39,7 @@ def gen_frames():
                 frame = buffer.tobytes()
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-            time.sleep(0.03)
+            time.sleep(0.33)
     finally:
         camera.release()
         logging.info("Webcam resource released")

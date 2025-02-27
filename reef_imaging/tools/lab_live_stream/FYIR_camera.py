@@ -44,7 +44,9 @@ def gen_frames():
                 # Increase brightness if needed
                 #bright_frame = cv2.convertScaleAbs(gray_frame, alpha=2, beta=50)  # Adjust alpha/beta as needed
 
-                ret, buffer = cv2.imencode('.jpg', gray_frame)
+                # Compress the image by adjusting the JPEG quality
+                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50]  # Adjust quality as needed (0-100)
+                ret, buffer = cv2.imencode('.jpg', gray_frame, encode_param)
                 if not ret:
                     logging.error("Failed to encode image")
                     break
