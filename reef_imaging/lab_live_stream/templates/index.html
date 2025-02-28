@@ -4,6 +4,25 @@
         <div class="container">
             <h3> Live Streaming </h3>
             <img src="{{ url_for('video_feed') }}" width="50%">
+            <button onclick="startTimeLapse()">Start Time-Lapse Recording</button>
+            <button onclick="stopTimeLapse()">Stop Time-Lapse Recording</button>
         </div>
+        <script>
+            function startTimeLapse() {
+                if (confirm("Are you sure you want to start time-lapse recording?")) {
+                    fetch('/start_time_lapse', { method: 'POST' })
+                        .then(response => response.json())
+                        .then(data => alert(data.message))
+                        .catch(error => console.error('Error:', error));
+                }
+            }
+
+            function stopTimeLapse() {
+                fetch('/stop_time_lapse', { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => alert(data.message))
+                    .catch(error => console.error('Error:', error));
+            }
+        </script>
     </body>
 </html>

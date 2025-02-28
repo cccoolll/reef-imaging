@@ -65,8 +65,8 @@ def record_time_lapse():
     out = cv2.VideoWriter(os.path.join(base_dir, "static", filename), fourcc, 24, (640, 480))
 
     start_time = time.time()
-    duration = 12 * 60 * 60  # 12 hours
-    interval = 1 / 24 * 120  # 240x speed up
+    duration = 1 * 60 * 60  # 1 hour
+    interval = 1 / 24 * 60  # 60x speed up
 
     while time.time() - start_time < duration:
         if recording_event.is_set():
