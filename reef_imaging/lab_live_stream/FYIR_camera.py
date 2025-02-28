@@ -39,6 +39,10 @@ def gen_frames():
             # Convert to grayscale (infrared cameras often work best in grayscale)
             gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
+            # Add timestamp to the frame
+            timestamp = time.strftime('%H:%M', time.localtime())
+            cv2.putText(gray_frame, timestamp, (gray_frame.shape[1] - 100, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+
             # Compress the image by adjusting the JPEG quality
             encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50]  # Adjust quality as needed (0-100)
             ret, buffer = cv2.imencode('.jpg', gray_frame, encode_param)
@@ -56,7 +60,9 @@ def gen_frames():
 def record_time_lapse():
     global frame_bytes
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(os.path.join(base_dir, "static", "time_lapse.mp4"), fourcc, 24, (640, 480))
+    timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime())
+    filename = f"time_lapse_{timestamp}.mp4"
+    out = cv2.VideoWriter(os.path.join(base_dir, "static", filename), fourcc, 24, (640, 480))
 
     start_time = time.time()
     duration = 12 * 60 * 60  # 12 hours
@@ -70,6 +76,18 @@ def record_time_lapse():
             else:
                 camera.open("/dev/video0")
                 success, frame = camera.read()
+                #compress the image by adjusting the JPEG quality
+                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50]
+                ret, buffer = cv2.imencode('.jpg', frame, encode_param)
+                if not ret:
+                    logging.error("Failed to encode image")
+                    break
+                frame_bytes = buffer.tobytes()
+                frame = cv2.imdecode(np.frombuffer(frame_bytes, np.uint8), cv2.IMREAD_COLOR)
+                #add timestamp to the frame
+                timestamp = time.strftime('%H:%M', time.localtime())
+                cv2.putText(frame, timestamp, (frame.shape[1] - 100, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+
                 if success:
                     out.write(frame)
                 camera.release()
@@ -86,10 +104,12 @@ def index(request: Request):
 
 @app.get('/video_feed')
 async def video_feed(request: Request):
+    global frame_bytes
     async def generator():
         for frame in gen_frames():
             if await request.is_disconnected():
                 logging.info("Client disconnected, stopping the generator")
+                frame_bytes = None
                 break
             yield frame
     
