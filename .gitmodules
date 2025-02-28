@@ -1,3 +1,7 @@
 [submodule "reef_imaging/control/squid-control"]
 	path = reef_imaging/control/squid-control
 	url = https://github.com/cccoolll/squid-control.git
+
+[submodule "reef_imaging/control/cytomat-control"]
+    path = reef_imaging/control/cytomat-control
+    url = https://github.com/aicell-lab/cytomat-control.git
