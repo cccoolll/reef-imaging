@@ -5,3 +5,7 @@
 [submodule "reef_imaging/control/cytomat-control"]
 	path = reef_imaging/control/cytomat-control
 	url = git@github.com:aicell-lab/cytomat-control.git
+
+[submodule "reef_imaging/control/dorna-control"]
+	path = reef_imaging/control/dorna-control
+	url = git@github.com:aicell-lab/dorna-control.git
