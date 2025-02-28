@@ -66,7 +66,7 @@ def record_time_lapse():
 
     start_time = time.time()
     duration = 12 * 60 * 60  # 12 hours
-    interval = 1 / 24 * 240  # 240x speed up
+    interval = 1 / 24 * 120  # 240x speed up
 
     while time.time() - start_time < duration:
         if recording_event.is_set():
