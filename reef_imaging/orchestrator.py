@@ -7,7 +7,7 @@ import json
 server_url = "http://192.168.2.1:9527"
 
 # Load sample configurations from JSON file
-with open('sample_config.json', 'r') as file:
+with open('config.json', 'r') as file:
     config = json.load(file)
 
 # number of samples
@@ -49,7 +49,6 @@ def perform_scanning_round(microscope):
 def run_time_lapse_workflow(num_rounds, delta_t):
     
     # Initial user-triggered start
-    load_sample_configurations()
     start_time = time.time()
     print(f"Starting time-lapse workflow at {start_time}...")
     for round_number in range(1, num_rounds + 1):
@@ -57,8 +56,8 @@ def run_time_lapse_workflow(num_rounds, delta_t):
         
         # Step 1: put sample from incubator to microscope
         print("Moving sample from incubator to microscope...")
-        incubator.get_sample_from_slot_to_transfer_station()
-        robotic_arm.move_plate("incubator", "microscope")
+        #incubator.get_sample_from_slot_to_transfer_station()
+        #robotic_arm.move_sample_from_incubator_to_microscope()
         print("Sample moved to microscope.")
 
         # Step 2: Scan on microscope
@@ -66,9 +65,9 @@ def run_time_lapse_workflow(num_rounds, delta_t):
 
         # Step 3: put sample from microscope to incubator
         print("Moving sample from microscope to incubator...")
-        robotic_arm.move_plate("microscope", "incubator")
+        #robotic_arm.move_sample_from_microscope_to_incubator()
         print("Sample moved to incubator.")
-        incubator.put_sample_from_transfer_station_to_slot()
+        #incubator.put_sample_from_transfer_station_to_slot()
         print("Sample moved to incubator.")
 
         # Step 4: Wait for next round
