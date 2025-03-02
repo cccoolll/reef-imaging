@@ -38,14 +38,15 @@ def gen_frames():
         else:
             # Convert to grayscale (infrared cameras often work best in grayscale)
             gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
+            # rotate 180 degrees
+            gray_frame = cv2.rotate(gray_frame, cv2.ROTATE_180)
             # Add timestamp to the frame
             timestamp = time.strftime('%H:%M', time.localtime())
             cv2.putText(gray_frame, timestamp, (gray_frame.shape[1] - 100, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
 
             # Compress the image by adjusting the JPEG quality
-            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50]  # Adjust quality as needed (0-100)
-            ret, buffer = cv2.imencode('.jpg', gray_frame, encode_param)
+            #encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50]  # Adjust quality as needed (0-100)
+            ret, buffer = cv2.imencode('.jpg', gray_frame) #, encode_param)
             if not ret:
                 logging.error("Failed to encode image")
                 frame_bytes = None  # Clear frame_bytes on error

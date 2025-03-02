@@ -1,0 +1,31 @@
+{
+    "samples": [
+        {
+            "name": "Sample1",
+            "settings": {
+                "incubator_slot": 3
+            }
+        }
+    ],
+    "microscopes": [
+        {
+            "name": "Microscope1",
+            "settings": {
+                "id": "ws-user-observant-script-70898079/WV7iXphJ9kpv3rAv8Apzxf:microscope-control-squid-simulation0_local",
+                "objective": "20x"
+            }
+        }
+    ],
+    "incubator": {
+        "name": "cytomat",
+        "settings": {
+            "id": "ws-user-pine-bumper-79360175/izm2rHYVhXeUqPDcateLHt:incubator-control"
+        }
+    },
+    "robotic_arm": {
+        "name": "robotic_arm",
+        "settings": {
+            "id": "ws-user-colossal-lumber-15488791/CP9NFE2bXyVSFsvQm2y8Aa:robotic-arm-control"
+        }
+    }
+}
