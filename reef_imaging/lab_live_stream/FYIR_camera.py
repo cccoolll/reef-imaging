@@ -39,9 +39,9 @@ def gen_frames():
             # Convert to grayscale (infrared cameras often work best in grayscale)
             gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-            # Add timestamp to the frame
-            timestamp = time.strftime('%H:%M', time.localtime())
-            cv2.putText(gray_frame, timestamp, (gray_frame.shape[1] - 100, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+            # Add date and time timestamp to the frame
+            timestamp = time.strftime('%Y-%m-%d %H:%M', time.localtime())
+            cv2.putText(gray_frame, timestamp, (gray_frame.shape[1] - 330, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
 
             # Compress the image by adjusting the JPEG quality
             encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50]  # Adjust quality as needed (0-100)
