@@ -4,8 +4,35 @@ from dorna_controller import *
 
 robotic_arm = DornaController()
 async def start_server(server_url):
-    server = await connect_to_server({"server_url": server_url})
+    server = await connect_to_server({"server_url": server_url,"method_timeout": 350})
 
+    def move_sample_from_microscope1_to_incubator():
+        robotic_arm.set_motor(1)
+        robotic_arm.move_sample_from_microscope1_to_incubator()
+        print("Sample moved from microscope1 to incubator")
+    
+    def move_sample_from_incubator_to_microscope1():
+        robotic_arm.set_motor(1)
+        robotic_arm.move_sample_from_incubator_to_microscope1()
+        print("Sample moved from incubator to microscope1")
+    
+    def move_plate(source, destination):
+        robotic_arm.move_plate(source, destination)
+    
+    def is_busy():
+        print("Checking if robotic arm is busy")
+        return robotic_arm.is_busy()
+    
+    def connect():
+        robotic_arm.connect()
+
+    def disconnect():
+        robotic_arm.disconnect()
+        
+    
+    def halt():
+        print("Halting robotic arm")
+        robotic_arm.halt()
     
 
     svc = await server.register_service({
@@ -14,13 +41,13 @@ async def start_server(server_url):
         "config": {
             "visibility": "public"
         },
-        "methods": {
-            "move_sample_from_microscope1_to_incubator": robotic_arm.move_sample_from_microscope1_to_incubator,
-            "move_sample_from_incubator_to_microscope1": robotic_arm.move_sample_from_incubator_to_microscope1,
-            "move_plate": robotic_arm.move_plate,
-            "is_busy": robotic_arm.is_busy
-
-        }
+        "move_sample_from_microscope1_to_incubator": move_sample_from_microscope1_to_incubator,
+        "move_sample_from_incubator_to_microscope1": move_sample_from_incubator_to_microscope1,
+        "move_plate": move_plate,
+        "is_busy": is_busy,
+        "connect": connect,
+        "disconnect": disconnect,
+        "halt": halt,
     })
 
     print(f"Incubator control service registered at workspace: {server.config.workspace}, id: {svc.id}")

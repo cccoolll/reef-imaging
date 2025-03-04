@@ -1,7 +1,6 @@
 # Description: Orchestrates the time-lapse imaging workflow by coordinating the control of multiple devices.
 import time
 from hypha_rpc.sync import connect_to_server
-import logging
 import json
 
 class TimeLapseOrchestrator:
@@ -23,42 +22,56 @@ class TimeLapseOrchestrator:
         self.robotic_arm_id = self.config['robotic_arm']['settings']['id']
         self.microscope_id = self.config['microscopes'][0]['settings']['id']
 
-        self.server = connect_to_server({"server_url": self.server_url})
+        self.server = connect_to_server({"server_url": self.server_url,"method_timeout": 350})
         self.incubator = self.server.get_service(self.incubator_id)
-        logging.info(f"Cytomat service connected: {self.incubator}")
+        print(f"Cytomat service connected: {self.incubator}")
         self.robotic_arm = self.server.get_service(self.robotic_arm_id)
-        logging.info(f"Dorna service connected: {self.robotic_arm}")
+        print(f"Dorna service connected: {self.robotic_arm}")
         self.microscope = self.server.get_service(self.microscope_id)
-        logging.info(f"Microscope service connected: {self.microscope}")
+        print(f"Microscope service connected: {self.microscope}")
     
     def transport_sample_from_incubator_to_microscope(self, incubator_slot=3, microscope=1):
+        self.robotic_arm.connect()
         # Move sample from incubator to microscope
-        self.incubator.move_sample_to_transfer_station(incubator_slot)
+        self.incubator.get_sample_from_slot_to_transfer_station(incubator_slot)
+        print("Sample moved to transfer station.")
         while self.incubator.is_busy():
             time.sleep(1)
         self.microscope.home_stage()
+        print("microscope homed.")
         if microscope == 1:
             self.robotic_arm.move_sample_from_incubator_to_microscope1()
+            time.sleep(200)
         else:
             print("Invalid microscope number.")
             return
-        while self.robotic_arm.is_busy():
-            time.sleep(1)
+        print("Sample moved to microscope.")
         self.microscope.return_stage()
+        print("microscope returned.")
+
+        self.robotic_arm.disconnect()
     
     def transport_sample_from_microscope_to_incubator(self, microscope=1,incubator_slot=3):
+
+        self.robotic_arm.connect()
         # Move sample from microscope to incubator
         self.microscope.home_stage()
+        print("microscope homed.")
         if microscope == 1:
             self.robotic_arm.move_sample_from_microscope1_to_incubator()
         else:
             print("Invalid microscope number.")
             return
-        while self.robotic_arm.is_busy():
-            time.sleep(1)
-        self.incubator.move_sample_to_slot(incubator_slot)
+        
+        print("Sample moved from microscope1 to incubator")
+
+        self.incubator.put_sample_from_transfer_station_to_slot(incubator_slot)
         while self.incubator.is_busy():
             time.sleep(1)
+        print("Sample moved to incubator.")
+        self.microscope.return_stage()
+
+        self.robotic_arm.disconnect()
 
     def perform_scanning_round(self):
         # Trigger the microscope to perform one scanning round.
@@ -80,8 +93,8 @@ class TimeLapseOrchestrator:
 
             # Step 1: put sample from incubator to microscope
             print("Moving sample from incubator to microscope...")
-            # self.incubator.get_sample_from_slot_to_transfer_station()
-            # self.robotic_arm.move_sample_from_incubator_to_microscope1()
+            self.incubator.get_sample_from_slot_to_transfer_station()
+            self.robotic_arm.move_sample_from_incubator_to_microscope1()
             print("Sample moved to microscope.")
 
             # Step 2: Scan on microscope
@@ -89,9 +102,9 @@ class TimeLapseOrchestrator:
 
             # Step 3: put sample from microscope to incubator
             print("Moving sample from microscope to incubator...")
-            # self.robotic_arm.move_sample_from_microscope1_to_incubator()
+            self.robotic_arm.move_sample_from_microscope1_to_incubator()
             print("Sample moved to incubator.")
-            # self.incubator.put_sample_from_transfer_station_to_slot()
+            self.incubator.put_sample_from_transfer_station_to_slot()
             print("Sample moved to incubator.")
 
             # Step 4: Wait for next round
@@ -107,3 +120,4 @@ if __name__ == "__main__":
 
     orchestrator = TimeLapseOrchestrator()
     #orchestrator.run_time_lapse_workflow(NUM_ROUNDS, DELTA_T)
+    orchestrator.transport_sample_from_microscope_to_incubator()

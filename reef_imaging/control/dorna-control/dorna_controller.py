@@ -17,33 +17,34 @@ class DornaController:
     def set_motor(self, state):
         self.robot.set_motor(state)
 
-    def play_script(self, script_path, timeout=160):
+    def play_script(self, script_path):
         print("Playing script")
-        self.robot.play_script(script_path, timeout=timeout)
+        self.robot.play_script(script_path)
 
     def is_busy(self):
         status = self.robot.track_cmd()
         print(f"Robot status: {status}")
         return status["union"].get("stat", -1) != 2
 
-    def move_sample_from_microscope1_to_incubator(self, timeout=160):
-        self.connect()
+    def move_sample_from_microscope1_to_incubator(self):
         self.set_motor(1)
         self.play_script("paths/microscope1_to_incubator.txt")
 
-    def move_sample_from_incubator_to_microscope1(self, timeout=160):
-        self.connect()
+    def move_sample_from_incubator_to_microscope1(self):
         self.set_motor(1)
         self.play_script("paths/incubator_to_microscope1.txt")
-        self.disconnect()
 
-    def move_plate(self, source, destination, timeout=160):
+    def move_plate(self, source, destination):
         if source == "microscope" and destination == "incubator":
             self.move_sample_from_microscope1_to_incubator()
         elif source == "incubator" and destination == "microscope1":
             self.move_sample_from_incubator_to_microscope1()
         else:
             print(f"Invalid source-destination combination: {source} to {destination}")
+    
+    def halt(self):
+        self.robot.halt()
+        print("Robot halted")
 
 if __name__ == "__main__":
     controller = DornaController()
@@ -51,4 +52,5 @@ if __name__ == "__main__":
     controller.connect()
     #move_plate(controller, "microscope1", "incubator")
     print("Is robot busy?", controller.is_busy())
+    controller.halt()
     controller.disconnect()
