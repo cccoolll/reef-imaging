@@ -3,7 +3,7 @@ from hypha_rpc import connect_to_server, login
 from cytomat import Cytomat
 
 async def start_server(server_url):
-    server = await connect_to_server({"server_url": server_url})
+    server = await connect_to_server({"server_url": server_url,"method_timeout": 90})
     
     def initialize():
         c = Cytomat("/dev/ttyUSB0", json_path="/home/tao/workspace/cytomat-controller/docs/config.json")
