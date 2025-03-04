@@ -85,8 +85,8 @@ def record_time_lapse():
                 frame_bytes = buffer.tobytes()
                 frame = cv2.imdecode(np.frombuffer(frame_bytes, np.uint8), cv2.IMREAD_COLOR)
                 #add timestamp to the frame
-                timestamp = time.strftime('%H:%M', time.localtime())
-                cv2.putText(frame, timestamp, (frame.shape[1] - 100, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+                timestamp = time.strftime('%Y-%m-%d %H:%M', time.localtime())
+                cv2.putText(frame, timestamp, (frame.shape[1] - 330, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
 
                 if success:
                     out.write(frame)
