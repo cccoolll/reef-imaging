@@ -1,6 +1,8 @@
 import asyncio
 from hypha_rpc import connect_to_server
-from dorna_controller_local import move_sample_from_microscope_to_incubator, move_sample_from_incubator_to_microscope, move_plate
+from dorna_controller import *
+
+robotic_arm = DornaController()
 async def start_server(server_url):
     server = await connect_to_server({"server_url": server_url})
 
@@ -13,9 +15,10 @@ async def start_server(server_url):
             "visibility": "public"
         },
         "methods": {
-            "move_sample_from_microscope_to_incubator": move_sample_from_microscope_to_incubator,
-            "move_sample_from_incubator_to_microscope": move_sample_from_incubator_to_microscope,
-            "move_plate": move_plate
+            "move_sample_from_microscope1_to_incubator": robotic_arm.move_sample_from_microscope1_to_incubator,
+            "move_sample_from_incubator_to_microscope1": robotic_arm.move_sample_from_incubator_to_microscope1,
+            "move_plate": robotic_arm.move_plate,
+            "is_busy": robotic_arm.is_busy
 
         }
     })

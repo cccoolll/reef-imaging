@@ -18,7 +18,7 @@ class TimeLapseOrchestrator:
         self.num_microscopes = len(self.config['microscopes'])
         print(f"Available microscopes: {self.num_microscopes}")
 
-        self.server_url = "http://192.168.2.1:9527"
+        self.server_url = "http://reef.dyn.scilifelab.se:9527"
         self.incubator_id = self.config['incubator']['settings']['id']
         self.robotic_arm_id = self.config['robotic_arm']['settings']['id']
         self.microscope_id = self.config['microscopes'][0]['settings']['id']
@@ -30,42 +30,15 @@ class TimeLapseOrchestrator:
         logging.info(f"Dorna service connected: {self.robotic_arm}")
         self.microscope = self.server.get_service(self.microscope_id)
         logging.info(f"Microscope service connected: {self.microscope}")
-    
-    def transport_sample_from_incubator_to_microscope(self, incubator_slot=3, microscope=1):
-        # Move sample from incubator to microscope
-        self.incubator.move_sample_to_transfer_station(incubator_slot)
-        while self.incubator.is_busy():
-            time.sleep(1)
-        self.microscope.home_stage()
-        if microscope == 1:
-            self.robotic_arm.move_sample_from_incubator_to_microscope1()
-        else:
-            print("Invalid microscope number.")
-            return
-        while self.robotic_arm.is_busy():
-            time.sleep(1)
-        self.microscope.return_stage()
-    
-    def transport_sample_from_microscope_to_incubator(self, microscope=1,incubator_slot=3):
-        # Move sample from microscope to incubator
-        self.microscope.home_stage()
-        if microscope == 1:
-            self.robotic_arm.move_sample_from_microscope1_to_incubator()
-        else:
-            print("Invalid microscope number.")
-            return
-        while self.robotic_arm.is_busy():
-            time.sleep(1)
-        self.incubator.move_sample_to_slot(incubator_slot)
-        while self.incubator.is_busy():
-            time.sleep(1)
 
-    def perform_scanning_round(self):
+    def perform_scanning_round(self,do_reflection_af):
         # Trigger the microscope to perform one scanning round.
         print("Starting microscope scanning...")
-        self.microscope.scan_well_plate()  # API call to start scanning
+        self.microscope.scan_well_plate(do_reflection_af=do_reflection_af)  # API call to start scanning
         # Optionally, wait/poll until scanning is done.
         microscope_status = self.microscope.get_status()
+        print("Waiting for microscope to finish scanning...")
+        print(microscope_status)
         while microscope_status["is_busy"]:
             microscope_status = self.microscope.get_status()
             time.sleep(3)  # Polling delay
@@ -78,20 +51,12 @@ class TimeLapseOrchestrator:
         for round_number in range(1, num_rounds + 1):
             print(f"\n--- Round {round_number} ---")
 
-            # Step 1: put sample from incubator to microscope
-            print("Moving sample from incubator to microscope...")
-            # self.incubator.get_sample_from_slot_to_transfer_station()
-            # self.robotic_arm.move_sample_from_incubator_to_microscope1()
-            print("Sample moved to microscope.")
 
-            # Step 2: Scan on microscope
-            self.perform_scanning_round()
-
-            # Step 3: put sample from microscope to incubator
+            #  put sample from microscope to incubator
             print("Moving sample from microscope to incubator...")
-            # self.robotic_arm.move_sample_from_microscope1_to_incubator()
+            self.robotic_arm.move_sample_from_microscope_to_incubator()
             print("Sample moved to incubator.")
-            # self.incubator.put_sample_from_transfer_station_to_slot()
+            self.incubator.put_sample_from_transfer_station_to_slot()
             print("Sample moved to incubator.")
 
             # Step 4: Wait for next round
@@ -102,8 +67,8 @@ class TimeLapseOrchestrator:
 
 if __name__ == "__main__":
     # Parameters could be loaded from a config file or passed as arguments
-    NUM_ROUNDS = 5  # Total number of time-lapse rounds
-    DELTA_T = 1800  # Wait time (in seconds) between rounds
+    NUM_ROUNDS = 1  # Total number of time-lapse rounds
+    DELTA_T = 18  # Wait time (in seconds) between rounds
 
     orchestrator = TimeLapseOrchestrator()
-    #orchestrator.run_time_lapse_workflow(NUM_ROUNDS, DELTA_T)
+    orchestrator.run_time_lapse_workflow(NUM_ROUNDS, DELTA_T)
