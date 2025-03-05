@@ -1,0 +1,137 @@
+import asyncio
+import time
+import base64
+from IPython.display import Image, display
+from hypha_rpc import connect_to_server, login
+import os
+import dotenv
+
+dotenv.load_dotenv()
+ENV_FILE = dotenv.find_dotenv()
+if ENV_FILE:
+    dotenv.load_dotenv(ENV_FILE)
+
+server_url = "https://hypha.aicell.io"
+
+reef_token = os.environ.get("REEF_WORKSPACE_TOKEN")
+squid_token = os.environ.get("SQUID_WORKSPACE_TOKEN")
+
+# Global variables for the services and state
+incubator = None
+microscope = None
+robotic_arm = None
+sample_loaded = False
+
+async def setup_connections():
+    global reef_token, squid_token, incubator, microscope, robotic_arm
+    if not reef_token or not squid_token:
+        token = await login({"server_url": server_url})
+        reef_token = token
+        squid_token = token
+
+    reef_server = await connect_to_server({
+        "server_url": server_url,
+        "token": reef_token,
+        "workspace": "reef-imaging",
+        "ping_interval": None
+    })
+    squid_server = await connect_to_server({
+        "server_url": server_url,
+        "token": squid_token,
+        "workspace": "squid-control",
+        "ping_interval": None
+    })
+
+    incubator_id = "incubator-control"
+    microscope_id = "microscope-control-squid-real-microscope-reef"
+    robotic_arm_id = "robotic-arm-control"
+
+    incubator = await reef_server.get_service(incubator_id)
+    microscope = await squid_server.get_service(microscope_id)
+    robotic_arm = await reef_server.get_service(robotic_arm_id)
+    print('Connected to devices.')
+    return incubator, microscope, robotic_arm
+
+async def check_sample_loaded():
+    global sample_loaded
+    if sample_loaded:
+        print("Sample plate has already been loaded onto the microscope")
+    else:
+        print("Sample plate is not loaded yet")
+    return sample_loaded
+
+async def load_plate_from_incubator_to_microscope(incubator_slot=33):
+    global sample_loaded, incubator, microscope, robotic_arm
+    assert not sample_loaded, "Sample plate has already been loaded"
+    await incubator.get_sample_from_slot_to_transfer_station(incubator_slot)
+    while await incubator.is_busy():
+        await asyncio.sleep(1)
+    await microscope.home_stage()
+    print("Plate loaded onto station.")
+    await robotic_arm.connect()
+    print("Robotic arm connected.")
+    await robotic_arm.grab_sample_from_incubator()
+    print("Sample grabbed.")
+    await robotic_arm.transport_from_incubator_to_microscope1()
+    print("Sample transported.")
+    await robotic_arm.put_sample_on_microscope1()
+    print("Sample placed on microscope.")
+    await robotic_arm.disconnect()
+    print("Robotic arm disconnected.")
+    await microscope.return_stage()
+    print("Sample plate successfully loaded onto microscope stage.")
+    sample_loaded = True
+
+async def unload_plate_from_microscope(incubator_slot=33):
+    global sample_loaded, incubator, microscope, robotic_arm
+    assert sample_loaded, "Sample plate is not on the microscope"
+    await robotic_arm.connect()
+    await microscope.home_stage()
+    print("Microscope homed.")
+    await robotic_arm.grab_sample_from_microscope1()
+    print("Sample grabbed from microscope.")
+    await robotic_arm.transport_from_microscope1_to_incubator()
+    print("Sample moved to incubator.")
+    await robotic_arm.put_sample_on_incubator()
+    print("Sample placed on incubator.")
+    await incubator.put_sample_from_transfer_station_to_slot(incubator_slot)
+    while await incubator.is_busy():
+        await asyncio.sleep(1)
+    print("Sample moved to incubator.")
+    await microscope.return_stage()
+    await robotic_arm.disconnect()
+    print("Sample successfully unloaded from the microscopy stage.")
+    sample_loaded = False
+
+async def run_cycle():
+    """Run the complete load-scan-unload process."""
+    try:
+        await load_plate_from_incubator_to_microscope(incubator_slot=33)
+        await microscope.scan_well_plate(
+            do_reflection_af=True,
+            scanning_zone=[(0, 0), (7, 11)],
+            action_ID='testPlateScan'
+        )
+        await unload_plate_from_microscope(incubator_slot=33)
+    except Exception as e:
+        print(f"Error during cycle: {e}")
+
+async def run_every_hour():
+    """Run the cycle every hour (3600 seconds)."""
+    while True:
+        start_time = asyncio.get_event_loop().time()
+        print("Starting new cycle...")
+        await run_cycle()
+        end_time = asyncio.get_event_loop().time()
+        elapsed = end_time - start_time
+        sleep_time = max(0, 3600 - elapsed)
+        print(f"Cycle complete. Elapsed time: {elapsed:.2f} seconds. Waiting {sleep_time:.2f} seconds until next cycle.")
+        await asyncio.sleep(sleep_time)
+
+async def main():
+    global incubator, microscope, robotic_arm
+    incubator, microscope, robotic_arm = await setup_connections()
+    await run_every_hour()
+
+if __name__ == '__main__':
+    asyncio.run(main())
