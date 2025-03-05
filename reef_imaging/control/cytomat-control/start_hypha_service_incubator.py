@@ -41,6 +41,7 @@ class IncubatorService:
         self.local = local
         self.server_url = "http://localhost:9527" if local else "https://hypha.aicell.io"
         self.c = Cytomat("/dev/ttyUSB0", json_path="/home/tao/workspace/cytomat-controller/docs/config.json")
+        self.plat_status = {}
 
     async def start_hypha_service(self, server):
         svc = await server.register_service({
@@ -54,7 +55,9 @@ class IncubatorService:
             "put_sample_from_transfer_station_to_slot": self.put_sample_from_transfer_station_to_slot,
             "get_sample_from_slot_to_transfer_station": self.get_sample_from_slot_to_transfer_station,
             "get_status": self.get_status,
-            "is_busy": self.is_busy
+            "is_busy": self.is_busy,
+            "reset_error_status": self.reset_error_status,
+            "get_sample_status": self.get_sample_status,
         })
 
         print(f"Incubator control service registered at workspace: {server.config.workspace}, id: {svc.id}")
@@ -82,11 +85,15 @@ class IncubatorService:
         Clean up error status and initialize the incubator
         Returns:A string message        
         """
-        self.c.maintenance_controller.reset_error_status()
         self.c.plate_handler.initialize()
         self.c.wait_until_not_busy(timeout=60)
         assert self.c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
         return "Incubator initialized."
+
+    @schema_function(skip_self=True)
+    def reset_error_status(self):
+        """Reset the error status of the incubator"""
+        self.c.maintenance_controller.reset_error_status()
 
     @schema_function(skip_self=True)
     def get_status(self):
@@ -122,18 +129,31 @@ class IncubatorService:
         Collect sample from transfer station to a slot
         Returns: A string message
         """
+        assert self.plat_status.get(slot) != "IN", "Plate is already inside the incubator"
         c = self.c
         c.plate_handler.move_plate_from_transfer_station_to_slot(slot)
         c.wait_until_not_busy(timeout=50)
         assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
+        self.plat_status[slot] = "IN"
 
     @schema_function(skip_self=True)
     def get_sample_from_slot_to_transfer_station(self, slot:int=Field(5, description="Slot number,range: 1-42")):
         """Release sample from a incubator's slot to it's transfer station."""
+        assert self.plat_status.get(slot) != "OUT", "Plate is already outside the incubator"
         c = self.c
         c.plate_handler.move_plate_from_slot_to_transfer_station(slot)
         c.wait_until_not_busy(timeout=50)
         assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
+        self.plat_status[slot] = "OUT"
+
+    @schema_function(skip_self=True)
+    def get_sample_status(self, slot:Optional[int]=Field(None, description="Slot number,range: 1-42, or None for all slots")):
+        """Check the status of the sample plats, either "IN "the incubator or "OUT", None means unknown"""
+        if slot is None:
+            return self.plat_status
+        else:
+            return self.plat_status.get(slot)
+    
 
     def is_busy(self):
         c = self.c
