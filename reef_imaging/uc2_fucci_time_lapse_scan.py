@@ -67,17 +67,13 @@ async def load_plate_from_incubator_to_microscope(incubator_slot=33):
     while await incubator.is_busy():
         await asyncio.sleep(1)
     await microscope.home_stage()
-    print("Plate loaded onto station.")
-    await robotic_arm.connect()
-    print("Robotic arm connected.")
+    print("Plate loaded on station.")
     await robotic_arm.grab_sample_from_incubator()
     print("Sample grabbed.")
     await robotic_arm.transport_from_incubator_to_microscope1()
     print("Sample transported.")
     await robotic_arm.put_sample_on_microscope1()
     print("Sample placed on microscope.")
-    await robotic_arm.disconnect()
-    print("Robotic arm disconnected.")
     await microscope.return_stage()
     print("Sample plate successfully loaded onto microscope stage.")
     sample_loaded = True
@@ -85,7 +81,6 @@ async def load_plate_from_incubator_to_microscope(incubator_slot=33):
 async def unload_plate_from_microscope(incubator_slot=33):
     global sample_loaded, incubator, microscope, robotic_arm
     assert sample_loaded, "Sample plate is not on the microscope"
-    await robotic_arm.connect()
     await microscope.home_stage()
     print("Microscope homed.")
     await robotic_arm.grab_sample_from_microscope1()
@@ -95,11 +90,8 @@ async def unload_plate_from_microscope(incubator_slot=33):
     await robotic_arm.put_sample_on_incubator()
     print("Sample placed on incubator.")
     await incubator.put_sample_from_transfer_station_to_slot(incubator_slot)
-    while await incubator.is_busy():
-        await asyncio.sleep(1)
     print("Sample moved to incubator.")
     await microscope.return_stage()
-    await robotic_arm.disconnect()
     print("Sample successfully unloaded from the microscopy stage.")
     sample_loaded = False
 
