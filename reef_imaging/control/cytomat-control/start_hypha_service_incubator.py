@@ -80,11 +80,12 @@ class IncubatorService:
     def initialize(self):
         """
         Description:
-        Initialize the incubator, it only needs to be called when the incubator needs to be recalibrated.
+        Clean up error status and initialize the incubator, it only needs to be called when the incubator needs to be recalibrated.
         Returns:
         str, shows the result of the operation.
         
         """
+        self.c.maintenance_controller.reset_error_status()
         self.c.plate_handler.initialize()
         self.c.wait_until_not_busy(timeout=60)
         assert self.c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
