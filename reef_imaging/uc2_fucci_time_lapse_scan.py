@@ -107,11 +107,7 @@ async def run_cycle():
     """Run the complete load-scan-unload process."""
     try:
         await load_plate_from_incubator_to_microscope(incubator_slot=33)
-        await microscope.scan_well_plate(
-            do_reflection_af=True,
-            scanning_zone=[(0, 0), (7, 11)],
-            action_ID='testPlateScan'
-        )
+        await microscope.scan_well_plate(illuminate_channels=['BF LED matrix full','Fluorescence 488 nm Ex','Fluorescence 561 nm Ex'],do_reflection_af=True,scanning_zone=[(0,0),(7,11)], action_ID='testPlateScan')
         await unload_plate_from_microscope(incubator_slot=33)
     except Exception as e:
         print(f"Error during cycle: {e}")

@@ -96,10 +96,8 @@ async def start_server(server_url, local):
     @schema_function()
     async def move_sample_from_microscope1_to_incubator():
         """
-        Description:
-        Move sample from microscope1 to incubator, this process involves grabbing the sample from microscope1, transporting it to the incubator and placing it there.
-        Returns:
-        bool: True
+        Move sample from microscope1 to incubator, the microscope need to be homed before
+        Returns: bool True
         """
         await robotic_arm.move_sample_from_microscope1_to_incubator()
         print("Sample moved from microscope1 to incubator")
@@ -108,10 +106,8 @@ async def start_server(server_url, local):
     @schema_function()
     async def move_sample_from_incubator_to_microscope1():
         """
-        Description:
-        Move sample from incubator to microscope1, this process involves grabbing the sample from incubator, transporting it to the microscope1 and placing it there. NOTE: The sample should be placed in the transfer station before this operation.
-        Returns:
-        bool: True
+        Move sample from incubator to microscope1, microscope need to be homed before
+        Returns: bool True
         """
         await robotic_arm.move_sample_from_incubator_to_microscope1()
         print("Sample moved from incubator to microscope1")
@@ -121,9 +117,8 @@ async def start_server(server_url, local):
     async def grab_sample_from_microscope1():
         """
         Description:
-        Transport a sample from microscope1 to the incubator, this function should be called after function 'grab_sample_from_microscope1'.
-        Returns:
-        bool: True
+        Transport a sample from microscope1 to the incubator
+        Returns: bool True
         """
         await robotic_arm.grab_sample_from_microscope1()
         print("Sample grabbed from microscope1")
@@ -132,10 +127,8 @@ async def start_server(server_url, local):
     @schema_function()
     async def grab_sample_from_incubator():
         """
-        Description:
-        Grab a sample from the incubator. IMPORTANT REQUIREMENT: the sample need to be placed in the transfer station befoer this operation.
-        Returns:
-        bool: True
+        Grab a sample from the incubator
+        Returns: bool True
         """
         await robotic_arm.grab_sample_from_incubator()
         print("Sample grabbed from incubator")
@@ -144,10 +137,8 @@ async def start_server(server_url, local):
     @schema_function()
     async def put_sample_on_microscope1():
         """
-        Description:
-        Place a sample on microscope1. IMPORTANT REQUIREMENT: The microscope need to be homed before this operation, otherwise don't use this function.
-        Returns:
-        bool: True
+        Place a sample on microscope1
+        Returns:bool True
         """
         await robotic_arm.put_sample_on_microscope1()
         print("Sample placed on microscope1")
@@ -156,10 +147,8 @@ async def start_server(server_url, local):
     @schema_function()
     async def put_sample_on_incubator():
         """
-        Description:
         Place a sample on the incubator.
-        Returns:
-        bool: True
+        Returns: bool True
         """
         await robotic_arm.put_sample_on_incubator()
         print("Sample placed on incubator")
@@ -168,10 +157,8 @@ async def start_server(server_url, local):
     @schema_function()
     async def transport_from_incubator_to_microscope1():
         """
-        Description:
-        Transport a sample from the incubator to microscope1, this function should be called after funtion 'grab_sample_from_incubator'.
-        Returns:
-        bool: True
+        Transport a sample from the incubator to microscope1
+        Returns: bool True
         """
         await robotic_arm.transport_from_incubator_to_microscope1()
         print("Sample moved from incubator to microscope1")
@@ -180,10 +167,8 @@ async def start_server(server_url, local):
     @schema_function()
     async def transport_from_microscope1_to_incubator():
         """
-        Description:
-        Transport a sample from microscope1 to the incubator, this function should be called after function 'grab_sample_from_microscope1'.
-        Returns:
-        bool: True
+        Transport a sample from microscope1 to the incubator
+        Returns: bool True
         """
         await robotic_arm.transport_from_microscope1_to_incubator()
         print("Sample moved from microscope1 to incubator")
@@ -192,10 +177,8 @@ async def start_server(server_url, local):
     @schema_function()
     async def connect():
         """
-        Description:
         Connect and occupy the robot, so that it can be controlled.
-        Returns:
-        bool: True
+        Returns: bool True
         """
         await robotic_arm.connect()
         print("Connected to robotic arm")
@@ -204,10 +187,8 @@ async def start_server(server_url, local):
     @schema_function()
     async def disconnect():
         """
-        Description:
         Disconnect the robot, so that it can be used by other clients.
-        Returns:
-        bool: True
+        Returns: bool True
         """
         await robotic_arm.disconnect()
         print("Disconnected from robotic arm")
@@ -217,9 +198,8 @@ async def start_server(server_url, local):
     async def halt():
         """
         Description:
-        Halt the robot, stop all the movements. THIS FUNCTION IS IMPORTANT, USE IT ANY TIME YOU WANT TO STOP THE ROBOT.
-        Returns:
-        bool: True
+        Halt/stop the robot, stop all the movements
+        Returns: bool True
         """
         print("Halting robotic arm")
         await robotic_arm.halt()

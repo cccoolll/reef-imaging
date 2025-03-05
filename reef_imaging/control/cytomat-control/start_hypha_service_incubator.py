@@ -79,11 +79,8 @@ class IncubatorService:
     @schema_function(skip_self=True)
     def initialize(self):
         """
-        Description:
-        Clean up error status and initialize the incubator, it only needs to be called when the incubator needs to be recalibrated.
-        Returns:
-        str, shows the result of the operation.
-        
+        Clean up error status and initialize the incubator
+        Returns:A string message        
         """
         self.c.maintenance_controller.reset_error_status()
         self.c.plate_handler.initialize()
@@ -94,20 +91,16 @@ class IncubatorService:
     @schema_function(skip_self=True)
     def get_status(self):
         """
-        Description:
-        Get the status of the incubator.
-        Returns:
-        dict, shows the status of the incubator.
+        Get the status of the incubator
+        Returns: A dictionary
         """
         return {"error_status": self.c.error_status, "action_status": self.c.action_status, "busy": self.c.overview_status.busy}
 
     @schema_function(skip_self=True)
     def move_plate(self, slot:int=Field(5, description="Slot number,range: 1-42")):
         """
-        Description: 
-        Move plate from slot to transfer station and back, is used just for testing.
-        Returns: 
-        str, shows the result of the operation.
+        Move plate from slot to transfer station and back
+        Returns: A string message
         """
         c = self.c
         c.wait_until_not_busy(timeout=50)
@@ -126,13 +119,12 @@ class IncubatorService:
     @schema_function(skip_self=True)
     def put_sample_from_transfer_station_to_slot(self, slot:int=Field(5, description="Slot number,range: 1-42")):
         """
-        Description:
-        Collect sample from incubator's transfer station to it's slot.
-        Returns:
-        str, shows the result of the operation.
+        Collect sample from transfer station to a slot
+        Returns: A string message
         """
         c = self.c
         c.plate_handler.move_plate_from_transfer_station_to_slot(slot)
+        c.wait_until_not_busy(timeout=50)
         assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
 
     @schema_function(skip_self=True)
