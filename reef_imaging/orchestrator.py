@@ -2,6 +2,7 @@
 import time
 from hypha_rpc.sync import connect_to_server
 import json
+import dotenv
 
 class TimeLapseOrchestrator:
     def __init__(self, config_path='config.json'):

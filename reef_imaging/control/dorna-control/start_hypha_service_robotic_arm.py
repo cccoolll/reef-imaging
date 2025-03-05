@@ -1,6 +1,14 @@
 import asyncio
-from hypha_rpc import connect_to_server
+import argparse
+import os
+from hypha_rpc import connect_to_server, login
 from dorna2 import Dorna
+import dotenv
+
+dotenv.load_dotenv()  
+ENV_FILE = dotenv.find_dotenv()  
+if ENV_FILE:  
+    dotenv.load_dotenv(ENV_FILE)  
 
 class DornaController:
     def __init__(self, ip="192.168.2.20"):
@@ -73,8 +81,16 @@ class DornaController:
 
 robotic_arm = DornaController()
 
-async def start_server(server_url):
-    server = await connect_to_server({"server_url": server_url,"method_timeout": 650})
+async def start_server(server_url, local):
+    if local:
+        token = None
+        server = await connect_to_server({"server_url": server_url, "token": token, "ping_interval": None})
+    else:
+        try:
+            token = os.environ.get("REEF_WORKSPACE_TOKEN")
+        except:
+            token = await login({"server_url": server_url})
+        server = await connect_to_server({"server_url": server_url, "token": token, "workspace": "reef-imaging", "ping_interval": None})
 
     async def move_sample_from_microscope1_to_incubator():
         await robotic_arm.move_sample_from_microscope1_to_incubator()
@@ -172,5 +188,10 @@ async def start_server(server_url):
     await server.serve()
 
 if __name__ == "__main__":
-    server_url = "http://localhost:9527"
-    asyncio.run(start_server(server_url))
+    parser = argparse.ArgumentParser(description="Start the Hypha service for the robotic arm.")
+    parser.add_argument('--local', action='store_true', help="Use localhost as server URL")
+    args = parser.parse_args()
+
+    server_url = "http://localhost:9527" if args.local else "https://hypha.aicell.io"
+
+    asyncio.run(start_server(server_url, args.local))
