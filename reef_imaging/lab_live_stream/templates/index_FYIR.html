@@ -4,8 +4,10 @@
         <div class="container">
             <h3> Live Streaming: Infrared Camera </h3>
             <img src="{{ url_for('video_feed') }}" width="50%">
-            <button onclick="startTimeLapse()">Start Time-Lapse Recording</button>
-            <button onclick="stopTimeLapse()">Stop Time-Lapse Recording</button>
+            <div>
+                <button onclick="startTimeLapse()">Start Time-Lapse Recording</button>
+                <button onclick="stopTimeLapse()">Stop Time-Lapse Recording</button>
+            </div>
         </div>
         <script>
             function startTimeLapse() {
