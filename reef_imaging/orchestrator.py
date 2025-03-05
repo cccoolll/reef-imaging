@@ -22,7 +22,7 @@ class TimeLapseOrchestrator:
         self.robotic_arm_id = self.config['robotic_arm']['settings']['id']
         self.microscope_id = self.config['microscopes'][0]['settings']['id']
 
-        self.server = connect_to_server({"server_url": self.server_url,"method_timeout": 350})
+        self.server = connect_to_server({"server_url": self.server_url})
         self.incubator = self.server.get_service(self.incubator_id)
         print(f"Cytomat service connected: {self.incubator}")
         self.robotic_arm = self.server.get_service(self.robotic_arm_id)
@@ -30,7 +30,7 @@ class TimeLapseOrchestrator:
         self.microscope = self.server.get_service(self.microscope_id)
         print(f"Microscope service connected: {self.microscope}")
     
-    def transport_sample_from_incubator_to_microscope(self, incubator_slot=3, microscope=1):
+    def complete_process_transport_sample_from_incubator_to_microscope(self, incubator_slot=3, microscope=1):
         self.robotic_arm.connect()
         # Move sample from incubator to microscope
         self.incubator.get_sample_from_slot_to_transfer_station(incubator_slot)
@@ -40,8 +40,12 @@ class TimeLapseOrchestrator:
         self.microscope.home_stage()
         print("microscope homed.")
         if microscope == 1:
-            self.robotic_arm.move_sample_from_incubator_to_microscope1()
-            time.sleep(200)
+            self.robotic_arm.grab_sample_from_incubator()
+            print("Sample grabbed from incubator.")
+            self.robotic_arm.transport_from_incubator_to_microscope1()
+            print("Sample moved to microscope.")
+            self.robotic_arm.put_sample_on_microscope1()
+            print("Sample placed on microscope.")
         else:
             print("Invalid microscope number.")
             return
@@ -51,14 +55,19 @@ class TimeLapseOrchestrator:
 
         self.robotic_arm.disconnect()
     
-    def transport_sample_from_microscope_to_incubator(self, microscope=1,incubator_slot=3):
+    def complete_process_transport_sample_from_microscope_to_incubator(self, microscope=1,incubator_slot=3):
 
         self.robotic_arm.connect()
         # Move sample from microscope to incubator
         self.microscope.home_stage()
         print("microscope homed.")
         if microscope == 1:
-            self.robotic_arm.move_sample_from_microscope1_to_incubator()
+            self.robotic_arm.grab_sample_from_microscope1()
+            print("Sample grabbed from microscope.")
+            self.robotic_arm.transport_from_microscope1_to_incubator()
+            print("Sample moved to incubator.")
+            self.robotic_arm.put_sample_on_incubator()
+            print("Sample placed on incubator.")
         else:
             print("Invalid microscope number.")
             return

@@ -29,6 +29,30 @@ class DornaController:
     def move_sample_from_microscope1_to_incubator(self):
         self.set_motor(1)
         self.play_script("paths/microscope1_to_incubator.txt")
+    
+    def grab_sample_from_microscope1(self):
+        self.set_motor(1)
+        self.play_script("paths/grab_from_microscope1.txt")
+    
+    def grab_sample_from_incubator(self):
+        self.set_motor(1)
+        self.play_script("paths/grab_from_incubator.txt")
+    
+    def put_sample_on_microscope1(self):
+        self.set_motor(1)
+        self.play_script("paths/put_on_microscope1.txt")
+    
+    def put_sample_on_incubator(self):
+        self.set_motor(1)
+        self.play_script("paths/put_on_incubator.txt")
+    
+    def transport_from_incubator_to_microscope1(self):
+        self.set_motor(1)
+        self.play_script("paths/transport_from_incubator_to_microscope1.txt")
+    
+    def transport_from_microscope1_to_incubator(self):
+        self.set_motor(1)
+        self.play_script("paths/transport_from_microscope1_to_incubator.txt")
 
     def move_sample_from_incubator_to_microscope1(self):
         self.set_motor(1)
