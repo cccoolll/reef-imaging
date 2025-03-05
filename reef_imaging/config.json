@@ -1,0 +1,31 @@
+{
+    "samples": [
+        {
+            "name": "Sample1",
+            "settings": {
+                "incubator_slot": 3
+            }
+        }
+    ],
+    "microscopes": [
+        {
+            "name": "Microscope1",
+            "settings": {
+                "id": "ws-user-zenith-glue-70976543/HbMMyVRaCXVkvXxybPaELs:microscope-control-squid-real-microscope0_local",
+                "objective": "20x"
+            }
+        }
+    ],
+    "incubator": {
+        "name": "cytomat",
+        "settings": {
+            "id": "ws-user-twisty-cafe-26457667/DSPmPtjZtcZZDXtdFgSgXU:incubator-control"
+        }
+    },
+    "robotic_arm": {
+        "name": "robotic_arm",
+        "settings": {
+            "id": "ws-user-furtive-charger-52893638/URyPGWwJpSphcjwtcnH6vF:robotic-arm-control"
+        }
+    }
+}
