@@ -3,6 +3,8 @@ import argparse
 import os
 from hypha_rpc import connect_to_server, login
 from cytomat import Cytomat
+from pydantic import Field
+from hypha_rpc.utils.schema import schema_function
 
 import dotenv
 
@@ -10,11 +12,35 @@ dotenv.load_dotenv()
 ENV_FILE = dotenv.find_dotenv()  
 if ENV_FILE:  
     dotenv.load_dotenv(ENV_FILE)  
-    
+
+
+ERROR_CODES = {
+    0: "No error",
+    1: "Motor communication disrupted",
+    2: "Plate not mounted on shovel",
+    3: "Plate not dropped from shovel",
+    4: "Shovel not extended",
+    5: "Procedure timeout",
+    6: "Transfer door not opened",
+    7: "Transfer door not closed",
+    8: "Shovel not retracted",
+    10: "Step motor temperature too high",
+    11: "Other step motor error",
+    12: "Transfer station not rotated",
+    13: "Heating or CO2 communication disrupted",
+    14: "Shaker communication disrupted",
+    15: "Shaker configuration out of order",
+    16: "Shaker not started",
+    19: "Shaker clamp not open",
+    20: "Shaker clamp not closed",
+    255: "Critical"
+}
+
 class IncubatorService:
     def __init__(self, local):
         self.local = local
         self.server_url = "http://localhost:9527" if local else "https://hypha.aicell.io"
+        self.c = Cytomat("/dev/ttyUSB0", json_path="/home/tao/workspace/cytomat-controller/docs/config.json")
 
     async def start_hypha_service(self, server):
         svc = await server.register_service({
@@ -27,6 +53,7 @@ class IncubatorService:
             "initialize": self.initialize,
             "put_sample_from_transfer_station_to_slot": self.put_sample_from_transfer_station_to_slot,
             "get_sample_from_slot_to_transfer_station": self.get_sample_from_slot_to_transfer_station,
+            "get_status": self.get_status,
             "is_busy": self.is_busy
         })
 
@@ -36,6 +63,7 @@ class IncubatorService:
         print(f"You can also test the service via the HTTP proxy: {self.server_url}/{server.config.workspace}/services/{id}/initialize")
 
     async def setup(self):
+        self.c.maintenance_controller.reset_error_status()
         if self.local:
             token = None
             server = await connect_to_server({"server_url": self.server_url, "token": token, "ping_interval": None})
@@ -49,30 +77,44 @@ class IncubatorService:
         await self.start_hypha_service(server)
 
     def initialize(self):
-        c = Cytomat("/dev/ttyUSB0", json_path="/home/tao/workspace/cytomat-controller/docs/config.json")
-        c.plate_handler.initialize()
-        
+        self.c.plate_handler.initialize()
+        self.c.wait_until_not_busy(timeout=60)
+        assert self.c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
+        return "Incubator initialized."
+
+    def get_status(self):
+        return {"error_status": self.c.error_status, "action_status": self.c.action_status, "busy": self.c.overview_status.busy}
+
     def move_plate(self, slot):
-        c = Cytomat("/dev/ttyUSB0", json_path="/home/tao/workspace/cytomat-controller/docs/config.json")
+        c = self.c
         c.wait_until_not_busy(timeout=50)
-        c.plate_handler.initialize()
+        assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
         c.wait_until_not_busy(timeout=50)
+        assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
+        c.plate_handler.move_plate_from_slot_to_transfer_station(slot)
+        c.wait_until_not_busy(timeout=100)
+        assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
         c.plate_handler.move_plate_from_transfer_station_to_slot(slot)
         c.wait_until_not_busy(timeout=50)
-        c.plate_handler.move_plate_from_slot_to_transfer_station(slot)
-        c.wait_until_not_busy(timeout=50)
+
+        assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
         return f"Plate moved to slot {slot} and back to transfer station."
     
-    def put_sample_from_transfer_station_to_slot(self, slot=5):
-        c = Cytomat("/dev/ttyUSB0")
+    @schema_function(skip_self=True)
+    def put_sample_from_transfer_station_to_slot(self, slot:int=Field(5, description="Slot number")):
+        """Put sample from transfer station to slot."""
+        c = self.c
         c.plate_handler.move_plate_from_transfer_station_to_slot(slot)
+        assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
 
     def get_sample_from_slot_to_transfer_station(self, slot=5):
-        c = Cytomat("/dev/ttyUSB0")
+        c = self.c
         c.plate_handler.move_plate_from_slot_to_transfer_station(slot)
-    
+        c.wait_until_not_busy(timeout=50)
+        assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
+
     def is_busy(self):
-        c = Cytomat("/dev/ttyUSB0")
+        c = self.c
         return c.overview_status.busy
 
 if __name__ == "__main__":
@@ -89,6 +131,7 @@ if __name__ == "__main__":
             await incubator_service.setup()
         except Exception as e:
             print(f"Error setting up incubator service: {e}")
+            raise e
 
     loop.create_task(main())
     loop.run_forever()

@@ -158,6 +158,8 @@ async def start_server(server_url, local):
         print("Halting robotic arm")
         await robotic_arm.halt()
         return True
+    
+    await robotic_arm.connect()
 
     svc = await server.register_service({
         "name": "Robotic Arm Control",
