@@ -1,1 +1,1 @@
-squid-control
+hypha-rpc==0.20.48
