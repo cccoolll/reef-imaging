@@ -5,7 +5,7 @@ from hypha_rpc import connect_to_server, login
 from cytomat import Cytomat
 from pydantic import Field
 from hypha_rpc.utils.schema import schema_function
-
+from typing import Optional
 import dotenv
 
 dotenv.load_dotenv()  

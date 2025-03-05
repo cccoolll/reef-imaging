@@ -77,7 +77,7 @@ def record_time_lapse():
                 camera.open("/dev/video0")
                 success, frame = camera.read()
                 #compress the image by adjusting the JPEG quality
-                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50]
+                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 90]
                 ret, buffer = cv2.imencode('.jpg', frame, encode_param)
                 if not ret:
                     logging.error("Failed to encode image")
