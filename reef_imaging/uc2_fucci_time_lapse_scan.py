@@ -64,8 +64,6 @@ async def load_plate_from_incubator_to_microscope(incubator_slot=33):
     global sample_loaded, incubator, microscope, robotic_arm
     assert not sample_loaded, "Sample plate has already been loaded"
     await incubator.get_sample_from_slot_to_transfer_station(incubator_slot)
-    while await incubator.is_busy():
-        await asyncio.sleep(1)
     await microscope.home_stage()
     print("Plate loaded on station.")
     await robotic_arm.grab_sample_from_incubator()
