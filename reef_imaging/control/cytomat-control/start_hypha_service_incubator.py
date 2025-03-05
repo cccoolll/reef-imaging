@@ -76,16 +76,38 @@ class IncubatorService:
 
         await self.start_hypha_service(server)
 
+    @schema_function(skip_self=True)
     def initialize(self):
+        """
+        Description:
+        Initialize the incubator, it only needs to be called when the incubator needs to be recalibrated.
+        Returns:
+        str, shows the result of the operation.
+        
+        """
         self.c.plate_handler.initialize()
         self.c.wait_until_not_busy(timeout=60)
         assert self.c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
         return "Incubator initialized."
 
+    @schema_function(skip_self=True)
     def get_status(self):
+        """
+        Description:
+        Get the status of the incubator.
+        Returns:
+        dict, shows the status of the incubator.
+        """
         return {"error_status": self.c.error_status, "action_status": self.c.action_status, "busy": self.c.overview_status.busy}
 
-    def move_plate(self, slot):
+    @schema_function(skip_self=True)
+    def move_plate(self, slot:int=Field(5, description="Slot number,range: 1-42")):
+        """
+        Description: 
+        Move plate from slot to transfer station and back, is used just for testing.
+        Returns: 
+        str, shows the result of the operation.
+        """
         c = self.c
         c.wait_until_not_busy(timeout=50)
         assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
@@ -101,13 +123,20 @@ class IncubatorService:
         return f"Plate moved to slot {slot} and back to transfer station."
     
     @schema_function(skip_self=True)
-    def put_sample_from_transfer_station_to_slot(self, slot:int=Field(5, description="Slot number")):
-        """Put sample from transfer station to slot."""
+    def put_sample_from_transfer_station_to_slot(self, slot:int=Field(5, description="Slot number,range: 1-42")):
+        """
+        Description:
+        Collect sample from incubator's transfer station to it's slot.
+        Returns:
+        str, shows the result of the operation.
+        """
         c = self.c
         c.plate_handler.move_plate_from_transfer_station_to_slot(slot)
         assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
 
-    def get_sample_from_slot_to_transfer_station(self, slot=5):
+    @schema_function(skip_self=True)
+    def get_sample_from_slot_to_transfer_station(self, slot:int=Field(5, description="Slot number,range: 1-42")):
+        """Release sample from a incubator's slot to it's transfer station."""
         c = self.c
         c.plate_handler.move_plate_from_slot_to_transfer_station(slot)
         c.wait_until_not_busy(timeout=50)

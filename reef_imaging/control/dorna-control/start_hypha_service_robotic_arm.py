@@ -4,6 +4,8 @@ import os
 from hypha_rpc import connect_to_server, login
 from dorna2 import Dorna
 import dotenv
+from pydantic import Field
+from hypha_rpc.utils.schema import schema_function
 
 dotenv.load_dotenv()  
 ENV_FILE = dotenv.find_dotenv()  
@@ -18,62 +20,61 @@ class DornaController:
     async def connect(self):
         await asyncio.to_thread(self.robot.connect, self.ip)
         print("Connected to robot")
+        return f"Connected to robot"
 
     async def disconnect(self):
         await asyncio.to_thread(self.robot.close)
         print("Disconnected from robot")
-
-    async def set_motor(self, state):
+        return f"Disconnected from robot"
+    
+    async def set_motor(self, state: int=Field(1, description="Enable or disable the motor, 1 for enable, 0 for disable")):
         await asyncio.to_thread(self.robot.set_motor, state)
+        return f"Motor set to {state}"
 
     async def play_script(self, script_path):
-        print("Playing script")
         await asyncio.to_thread(self.robot.play_script, script_path)
-
-    async def is_busy(self):
-        status = await asyncio.to_thread(self.robot.track_cmd)
-        print(f"Robot status: {status}")
-        return status["union"].get("stat", -1) != 2
-
+        return "Script played"
+    
     async def move_sample_from_microscope1_to_incubator(self):
         await self.set_motor(1)
         await self.play_script("paths/microscope1_to_incubator.txt")
+        return "Sample moved from microscope1 to incubator"
     
     async def grab_sample_from_microscope1(self):
         await self.set_motor(1)
         await self.play_script("paths/grab_from_microscope1.txt")
-    
+        return "Sample grabbed from microscope1"
+
     async def grab_sample_from_incubator(self):
         await self.set_motor(1)
         await self.play_script("paths/grab_from_incubator.txt")
+        return "Sample grabbed from incubator"
     
     async def put_sample_on_microscope1(self):
         await self.set_motor(1)
         await self.play_script("paths/put_on_microscope1.txt")
-    
+        return "Sample placed on microscope1"
+
     async def put_sample_on_incubator(self):
         await self.set_motor(1)
         await self.play_script("paths/put_on_incubator.txt")
+        return "Sample placed on incubator"
     
     async def transport_from_incubator_to_microscope1(self):
         await self.set_motor(1)
         await self.play_script("paths/transport_from_incubator_to_microscope1.txt")
+        return "Sample moved from incubator to microscope1"
     
     async def transport_from_microscope1_to_incubator(self):
         await self.set_motor(1)
         await self.play_script("paths/transport_from_microscope1_to_incubator.txt")
+        return "Sample moved from microscope1 to incubator"
 
     async def move_sample_from_incubator_to_microscope1(self):
         await self.set_motor(1)
         await self.play_script("paths/incubator_to_microscope1.txt")
+        return "Sample moved from incubator to microscope1"
 
-    async def move_plate(self, source, destination):
-        if source == "microscope" and destination == "incubator":
-            await self.move_sample_from_microscope1_to_incubator()
-        elif source == "incubator" and destination == "microscope1":
-            await self.move_sample_from_incubator_to_microscope1()
-        else:
-            print(f"Invalid source-destination combination: {source} to {destination}")
     
     async def halt(self):
         await asyncio.to_thread(self.robot.halt)
@@ -92,69 +93,134 @@ async def start_server(server_url, local):
             token = await login({"server_url": server_url})
         server = await connect_to_server({"server_url": server_url, "token": token, "workspace": "reef-imaging", "ping_interval": None})
 
+    @schema_function()
     async def move_sample_from_microscope1_to_incubator():
+        """
+        Description:
+        Move sample from microscope1 to incubator, this process involves grabbing the sample from microscope1, transporting it to the incubator and placing it there.
+        Returns:
+        bool: True
+        """
         await robotic_arm.move_sample_from_microscope1_to_incubator()
         print("Sample moved from microscope1 to incubator")
         return True
     
+    @schema_function()
     async def move_sample_from_incubator_to_microscope1():
+        """
+        Description:
+        Move sample from incubator to microscope1, this process involves grabbing the sample from incubator, transporting it to the microscope1 and placing it there. NOTE: The sample should be placed in the transfer station before this operation.
+        Returns:
+        bool: True
+        """
         await robotic_arm.move_sample_from_incubator_to_microscope1()
         print("Sample moved from incubator to microscope1")
         return True
     
-    async def move_plate(source, destination):
-        await robotic_arm.move_plate(source, destination)
-        print(f"Sample moved from {source} to {destination}")
-        return True
-    
+    @schema_function()
     async def grab_sample_from_microscope1():
+        """
+        Description:
+        Transport a sample from microscope1 to the incubator, this function should be called after function 'grab_sample_from_microscope1'.
+        Returns:
+        bool: True
+        """
         await robotic_arm.grab_sample_from_microscope1()
         print("Sample grabbed from microscope1")
         return True
     
+    @schema_function()
     async def grab_sample_from_incubator():
+        """
+        Description:
+        Grab a sample from the incubator. IMPORTANT REQUIREMENT: the sample need to be placed in the transfer station befoer this operation.
+        Returns:
+        bool: True
+        """
         await robotic_arm.grab_sample_from_incubator()
         print("Sample grabbed from incubator")
         return True
     
+    @schema_function()
     async def put_sample_on_microscope1():
+        """
+        Description:
+        Place a sample on microscope1. IMPORTANT REQUIREMENT: The microscope need to be homed before this operation, otherwise don't use this function.
+        Returns:
+        bool: True
+        """
         await robotic_arm.put_sample_on_microscope1()
         print("Sample placed on microscope1")
         return True
-    
+        
+    @schema_function()
     async def put_sample_on_incubator():
+        """
+        Description:
+        Place a sample on the incubator.
+        Returns:
+        bool: True
+        """
         await robotic_arm.put_sample_on_incubator()
         print("Sample placed on incubator")
         return True
-    
+
+    @schema_function()
     async def transport_from_incubator_to_microscope1():
+        """
+        Description:
+        Transport a sample from the incubator to microscope1, this function should be called after funtion 'grab_sample_from_incubator'.
+        Returns:
+        bool: True
+        """
         await robotic_arm.transport_from_incubator_to_microscope1()
         print("Sample moved from incubator to microscope1")
         return True
     
+    @schema_function()
     async def transport_from_microscope1_to_incubator():
+        """
+        Description:
+        Transport a sample from microscope1 to the incubator, this function should be called after function 'grab_sample_from_microscope1'.
+        Returns:
+        bool: True
+        """
         await robotic_arm.transport_from_microscope1_to_incubator()
         print("Sample moved from microscope1 to incubator")
         return True
-    
-    async def is_busy():
-        """
-        This function doesn't work, since dorna can't return the status of the robot during a move.
-        """
-        print("Checking if robotic arm is busy")
-        return await robotic_arm.is_busy()
-    
+
+    @schema_function()
     async def connect():
+        """
+        Description:
+        Connect and occupy the robot, so that it can be controlled.
+        Returns:
+        bool: True
+        """
         await robotic_arm.connect()
         print("Connected to robotic arm")
         return True
 
+    @schema_function()
     async def disconnect():
+        """
+        Description:
+        Disconnect the robot, so that it can be used by other clients.
+        Returns:
+        bool: True
+        """
         await robotic_arm.disconnect()
         print("Disconnected from robotic arm")
         return True
-        
+    
+    @schema_function()
     async def halt():
+        """
+        Description:
+        Halt the robot, stop all the movements. THIS FUNCTION IS IMPORTANT, USE IT ANY TIME YOU WANT TO STOP THE ROBOT.
+        Returns:
+        bool: True
+        """
         print("Halting robotic arm")
         await robotic_arm.halt()
         return True
@@ -175,7 +241,6 @@ async def start_server(server_url, local):
         "put_sample_on_incubator": put_sample_on_incubator,
         "transport_from_incubator_to_microscope1": transport_from_incubator_to_microscope1,
         "transport_from_microscope1_to_incubator": transport_from_microscope1_to_incubator,
-        "move_plate": move_plate,
         "connect": connect,
         "disconnect": disconnect,
         "halt": halt,
