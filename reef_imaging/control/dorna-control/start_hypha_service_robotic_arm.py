@@ -31,65 +31,53 @@ class DornaController:
         return f"Disconnected from robot"
     
     async def set_motor(self, state: int=Field(1, description="Enable or disable the motor, 1 for enable, 0 for disable")):
+        if not self.connected:
+            await self.connect()
         await asyncio.to_thread(self.robot.set_motor, state)
         return f"Motor set to {state}"
 
     async def play_script(self, script_path):
+        if not self.connected:
+            await self.connect()
         await asyncio.to_thread(self.robot.play_script, script_path)
         return "Script played"
     
     async def move_sample_from_microscope1_to_incubator(self):
-        if not self.connected:
-            await self.connect()
         await self.set_motor(1)
         await self.play_script("paths/microscope1_to_incubator.txt")
         return "Sample moved from microscope1 to incubator"
     
     async def grab_sample_from_microscope1(self):
-        if not self.connected:
-            await self.connect()
         await self.set_motor(1)
         await self.play_script("paths/grab_from_microscope1.txt")
         return "Sample grabbed from microscope1"
 
     async def grab_sample_from_incubator(self):
-        if not self.connected:
-            await self.connect()
         await self.set_motor(1)
         await self.play_script("paths/grab_from_incubator.txt")
         return "Sample grabbed from incubator"
     
     async def put_sample_on_microscope1(self):
-        if not self.connected:
-            await self.connect()
         await self.set_motor(1)
         await self.play_script("paths/put_on_microscope1.txt")
         return "Sample placed on microscope1"
 
     async def put_sample_on_incubator(self):
-        if not self.connected:
-            await self.connect()
         await self.set_motor(1)
         await self.play_script("paths/put_on_incubator.txt")
         return "Sample placed on incubator"
     
     async def transport_from_incubator_to_microscope1(self):
-        if not self.connected:
-            await self.connect()
         await self.set_motor(1)
         await self.play_script("paths/transport_from_incubator_to_microscope1.txt")
         return "Sample moved from incubator to microscope1"
     
     async def transport_from_microscope1_to_incubator(self):
-        if not self.connected:
-            await self.connect()
         await self.set_motor(1)
         await self.play_script("paths/transport_from_microscope1_to_incubator.txt")
         return "Sample moved from microscope1 to incubator"
 
     async def move_sample_from_incubator_to_microscope1(self):
-        if not self.connected:
-            await self.connect()
         await self.set_motor(1)
         await self.play_script("paths/incubator_to_microscope1.txt")
         return "Sample moved from incubator to microscope1"
