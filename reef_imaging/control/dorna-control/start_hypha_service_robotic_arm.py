@@ -16,14 +16,17 @@ class DornaController:
     def __init__(self, ip="192.168.2.20"):
         self.robot = Dorna()
         self.ip = ip
+        self.connected = False
 
     async def connect(self):
         await asyncio.to_thread(self.robot.connect, self.ip)
+        self.connected = True
         print("Connected to robot")
         return f"Connected to robot"
 
     async def disconnect(self):
         await asyncio.to_thread(self.robot.close)
+        self.connected = False
         print("Disconnected from robot")
         return f"Disconnected from robot"
     
@@ -36,47 +39,65 @@ class DornaController:
         return "Script played"
     
     async def move_sample_from_microscope1_to_incubator(self):
+        if not self.connected:
+            await self.connect()
         await self.set_motor(1)
         await self.play_script("paths/microscope1_to_incubator.txt")
         return "Sample moved from microscope1 to incubator"
     
     async def grab_sample_from_microscope1(self):
+        if not self.connected:
+            await self.connect()
         await self.set_motor(1)
         await self.play_script("paths/grab_from_microscope1.txt")
         return "Sample grabbed from microscope1"
 
     async def grab_sample_from_incubator(self):
+        if not self.connected:
+            await self.connect()
         await self.set_motor(1)
         await self.play_script("paths/grab_from_incubator.txt")
         return "Sample grabbed from incubator"
     
     async def put_sample_on_microscope1(self):
+        if not self.connected:
+            await self.connect()
         await self.set_motor(1)
         await self.play_script("paths/put_on_microscope1.txt")
         return "Sample placed on microscope1"
 
     async def put_sample_on_incubator(self):
+        if not self.connected:
+            await self.connect()
         await self.set_motor(1)
         await self.play_script("paths/put_on_incubator.txt")
         return "Sample placed on incubator"
     
     async def transport_from_incubator_to_microscope1(self):
+        if not self.connected:
+            await self.connect()
         await self.set_motor(1)
         await self.play_script("paths/transport_from_incubator_to_microscope1.txt")
         return "Sample moved from incubator to microscope1"
     
     async def transport_from_microscope1_to_incubator(self):
+        if not self.connected:
+            await self.connect()
         await self.set_motor(1)
         await self.play_script("paths/transport_from_microscope1_to_incubator.txt")
         return "Sample moved from microscope1 to incubator"
 
     async def move_sample_from_incubator_to_microscope1(self):
+        if not self.connected:
+            await self.connect()
         await self.set_motor(1)
         await self.play_script("paths/incubator_to_microscope1.txt")
         return "Sample moved from incubator to microscope1"
 
     
     async def halt(self):
+        if not self.connected:
+            await self.connect()
         await asyncio.to_thread(self.robot.halt)
         print("Robot halted")
 
