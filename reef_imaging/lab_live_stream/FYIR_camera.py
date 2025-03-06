@@ -20,17 +20,21 @@ app.mount("/static", StaticFiles(directory=os.path.join(base_dir, "static")), na
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 
-# Camera Index for FYIR Infrared Camera
-camera = cv2.VideoCapture("/dev/video0")
+# Change from a global camera to a function that returns a fresh camera object
+def get_camera():
+    cam = cv2.VideoCapture("/dev/video0")
+    # Force camera settings refresh
+    cam.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    return cam
 
 recording_event = Event()
 recording_thread = None
 frame_bytes = None
 
-def gen_frames():
+def gen_frames(camera_instance):
     global frame_bytes
     while True:
-        success, frame = camera.read()
+        success, frame = camera_instance.read()
         if not success:
             logging.error("Failed to capture image")
             frame_bytes = None  # Clear frame_bytes on error
@@ -57,6 +61,7 @@ def gen_frames():
 
         time.sleep(0.1)  # Reduce CPU load
 
+# Update record_time_lapse to also use get_camera()
 def record_time_lapse():
     global frame_bytes
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
@@ -74,7 +79,7 @@ def record_time_lapse():
                 frame = cv2.imdecode(np.frombuffer(frame_bytes, np.uint8), cv2.IMREAD_COLOR)
                 out.write(frame)
             else:
-                camera.open("/dev/video0")
+                camera = get_camera()
                 success, frame = camera.read()
                 #compress the image by adjusting the JPEG quality
                 encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 90]
@@ -105,13 +110,23 @@ def index(request: Request):
 @app.get('/video_feed')
 async def video_feed(request: Request):
     global frame_bytes
+    frame_bytes = None  # Clear the previous frame
+    
+    # Get a fresh camera instance for each connection
+    camera_instance = get_camera()
+    
     async def generator():
-        for frame in gen_frames():
-            if await request.is_disconnected():
-                logging.info("Client disconnected, stopping the generator")
-                frame_bytes = None
-                break
-            yield frame
+        try:
+            for frame in gen_frames(camera_instance):
+                if await request.is_disconnected():
+                    logging.info("Client disconnected, stopping the generator")
+                    frame_bytes = None
+                    break
+                yield frame
+        finally:
+            # Make sure to release the camera when done
+            camera_instance.release()
+            logging.info("Camera released")
     
     return StreamingResponse(generator(), media_type='multipart/x-mixed-replace; boundary=frame')
 
