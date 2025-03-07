@@ -60,39 +60,39 @@ class RoboticArmService:
         await self.start_hypha_service(server)
 
     @schema_function(skip_self=True)
-    async def connect(self):
+    def connect(self):
         """
         Connect and occupy the robot, so that it can be controlled.
         Returns: bool
         """
-        await asyncio.to_thread(self.robot.connect, self.ip)
+        self.robot.connect(self.ip)
         self.connected = True
         print("Connected to robot")
         return True
 
     @schema_function(skip_self=True)
-    async def disconnect(self):
+    def disconnect(self):
         """
         Disconnect the robot, so that it can be used by other clients.
         Returns: bool
         """
-        await asyncio.to_thread(self.robot.close)
+        self.robot.close()
         self.connected = False
         print("Disconnected from robot")
         return True
 
     @schema_function(skip_self=True)
-    async def set_motor(self, state: int=Field(1, description="Enable or disable the motor, 1 for enable, 0 for disable")):
+    def set_motor(self, state: int=Field(1, description="Enable or disable the motor, 1 for enable, 0 for disable")):
         if not self.connected:
-            await self.connect()
+            self.connect()
         self.robot.set_motor(state)
         return f"Motor set to {state}"
 
     @schema_function(skip_self=True)
-    async def play_script(self, script_path):
+    def play_script(self, script_path):
         if not self.connected:
-            await self.connect()
-        result = await asyncio.to_thread(self.robot.play_script, script_path)
+            self.connect()
+        result = self.robot.play_script(script_path)
         if result != 2:
             raise Exception("Error playing script")
         else:

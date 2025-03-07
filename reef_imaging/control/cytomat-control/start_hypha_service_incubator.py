@@ -80,20 +80,20 @@ class IncubatorService:
         await self.start_hypha_service(server)
 
     @schema_function(skip_self=True)
-    async def initialize(self):
+    def initialize(self):
         """
         Clean up error status and initialize the incubator
-        Returns: A string message        
+        Returns:A string message        
         """
-        await asyncio.to_thread(self.c.plate_handler.initialize)
-        await asyncio.to_thread(self.c.wait_until_not_busy, 60)
+        self.c.plate_handler.initialize()
+        self.c.wait_until_not_busy(timeout=60)
         assert self.c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
         return "Incubator initialized."
 
     @schema_function(skip_self=True)
-    async def reset_error_status(self):
+    def reset_error_status(self):
         """Reset the error status of the incubator"""
-        await asyncio.to_thread(self.c.maintenance_controller.reset_error_status)
+        self.c.maintenance_controller.reset_error_status()
 
     @schema_function(skip_self=True)
     def get_status(self):
@@ -104,44 +104,46 @@ class IncubatorService:
         return {"error_status": self.c.error_status, "action_status": self.c.action_status, "busy": self.c.overview_status.busy}
 
     @schema_function(skip_self=True)
-    async def move_plate(self, slot:int=Field(5, description="Slot number,range: 1-42")):
+    def move_plate(self, slot:int=Field(5, description="Slot number,range: 1-42")):
         """
         Move plate from slot to transfer station and back
         Returns: A string message
         """
         c = self.c
-        await asyncio.to_thread(c.wait_until_not_busy, 50)
+        c.wait_until_not_busy(timeout=50)
         assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
-        await asyncio.to_thread(c.wait_until_not_busy, 50)
+        c.wait_until_not_busy(timeout=50)
         assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
-        await asyncio.to_thread(c.plate_handler.move_plate_from_slot_to_transfer_station, slot)
-        await asyncio.to_thread(c.wait_until_not_busy, 100)
+        c.plate_handler.move_plate_from_slot_to_transfer_station(slot)
+        c.wait_until_not_busy(timeout=100)
         assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
-        await asyncio.to_thread(c.plate_handler.move_plate_from_transfer_station_to_slot, slot)
-        await asyncio.to_thread(c.wait_until_not_busy, 50)
+        c.plate_handler.move_plate_from_transfer_station_to_slot(slot)
+        c.wait_until_not_busy(timeout=50)
 
         assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
         return f"Plate moved to slot {slot} and back to transfer station."
     
     @schema_function(skip_self=True)
-    async def put_sample_from_transfer_station_to_slot(self, slot:int=Field(5, description="Slot number,range: 1-42")):
+    def put_sample_from_transfer_station_to_slot(self, slot:int=Field(5, description="Slot number,range: 1-42")):
         """
         Collect sample from transfer station to a slot
         Returns: A string message
         """
         assert self.plat_status.get(slot) != "IN", "Plate is already inside the incubator"
-        await asyncio.to_thread(self.c.plate_handler.move_plate_from_transfer_station_to_slot, slot)
-        await asyncio.to_thread(self.c.wait_until_not_busy, 50)
-        assert self.c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
+        c = self.c
+        c.plate_handler.move_plate_from_transfer_station_to_slot(slot)
+        c.wait_until_not_busy(timeout=50)
+        assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
         self.plat_status[slot] = "IN"
 
     @schema_function(skip_self=True)
-    async def get_sample_from_slot_to_transfer_station(self, slot:int=Field(5, description="Slot number,range: 1-42")):
+    def get_sample_from_slot_to_transfer_station(self, slot:int=Field(5, description="Slot number,range: 1-42")):
         """Release sample from a incubator's slot to it's transfer station."""
         assert self.plat_status.get(slot) != "OUT", "Plate is already outside the incubator"
-        await asyncio.to_thread(self.c.plate_handler.move_plate_from_slot_to_transfer_station, slot)
-        await asyncio.to_thread(self.c.wait_until_not_busy, 50)
-        assert self.c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
+        c = self.c
+        c.plate_handler.move_plate_from_slot_to_transfer_station(slot)
+        c.wait_until_not_busy(timeout=50)
+        assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
         self.plat_status[slot] = "OUT"
 
     @schema_function(skip_self=True)
