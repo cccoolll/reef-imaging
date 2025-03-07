@@ -5,6 +5,11 @@ from IPython.display import Image, display
 from hypha_rpc import connect_to_server, login
 import os
 import dotenv
+import logging  # Added for better error logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 dotenv.load_dotenv()
 ENV_FILE = dotenv.find_dotenv()
@@ -62,56 +67,137 @@ async def check_sample_loaded():
 
 async def load_plate_from_incubator_to_microscope(incubator_slot=33):
     global sample_loaded, incubator, microscope, robotic_arm
-    assert not sample_loaded, "Sample plate has already been loaded"
-    await incubator.get_sample_from_slot_to_transfer_station(incubator_slot)
-    await microscope.home_stage()
-    print("Plate loaded on station.")
-    await robotic_arm.grab_sample_from_incubator()
-    print("Sample grabbed.")
-    await robotic_arm.transport_from_incubator_to_microscope1()
-    print("Sample transported.")
-    await robotic_arm.put_sample_on_microscope1()
-    print("Sample placed on microscope.")
-    await microscope.return_stage()
-    print("Sample plate successfully loaded onto microscope stage.")
-    sample_loaded = True
+    try:
+        assert not sample_loaded, "Sample plate has already been loaded"
+        await incubator.get_sample_from_slot_to_transfer_station(incubator_slot)
+        await microscope.home_stage()
+        print("Plate loaded on station.")
+        
+        try:
+            await robotic_arm.grab_sample_from_incubator()
+            print("Sample grabbed.")
+        except Exception as e:
+            logger.error(f"Error grabbing sample from incubator: {e}")
+            await robotic_arm.halt()
+            # Return early to prevent further steps from executing
+            return False
+            
+        try:
+            await robotic_arm.transport_from_incubator_to_microscope1()
+            print("Sample transported.")
+        except Exception as e:
+            robotic_arm.halt()
+            logger.error(f"Error transporting sample to microscope: {e}")
+            # Attempt to return sample to incubator if possible
+            try:
+                await robotic_arm.transport_from_microscope1_to_incubator()
+                await robotic_arm.put_sample_on_incubator()
+                await incubator.put_sample_from_transfer_station_to_slot(incubator_slot)
+            except:
+                robotic_arm.halt()
+                logger.error("Failed to return sample to incubator after transport failure")
+            return False
+            
+        # Continue with remaining operations with error handling
+        try:
+            await robotic_arm.put_sample_on_microscope1()
+            print("Sample placed on microscope.")
+        except Exception as e:
+            robotic_arm.halt()
+            logger.error(f"Error placing sample on microscope: {e}")
+            return False
+            
+        await microscope.return_stage()
+        print("Sample plate successfully loaded onto microscope stage.")
+        sample_loaded = True
+        return True
+    except Exception as e:
+        logger.error(f"Error during sample loading process: {e}")
+        return False
 
 async def unload_plate_from_microscope(incubator_slot=33):
     global sample_loaded, incubator, microscope, robotic_arm
-    assert sample_loaded, "Sample plate is not on the microscope"
-    await microscope.home_stage()
-    print("Microscope homed.")
-    await robotic_arm.grab_sample_from_microscope1()
-    print("Sample grabbed from microscope.")
-    await robotic_arm.transport_from_microscope1_to_incubator()
-    print("Sample moved to incubator.")
-    await robotic_arm.put_sample_on_incubator()
-    print("Sample placed on incubator.")
-    await incubator.put_sample_from_transfer_station_to_slot(incubator_slot)
-    print("Sample moved to incubator.")
-    await microscope.return_stage()
-    print("Sample successfully unloaded from the microscopy stage.")
-    sample_loaded = False
+    try:
+        assert sample_loaded, "Sample plate is not on the microscope"
+        await microscope.home_stage()
+        print("Microscope homed.")
+        
+        try:
+            await robotic_arm.grab_sample_from_microscope1()
+            print("Sample grabbed from microscope.")
+        except Exception as e:
+            robotic_arm.halt()
+            logger.error(f"Error grabbing sample from microscope: {e}")
+            return False
+            
+        try:
+            await robotic_arm.transport_from_microscope1_to_incubator()
+            print("Sample moved to incubator.")
+        except Exception as e:
+            logger.error(f"Error transporting sample to incubator: {e}")
+            return False
+            
+        try:
+            await robotic_arm.put_sample_on_incubator()
+            print("Sample placed on incubator.")
+        except Exception as e:
+            logger.error(f"Error placing sample on incubator: {e}")
+            return False
+            
+        await incubator.put_sample_from_transfer_station_to_slot(incubator_slot)
+        print("Sample moved to incubator.")
+        await microscope.return_stage()
+        print("Sample successfully unloaded from the microscopy stage.")
+        sample_loaded = False
+        return True
+    except Exception as e:
+        logger.error(f"Error during sample unloading process: {e}")
+        return False
 
 async def run_cycle():
     """Run the complete load-scan-unload process."""
     try:
-        await load_plate_from_incubator_to_microscope(incubator_slot=33)
-        await microscope.scan_well_plate(illuminate_channels=['BF LED matrix full','Fluorescence 488 nm Ex','Fluorescence 561 nm Ex'],do_reflection_af=True,scanning_zone=[(0,0),(7,11)], action_ID='testPlateScan')
-        await unload_plate_from_microscope(incubator_slot=33)
+        loading_success = await load_plate_from_incubator_to_microscope(incubator_slot=33)
+        if not loading_success:
+            logger.error("Failed to load sample - aborting cycle")
+            return False
+            
+        try:
+            await microscope.scan_well_plate(
+                illuminate_channels=['BF LED matrix full','Fluorescence 488 nm Ex','Fluorescence 561 nm Ex'],
+                do_reflection_af=True,
+                scanning_zone=[(0,0),(7,11)], 
+                action_ID='testPlateScan'
+            )
+        except Exception as e:
+            logger.error(f"Error during microscope scanning: {e}")
+            # Even if scanning fails, try to return the sample to incubator
+        
+        unloading_success = await unload_plate_from_microscope(incubator_slot=33)
+        if not unloading_success:
+            logger.error("Failed to unload sample - manual intervention may be required")
+            return False
+            
+        return True
     except Exception as e:
-        print(f"Error during cycle: {e}")
+        logger.error(f"Unexpected error during cycle: {e}")
+        return False
 
 async def run_every_hour():
     """Run the cycle every hour (3600 seconds)."""
     while True:
         start_time = asyncio.get_event_loop().time()
-        print("Starting new cycle...")
-        await run_cycle()
+        logger.info("Starting new cycle...")
+        success = await run_cycle()
+        if success:
+            logger.info("Cycle completed successfully")
+        else:
+            logger.warning("Cycle completed with errors")
+            
         end_time = asyncio.get_event_loop().time()
         elapsed = end_time - start_time
         sleep_time = max(0, 3600 - elapsed)
-        print(f"Cycle complete. Elapsed time: {elapsed:.2f} seconds. Waiting {sleep_time:.2f} seconds until next cycle.")
+        print(f"Elapsed time: {elapsed:.2f} seconds. Waiting {sleep_time:.2f} seconds until next cycle.")
         await asyncio.sleep(sleep_time)
 
 async def main():
