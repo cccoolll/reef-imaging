@@ -63,7 +63,7 @@ class RoboticArmService:
     def connect(self):
         """
         Connect and occupy the robot, so that it can be controlled.
-        Returns: bool True
+        Returns: bool
         """
         self.robot.connect(self.ip)
         self.connected = True
@@ -74,7 +74,7 @@ class RoboticArmService:
     def disconnect(self):
         """
         Disconnect the robot, so that it can be used by other clients.
-        Returns: bool True
+        Returns: bool
         """
         self.robot.close()
         self.connected = False
@@ -92,102 +92,137 @@ class RoboticArmService:
     def play_script(self, script_path):
         if not self.connected:
             self.connect()
-        self.robot.play_script(script_path)
-        return "Script played"
+        result = self.robot.play_script(script_path)
+        if result != 2:
+            raise Exception("Error playing script")
+        else:
+            return "Script played"
 
     @schema_function(skip_self=True)
     def move_sample_from_microscope1_to_incubator(self):
         """
         Move sample from microscope1 to incubator, the microscope need to be homed before
-        Returns: bool True
+        Returns: bool
         """
         self.set_motor(1)
-        self.play_script("paths/microscope1_to_incubator.txt")
-        print("Sample moved from microscope1 to incubator")
-        return True
+        try:
+            self.play_script("paths/microscope1_to_incubator.txt")
+            print("Sample moved from microscope1 to incubator")
+            return True
+        except Exception as e:
+            print(f"Failed to move sample from microscope1 to incubator: {e}")
+            return False
 
     @schema_function(skip_self=True)
     def move_sample_from_incubator_to_microscope1(self):
         """
         Move sample from incubator to microscope1, microscope need to be homed before
-        Returns: bool True
+        Returns: bool
         """
         self.set_motor(1)
-        self.play_script("paths/incubator_to_microscope1.txt")
-        print("Sample moved from incubator to microscope1")
-        return True
+        try:
+            self.play_script("paths/incubator_to_microscope1.txt")
+            print("Sample moved from incubator to microscope1")
+            return True
+        except Exception as e:
+            print(f"Failed to move sample from incubator to microscope1: {e}")
+            return False
 
     @schema_function(skip_self=True)
     def grab_sample_from_microscope1(self):
         """
         Transport a sample from microscope1 to the incubator
-        Returns: bool True
+        Returns: bool
         """
         self.set_motor(1)
-        self.play_script("paths/grab_from_microscope1.txt")
-        print("Sample grabbed from microscope1")
-        return True
+        try:
+            self.play_script("paths/grab_from_microscope1.txt")
+            print("Sample grabbed from microscope1")
+            return True
+        except Exception as e:
+            print(f"Failed to grab sample from microscope1: {e}")
+            return False
 
     @schema_function(skip_self=True)
     def grab_sample_from_incubator(self):
         """
         Grab a sample from the incubator
-        Returns: bool True
+        Returns: bool
         """
         self.set_motor(1)
-        self.play_script("paths/grab_from_incubator.txt")
-        print("Sample grabbed from incubator")
-        return True
+        try:
+            self.play_script("paths/grab_from_incubator.txt")
+            print("Sample grabbed from incubator")
+            return True
+        except Exception as e:
+            print(f"Failed to grab sample from incubator: {e}")
+            return False
 
     @schema_function(skip_self=True)
     def put_sample_on_microscope1(self):
         """
         Place a sample on microscope1
-        Returns: bool True
+        Returns: bool
         """
         self.set_motor(1)
-        self.play_script("paths/put_on_microscope1.txt")
-        print("Sample placed on microscope1")
-        return True
+        try:
+            self.play_script("paths/put_on_microscope1.txt")
+            print("Sample placed on microscope1")
+            return True
+        except Exception as e:
+            print(f"Failed to put sample on microscope1: {e}")
+            return False
 
     @schema_function(skip_self=True)
     def put_sample_on_incubator(self):
         """
         Place a sample on the incubator.
-        Returns: bool True
+        Returns: bool
         """
         self.set_motor(1)
-        self.play_script("paths/put_on_incubator.txt")
-        print("Sample placed on incubator")
-        return True
+        try:
+            self.play_script("paths/put_on_incubator.txt")
+            print("Sample placed on incubator")
+            return True
+        except Exception as e:
+            print(f"Failed to put sample on incubator: {e}")
+            return False
 
     @schema_function(skip_self=True)
     def transport_from_incubator_to_microscope1(self):
         """
         Transport a sample from the incubator to microscope1
-        Returns: bool True
+        Returns: bool
         """
         self.set_motor(1)
-        self.play_script("paths/transport_from_incubator_to_microscope1.txt")
-        print("Sample moved from incubator to microscope1")
-        return True
+        try:
+            self.play_script("paths/transport_from_incubator_to_microscope1.txt")
+            print("Sample moved from incubator to microscope1")
+            return True
+        except Exception as e:
+            print(f"Failed to transport sample from incubator to microscope1: {e}")
+            return False
 
     @schema_function(skip_self=True)
     def transport_from_microscope1_to_incubator(self):
         """
         Transport a sample from microscope1 to the incubator
-        Returns: bool True
+        Returns: bool
         """
         self.set_motor(1)
-        self.play_script("paths/transport_from_microscope1_to_incubator.txt")
-        print("Sample moved from microscope1 to incubator")
-        return True
+        try:
+            self.play_script("paths/transport_from_microscope1_to_incubator.txt")
+            print("Sample moved from microscope1 to incubator")
+            return True
+        except Exception as e:
+            print(f"Failed to transport sample from microscope1 to incubator: {e}")
+            return False
 
     @schema_function(skip_self=True)
     def halt(self):
         """
         Halt/stop the robot, stop all the movements
-        Returns: bool True
+        Returns: bool
         """
         if not self.connected:
             self.connect()
