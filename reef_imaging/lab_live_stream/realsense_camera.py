@@ -76,7 +76,7 @@ def gen_frames():
 def record_time_lapse():
     global frame_bytes
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    interval = 1 / 24 * 30  # 30x speed up
+    interval = 1 / 24 * 15  # 15x speed up
 
     while recording_event.is_set():
         timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime())
