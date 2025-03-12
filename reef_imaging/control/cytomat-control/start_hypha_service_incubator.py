@@ -7,6 +7,7 @@ from pydantic import Field
 from hypha_rpc.utils.schema import schema_function
 from typing import Optional
 import dotenv
+import json
 
 dotenv.load_dotenv()  
 ENV_FILE = dotenv.find_dotenv()  
@@ -42,6 +43,7 @@ class IncubatorService:
         self.server_url = "http://localhost:9527" if local else "https://hypha.aicell.io"
         self.c = Cytomat("/dev/ttyUSB1", json_path="/home/tao/workspace/cytomat-controller/docs/config.json")
         self.plat_status = {}
+        self.samples_file = "/home/tao/workspace/reef-imaging/reef_imaging/control/cytomat-control/samples.json"
 
     async def start_hypha_service(self, server):
         svc = await server.register_service({
@@ -60,6 +62,7 @@ class IncubatorService:
             "get_sample_status": self.get_sample_status,
             "get_temperature": self.get_temperature,
             "get_co2_level": self.get_co2_level,
+            "get_slot_information": self.get_slot_information,
         })
 
         print(f"Incubator control service registered at workspace: {server.config.workspace}, id: {svc.id}")
@@ -95,11 +98,24 @@ class IncubatorService:
     @schema_function(skip_self=True)
     def get_temperature(self):
         """Get the current temperature of the incubator"""
+        self.c.wait_until_not_busy(timeout=50)
+        print(f"Temperature: {self.c.climate_controller.current_temperature}")
         return self.c.climate_controller.current_temperature
     
     @schema_function(skip_self=True)
+    def get_slot_information(self, slot: int = Field(1, description="Slot number, range: 1-42")):
+        """Get the current slot information of the incubator"""
+        with open(self.samples_file, 'r') as file:
+            samples = json.load(file)
+        slot_info = next((sample for sample in samples if sample["incubator_slot"] == slot), None)
+        return slot_info
+
+
+    @schema_function(skip_self=True)
     def get_co2_level(self):
         """Get the current CO2 level of the incubator"""
+        self.c.wait_until_not_busy(timeout=50)
+        print(f"CO2 level: {self.c.climate_controller.current_co2}")
         return self.c.climate_controller.current_co2
 
     @schema_function(skip_self=True)

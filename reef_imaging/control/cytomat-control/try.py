@@ -6,9 +6,9 @@ c = Cytomat("/dev/ttyUSB1", json_path="/home/tao/workspace/cytomat-controller/do
 # Initialize the plate handler
 #c.plate_handler.initialize()
 print("Current temperature:", c.climate_controller.current_temperature)
-print("Current CO2 level:", c.climate_controller.current_co2)
-print("Plate on transfer station?", c.overview_status.transfer_station_occupied)
-print(c.overview_status)
+#print("Current CO2 level:", c.climate_controller.current_co2)
+#print("Plate on transfer station?", c.overview_status.transfer_station_occupied)
+#print(c.overview_status)
 
 # slot = int(5)
 # c.wait_until_not_busy(timeout=50)

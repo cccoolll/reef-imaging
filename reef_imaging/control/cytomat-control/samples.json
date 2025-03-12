@@ -1,0 +1,380 @@
+[
+    {
+        "incubator_slot": 1,
+        "name": "Sample1",
+        "date_to_incubator": "2021-09-01T00:00:00Z",
+        "start_imaging": "2021-09-01T00:00:00Z",
+        "end_imaging": "2021-09-01T00:00:00Z",
+        "time_lapse_hours": 1,
+        "allocated_microscope": 1
+    },
+    {
+        "incubator_slot": 2,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 3,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 4,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 5,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 6,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 7,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 8,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 9,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 10,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 11,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 12,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 13,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 14,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 15,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 16,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 17,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 18,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 19,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 20,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 21,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 22,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 23,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 24,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 25,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 26,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 27,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 28,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 29,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 30,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 31,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 32,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 33,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 34,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 35,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 36,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 37,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 38,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 39,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 40,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 41,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    },
+    {
+        "incubator_slot": 42,
+        "name": "",
+        "date_to_incubator": "",
+        "start_imaging": "",
+        "end_imaging": "",
+        "time_lapse_hours": 0,
+        "allocated_microscope": 0
+    }
+]
