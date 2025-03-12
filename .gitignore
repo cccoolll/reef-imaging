@@ -177,3 +177,5 @@ node_modules/
 package-lock.json
 package.json
 .eslintrc.json
+reef_imaging/control/dorna-control/dorna.log.1
+traefik/acme/acme.json

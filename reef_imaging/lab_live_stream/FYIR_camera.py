@@ -23,7 +23,7 @@ logging.basicConfig(level=logging.INFO)
 
 # Change from a global camera to a function that returns a fresh camera object
 def get_camera():
-    cam = cv2.VideoCapture("/dev/video0")
+    cam = cv2.VideoCapture(1)
     # Force camera settings refresh
     cam.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     return cam

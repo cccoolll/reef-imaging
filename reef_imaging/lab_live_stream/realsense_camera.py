@@ -9,6 +9,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from threading import Thread, Event
+from datetime import datetime, timedelta
 
 # Get the absolute path to the directory where the script is located
 base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -27,81 +28,88 @@ def get_camera():
     cam.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     return cam
 
+video_dir = '/media/reef/harddisk/dorna_video'
+os.makedirs(video_dir, exist_ok=True)
+
 recording_event = Event()
-recording_thread = None
+recording_event.set()  # Automatically start recording
 frame_bytes = None
 
-def gen_frames(camera_instance):
+camera = get_camera()  # Keep a single camera instance
+
+def capture_frames():
     global frame_bytes
-    while True:
-        success, frame = camera_instance.read()
+    while recording_event.is_set():
+        success, frame = camera.read()
         if not success:
             logging.error("Failed to capture image")
             frame_bytes = None  # Clear frame_bytes on error
-            break
         else:
-            # Convert to grayscale (infrared cameras often work best in grayscale)
-            gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            # rotate 180 degrees
-            gray_frame = cv2.rotate(gray_frame, cv2.ROTATE_180)
-            # Add timestamp to the frame
-            timestamp = time.strftime('%H:%M', time.localtime())
-            cv2.putText(gray_frame, timestamp, (gray_frame.shape[1] - 100, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+            # Convert to grayscale
+            #frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+            #rotate 180 degree
+            frame = cv2.rotate(frame, cv2.ROTATE_180)
+
+            # Add date and time timestamp to the frame
+            timestamp = time.strftime('%Y-%m-%d %H:%M', time.localtime())
+            cv2.putText(frame, timestamp, (frame.shape[1] - 330, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
 
             # Compress the image by adjusting the JPEG quality
-            #encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50]  # Adjust quality as needed (0-100)
-            ret, buffer = cv2.imencode('.jpg', gray_frame) #, encode_param)
+            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50]  # Adjust quality as needed (0-100)
+            ret, buffer = cv2.imencode('.jpg', frame, encode_param)
             if not ret:
                 logging.error("Failed to encode image")
                 frame_bytes = None  # Clear frame_bytes on error
-                break
+            else:
+                frame_bytes = buffer.tobytes()
+        time.sleep(0.1)  # Reduce CPU load
 
-            frame_bytes = buffer.tobytes()
+def gen_frames():
+    global frame_bytes
+    while True:
+        if frame_bytes:
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-
         time.sleep(0.1)  # Reduce CPU load
 
 def record_time_lapse():
     global frame_bytes
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime())
-    filename = f"time_lapse_{timestamp}.mp4"
-    out = cv2.VideoWriter(os.path.join(base_dir, "static", filename), fourcc, 24, (640, 480))
+    interval = 1 / 24 * 30  # 30x speed up
 
-    start_time = time.time()
-    duration = 1 * 60 * 60  # 1 hour
-    interval = 1 / 24 * 60  # 60x speed up
+    while recording_event.is_set():
+        timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime())
+        filename = f"time_lapse_{timestamp}.mp4"
+        out = cv2.VideoWriter(os.path.join(video_dir, filename), fourcc, 24, (640, 480))
 
-    while time.time() - start_time < duration:
-        if recording_event.is_set():
-            if frame_bytes:
+        start_time = time.time()
+        duration = 30 * 60  # 30 minutes
+
+        while time.time() - start_time < duration:
+            if recording_event.is_set() and frame_bytes:
                 frame = cv2.imdecode(np.frombuffer(frame_bytes, np.uint8), cv2.IMREAD_COLOR)
-                out.write(frame)
-            else:
-                camera = get_camera()
-                success, frame = camera.read()
-                #compress the image by adjusting the JPEG quality
-                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 90]
-                ret, buffer = cv2.imencode('.jpg', frame, encode_param)
-                if not ret:
-                    logging.error("Failed to encode image")
-                    break
-                frame_bytes = buffer.tobytes()
-                frame = cv2.imdecode(np.frombuffer(frame_bytes, np.uint8), cv2.IMREAD_COLOR)
-                #add timestamp to the frame
-                timestamp = time.strftime('%H:%M', time.localtime())
-                cv2.putText(frame, timestamp, (frame.shape[1] - 100, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
-
-                if success:
+                if frame is not None and frame.size > 0:
                     out.write(frame)
-                camera.release()
-            time.sleep(interval)
-        else:
-            break
+                time.sleep(interval)
+            else:
+                break
 
-    out.release()
+        out.release()
+        logging.info(f"Time-lapse recording saved: {filename}")
+
     logging.info("Time-lapse recording finished")
+
+def clean_old_videos():
+    now = datetime.now()
+    cutoff = now - timedelta(hours=72)
+    for filename in os.listdir(video_dir):
+        filepath = os.path.join(video_dir, filename)
+        if os.path.isfile(filepath):
+            file_time = datetime.fromtimestamp(os.path.getmtime(filepath))
+            if file_time < cutoff:
+                os.remove(filepath)
+                logging.info(f"Deleted old video: {filename}")
 
 @app.get('/')
 def index(request: Request):
@@ -109,44 +117,34 @@ def index(request: Request):
 
 @app.get('/video_feed')
 async def video_feed(request: Request):
-    global frame_bytes
-    frame_bytes = None  # Clear the previous frame
-    
-    # Get a fresh camera instance for each connection
-    camera_instance = get_camera()
-    
     async def generator():
         try:
-            for frame in gen_frames(camera_instance):
+            for frame in gen_frames():
                 if await request.is_disconnected():
                     logging.info("Client disconnected, stopping the generator")
-                    frame_bytes = None
                     break
                 yield frame
-        finally:
-            # Make sure to release the camera when done
-            camera_instance.release()
-            logging.info("Camera released")
-    
+        except Exception as e:
+            logging.error(f"Error in video feed: {e}")
+
     return StreamingResponse(generator(), media_type='multipart/x-mixed-replace; boundary=frame')
 
-@app.post('/start_time_lapse')
-async def start_time_lapse(request: Request):
-    global recording_thread
-    if recording_event.is_set():
-        return JSONResponse(content={"message": "Recording in progress"}, status_code=400)
-    else:
-        recording_event.set()
-        recording_thread = Thread(target=record_time_lapse)
-        recording_thread.start()
-        return JSONResponse(content={"message": "Time-lapse recording started"}, status_code=200)
-
-@app.post('/stop_time_lapse')
-async def stop_time_lapse(request: Request):
-    recording_event.clear()
-    if recording_thread:
-        recording_thread.join()
-    return JSONResponse(content={"message": "Time-lapse recording stopped"}, status_code=200)
-
 if __name__ == '__main__':
+    # Start a background thread to clean old videos periodically
+    def periodic_cleaning():
+        while True:
+            clean_old_videos()
+            time.sleep(3600)  # Run every hour
+
+    cleaning_thread = Thread(target=periodic_cleaning, daemon=True)
+    cleaning_thread.start()
+
+    # Start the frame capture in a background thread
+    capture_thread = Thread(target=capture_frames, daemon=True)
+    capture_thread.start()
+
+    # Start the time-lapse recording in a background thread
+    recording_thread = Thread(target=record_time_lapse, daemon=True)
+    recording_thread.start()
+
     uvicorn.run(app, host='0.0.0.0', port=8001)  # Running on a different port
