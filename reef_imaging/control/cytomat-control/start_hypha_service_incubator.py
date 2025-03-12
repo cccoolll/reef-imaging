@@ -40,7 +40,7 @@ class IncubatorService:
     def __init__(self, local):
         self.local = local
         self.server_url = "http://localhost:9527" if local else "https://hypha.aicell.io"
-        self.c = Cytomat("/dev/ttyUSB0", json_path="/home/tao/workspace/cytomat-controller/docs/config.json")
+        self.c = Cytomat("/dev/ttyUSB1", json_path="/home/tao/workspace/cytomat-controller/docs/config.json")
         self.plat_status = {}
 
     async def start_hypha_service(self, server):
@@ -58,6 +58,8 @@ class IncubatorService:
             "is_busy": self.is_busy,
             "reset_error_status": self.reset_error_status,
             "get_sample_status": self.get_sample_status,
+            "get_temperature": self.get_temperature,
+            "get_co2_level": self.get_co2_level,
         })
 
         print(f"Incubator control service registered at workspace: {server.config.workspace}, id: {svc.id}")
@@ -89,6 +91,16 @@ class IncubatorService:
         self.c.wait_until_not_busy(timeout=60)
         assert self.c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
         return "Incubator initialized."
+    
+    @schema_function(skip_self=True)
+    def get_temperature(self):
+        """Get the current temperature of the incubator"""
+        return self.c.climate_controller.current_temperature
+    
+    @schema_function(skip_self=True)
+    def get_co2_level(self):
+        """Get the current CO2 level of the incubator"""
+        return self.c.climate_controller.current_co2
 
     @schema_function(skip_self=True)
     def reset_error_status(self):

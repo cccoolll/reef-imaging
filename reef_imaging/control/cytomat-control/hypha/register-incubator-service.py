@@ -6,12 +6,12 @@ async def start_server(server_url):
     server = await connect_to_server({"server_url": server_url})
     
     def initialize():
-        c = Cytomat("/dev/ttyUSB0", json_path="/home/tao/workspace/cytomat-controller/docs/config.json")
+        c = Cytomat("/dev/ttyUSB1", json_path="/home/tao/workspace/cytomat-controller/docs/config.json")
         c.plate_handler.initialize()
         
     def move_plate(slot):
         # Initialize Cytomat with the correct serial port and configuration file path
-        c = Cytomat("/dev/ttyUSB0", json_path="/home/tao/workspace/cytomat-controller/docs/config.json")
+        c = Cytomat("/dev/ttyUSB1", json_path="/home/tao/workspace/cytomat-controller/docs/config.json")
         c.wait_until_not_busy(timeout=50)
         c.plate_handler.initialize()
         c.wait_until_not_busy(timeout=50)
@@ -22,15 +22,15 @@ async def start_server(server_url):
         return f"Plate moved to slot {slot} and back to transfer station."
     
     def put_sample_from_transfer_station_to_slot(slot=5):
-        c = Cytomat("/dev/ttyUSB0")
+        c = Cytomat("/dev/ttyUSB1")
         c.plate_handler.move_plate_from_transfer_station_to_slot(slot)
 
     def get_sample_from_slot_to_transfer_station(slot=5):
-        c = Cytomat("/dev/ttyUSB0")
+        c = Cytomat("/dev/ttyUSB1")
         c.plate_handler.move_plate_from_slot_to_transfer_station(slot)
     
     def is_busy():
-        c = Cytomat("/dev/ttyUSB0")
+        c = Cytomat("/dev/ttyUSB1")
         return c.overview_status.busy
     
 
