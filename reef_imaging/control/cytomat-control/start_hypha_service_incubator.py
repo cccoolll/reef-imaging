@@ -42,8 +42,13 @@ class IncubatorService:
         self.local = local
         self.server_url = "http://localhost:9527" if local else "https://hypha.aicell.io"
         self.c = Cytomat("/dev/ttyUSB1", json_path="/home/tao/workspace/cytomat-controller/docs/config.json")
-        self.plat_status = {}
         self.samples_file = "/home/tao/workspace/reef-imaging/reef_imaging/control/cytomat-control/samples.json"
+        try:
+            with open(self.samples_file, 'r') as file:
+                samples = json.load(file)
+            self.plat_status = {sample["incubator_slot"]: sample["status"] for sample in samples}
+        except Exception as e:
+            self.plat_status = {}
 
     async def start_hypha_service(self, server):
         svc = await server.register_service({
@@ -151,8 +156,19 @@ class IncubatorService:
         assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
         return f"Plate moved to slot {slot} and back to transfer station."
     
+    def update_sample_status(self, slot: int, status: str):
+        # Update the sample's status in samples.json
+        with open(self.samples_file, 'r') as file:
+            samples = json.load(file)
+        for sample in samples:
+            if sample["incubator_slot"] == slot:
+                sample["status"] = status
+                break
+        with open(self.samples_file, 'w') as file:
+            json.dump(samples, file, indent=4)
+
     @schema_function(skip_self=True)
-    def put_sample_from_transfer_station_to_slot(self, slot:int=Field(5, description="Slot number,range: 1-42")):
+    def put_sample_from_transfer_station_to_slot(self, slot: int = Field(5, description="Slot number,range: 1-42")):
         """
         Collect sample from transfer station to a slot
         Returns: A string message
@@ -163,9 +179,10 @@ class IncubatorService:
         c.wait_until_not_busy(timeout=50)
         assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
         self.plat_status[slot] = "IN"
-
+        self.update_sample_status(slot, "IN")
+    
     @schema_function(skip_self=True)
-    def get_sample_from_slot_to_transfer_station(self, slot:int=Field(5, description="Slot number,range: 1-42")):
+    def get_sample_from_slot_to_transfer_station(self, slot: int = Field(5, description="Slot number,range: 1-42")):
         """Release sample from a incubator's slot to it's transfer station."""
         assert self.plat_status.get(slot) != "OUT", "Plate is already outside the incubator"
         c = self.c
@@ -173,14 +190,18 @@ class IncubatorService:
         c.wait_until_not_busy(timeout=50)
         assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
         self.plat_status[slot] = "OUT"
+        self.update_sample_status(slot, "OUT")
 
     @schema_function(skip_self=True)
-    def get_sample_status(self, slot:Optional[int]=Field(None, description="Slot number,range: 1-42, or None for all slots")):
-        """Check the status of the sample plats, either "IN "the incubator or "OUT", None means unknown"""
+    def get_sample_status(self, slot: Optional[int] = Field(None, description="Slot number, range: 1-42, or None for all slots")):
+        """Return the status of sample plates from samples.json"""
+        with open(self.samples_file, 'r') as file:
+            samples = json.load(file)
         if slot is None:
-            return self.plat_status
+            return {sample["incubator_slot"]: sample["status"] for sample in samples}
         else:
-            return self.plat_status.get(slot)
+            sample = next((s for s in samples if s["incubator_slot"] == slot), None)
+            return sample["status"] if sample else "Unknown"
     
 
     def is_busy(self):
