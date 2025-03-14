@@ -39,6 +39,8 @@ class RoboticArmService:
             "connect": self.connect,
             "disconnect": self.disconnect,
             "halt": self.halt,
+            "get_all_joints": self.get_all_joints,
+            "get_all_positions": self.get_all_positions,
         })
 
         print(f"Robotic arm control service registered at workspace: {server.config.workspace}, id: {svc.id}")
@@ -97,6 +99,26 @@ class RoboticArmService:
             raise Exception("Error playing script")
         else:
             return "Script played"
+    
+    @schema_function(skip_self=True)
+    def get_all_joints(self):
+        """
+        Get the current position of all joints
+        Returns: dict
+        """
+        if not self.connected:
+            self.connect()
+        return self.robot.get_all_joint()
+    
+    @schema_function(skip_self=True)
+    def get_all_positions(self):
+        """
+        Get the current position of all joints
+        Returns: dict
+        """
+        if not self.connected:
+            self.connect()
+        return self.robot.get_all_pose()
 
     @schema_function(skip_self=True)
     def move_sample_from_microscope1_to_incubator(self):

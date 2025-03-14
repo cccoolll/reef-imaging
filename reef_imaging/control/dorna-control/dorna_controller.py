@@ -70,11 +70,14 @@ class DornaController:
         self.robot.halt()
         print("Robot halted")
 
+        
+
 if __name__ == "__main__":
     controller = DornaController()
     # Example usage
     controller.connect()
     #move_plate(controller, "microscope1", "incubator")
     print("Is robot busy?", controller.is_busy())
-    controller.halt()
+    #controller.halt()
+    print(controller.robot.get_all_joint())
     controller.disconnect()

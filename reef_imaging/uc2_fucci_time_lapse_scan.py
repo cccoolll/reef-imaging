@@ -65,7 +65,7 @@ async def check_sample_loaded():
         print("Sample plate is not loaded yet")
     return sample_loaded
 
-async def load_plate_from_incubator_to_microscope(incubator_slot=35):
+async def load_plate_from_incubator_to_microscope(incubator_slot=10):
     global sample_loaded, incubator, microscope, robotic_arm
     try:
         assert not sample_loaded, "Sample plate has already been loaded"
@@ -115,7 +115,7 @@ async def load_plate_from_incubator_to_microscope(incubator_slot=35):
         logger.error(f"Error during sample loading process: {e}")
         return False
 
-async def unload_plate_from_microscope(incubator_slot=35):
+async def unload_plate_from_microscope(incubator_slot=10):
     global sample_loaded, incubator, microscope, robotic_arm
     try:
         assert sample_loaded, "Sample plate is not on the microscope"
@@ -157,7 +157,7 @@ async def unload_plate_from_microscope(incubator_slot=35):
 async def run_cycle():
     """Run the complete load-scan-unload process."""
     try:
-        loading_success = await load_plate_from_incubator_to_microscope(incubator_slot=35)
+        loading_success = await load_plate_from_incubator_to_microscope(incubator_slot=10)
         if not loading_success:
             logger.error("Failed to load sample - aborting cycle")
             return False
@@ -167,13 +167,13 @@ async def run_cycle():
                 illuminate_channels=['BF LED matrix full','Fluorescence 488 nm Ex','Fluorescence 561 nm Ex'],
                 do_reflection_af=True,
                 scanning_zone=[(0,0),(7,11)], 
-                action_ID='20250307'
+                action_ID='20250313'
             )
         except Exception as e:
             logger.error(f"Error during microscope scanning: {e}")
             # Even if scanning fails, try to return the sample to incubator
         
-        unloading_success = await unload_plate_from_microscope(incubator_slot=35)
+        unloading_success = await unload_plate_from_microscope(incubator_slot=10)
         if not unloading_success:
             logger.error("Failed to unload sample - manual intervention may be required")
             return False
