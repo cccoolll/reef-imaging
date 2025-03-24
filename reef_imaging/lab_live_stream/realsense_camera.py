@@ -52,8 +52,8 @@ def capture_frames():
             frame = cv2.rotate(frame, cv2.ROTATE_180)
 
             # Add date and time timestamp to the frame
-            timestamp = time.strftime('%Y-%m-%d %H:%M', time.localtime())
-            cv2.putText(frame, timestamp, (frame.shape[1] - 330, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+            timestamp = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+            cv2.putText(frame, timestamp, (frame.shape[1] - 390, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
 
             # Compress the image by adjusting the JPEG quality
             encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50]  # Adjust quality as needed (0-100)
