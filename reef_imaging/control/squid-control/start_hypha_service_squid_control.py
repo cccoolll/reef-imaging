@@ -276,12 +276,12 @@ class Microscope:
         return image_base64  
 
     @schema_function(skip_self=True)
-    def snap(self, exposure_time: int=Field(100, description="Exposure time, in milliseconds"), channel: int=Field(0, description="Light source (0 for Bright Field, Fluorescence channels: 11 for 405 nm, 12 for 488 nm, 13 for 638nm, 14 for 561 nm, 15 for 730 nm)"), intensity: int=Field(50, description="Intensity of the illumination source"), context=None):
+    async def snap(self, exposure_time: int=Field(100, description="Exposure time, in milliseconds"), channel: int=Field(0, description="Light source (0 for Bright Field, Fluorescence channels: 11 for 405 nm, 12 for 488 nm, 13 for 638nm, 14 for 561 nm, 15 for 730 nm)"), intensity: int=Field(50, description="Intensity of the illumination source"), context=None):
         """
         Get an image from microscope
-        Returns:the URL of the image
+        Returns: the URL of the image
         """
-        gray_img = self.squidController.snap_image(channel, intensity, exposure_time)
+        gray_img = await self.squidController.snap_image(channel, intensity, exposure_time)
         print('The image is snapped')
         gray_img = gray_img.astype(np.uint8)
         # Resize the image to a standard size
@@ -341,7 +341,7 @@ class Microscope:
         if illuminate_channels is None:
             illuminate_channels = ['BF LED matrix full','Fluorescence 488 nm Ex','Fluorescence 561 nm Ex']
         print("Start scanning well plate")
-        self.squidController.plate_scan(well_plate_type,illuminate_channels,do_contrast_autofocus,do_reflection_af,scanning_zone,action_ID)
+        self.squidController.plate_scan(well_plate_type, illuminate_channels, do_contrast_autofocus, do_reflection_af, scanning_zone, action_ID)
         print("Well plate scanning completed")
         return "Well plate scanning completed"
 
@@ -429,7 +429,7 @@ class Microscope:
         return 'The camera is auto-focused'
 
     @schema_function(skip_self=True)
-    def navigate_to_well(self, row: str=Field('A', description="Row number of the well position (e.g., 'A')"), col: int=Field(1, description="Column number of the well position"), wellplate_type: str=Field('24', description="Type of the well plate (e.g., '6', '12', '24', '96', '384')"), context=None):
+    def navigate_to_well(self, row: str=Field('A', description="Row number of the well position (e.g., 'A')"), col: int=Field(1, description="Column number of the well position"), wellplate_type: str=Field('96', description="Type of the well plate (e.g., '6', '12', '24', '96', '384')"), context=None):
         """
         Navigate to the specified well position in the well plate.
         Returns: A string message
