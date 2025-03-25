@@ -2,8 +2,21 @@ import asyncio
 from hypha_rpc import connect_to_server
 import dotenv
 import os
+import logging
 
-
+# Configure logging
+log_dir = os.path.join(os.path.dirname(__file__), "logs")
+os.makedirs(log_dir, exist_ok=True)
+log_file = os.path.join(log_dir, "experiment_server.log")
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(log_file, mode='a', encoding='utf-8')
+    ]
+)
+logger = logging.getLogger(__name__)
 
 async def start_server(server_url, workspace, token):
     server = await connect_to_server({"server_url": server_url, "workspace": workspace, "token": token})
@@ -15,15 +28,19 @@ async def start_server(server_url, workspace, token):
 
     def hello1(name):
         task_status["hello1"] = "started"
-        print("Hello1 " + name)
+        message = "Hello1 " + name
+        print(message)
+        logger.info(message)
         task_status["hello1"] = "finished"
-        return "Hello1 " + name
+        return message
 
     def hello2(name):
         task_status["hello2"] = "started"
-        print("Hello2 " + name)
+        message = "Hello2 " + name
+        print(message)
+        logger.info(message)
         task_status["hello2"] = "finished"
-        return "Hello2 " + name
+        return message
 
     def get_status(task_name):
         return task_status.get(task_name, "unknown")
@@ -43,7 +60,9 @@ async def start_server(server_url, workspace, token):
         "reset_status": reset_status
     })
 
-    print(f"Hello world service registered at workspace: {server.config.workspace}, id: {svc.id}")
+    message = f"Hello world service registered at workspace: {server.config.workspace}, id: {svc.id}"
+    print(message)
+    logger.info(message)
 
     # Keep the server running
     await server.serve()

@@ -2,53 +2,79 @@ import asyncio
 from hypha_rpc import connect_to_server
 import os
 import dotenv
+import logging
 
 dotenv.load_dotenv()
 
-async def call_service_with_retries(server_url, service_id, task_name, max_retries=3, timeout=5):
+# Configure logging
+log_dir = os.path.join(os.path.dirname(__file__), "logs")
+os.makedirs(log_dir, exist_ok=True)
+log_file = os.path.join(log_dir, "experiment_client.log")
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(log_file, mode='a', encoding='utf-8')
+    ]
+)
+logger = logging.getLogger(__name__)
+
+async def call_service_with_retries(server_url, service_id, task_name, workspace, token, max_retries=3, timeout=5):
     retries = 0
     while retries < max_retries:
         try:
-            server = await connect_to_server({"server_url": server_url})
+            server = await connect_to_server({"server_url": server_url, "workspace": workspace, "token": token})
             svc = await server.get_service(service_id)
 
             # Check the status of the task
             status = await svc.get_status(task_name)
             if status == "not_started":
-                print(f"Starting the task {task_name}...")
+                message = f"Starting the task {task_name}..."
+                print(message)
+                logger.info(message)
                 if task_name == "hello1":
                     await svc.hello1("John")
                 elif task_name == "hello2":
                     await svc.hello2("John")
             elif status == "finished":
-                print(f"Task {task_name} already finished.")
+                message = f"Task {task_name} already finished."
+                print(message)
+                logger.info(message)
                 return
 
             # Wait for the task to complete
             await asyncio.sleep(timeout)
             status = await svc.get_status(task_name)
             if status == "finished":
-                print(f"Task {task_name} completed successfully.")
+                message = f"Task {task_name} completed successfully."
+                print(message)
+                logger.info(message)
                 # Reset the status for the next loop
                 await svc.reset_status(task_name)
                 return
 
         except Exception as e:
-            print(f"Error: {e}. Retrying... ({retries + 1}/{max_retries})")
+            message = f"Error: {e}. Retrying... ({retries + 1}/{max_retries})"
+            print(message)
+            logger.error(message)
             retries += 1
             await asyncio.sleep(timeout)
 
-    print(f"Max retries reached for task {task_name}. Terminating.")
+    message = f"Max retries reached for task {task_name}. Terminating."
+    print(message)
+    logger.error(message)
 
-async def main_loop(server_url, service_id):
+async def main_loop(server_url, service_id, workspace, token):
     while True:
-        await call_service_with_retries(server_url, service_id, "hello1")
-        await call_service_with_retries(server_url, service_id, "hello2")
+        await call_service_with_retries(server_url, service_id, "hello1", workspace, token)
+        await call_service_with_retries(server_url, service_id, "hello2", workspace, token)
         # Add a delay between loops if needed
         await asyncio.sleep(1)
 
 if __name__ == "__main__":
     server_url = "https://hypha.aicell.io"
     workspace = "reef-imaging"
+    service_id = "hello-world"
     token = os.environ.get("REEF_WORKSPACE_TOKEN")
-    asyncio.run(main_loop(server_url, workspace, token))
+    asyncio.run(main_loop(server_url, service_id, workspace, token))
