@@ -33,21 +33,37 @@ async def start_server(server_url, workspace, token):
 
     def hello1(name):
         task_status["hello1"] = "started"
-        message = "Hello1 " + name
-        print(message)
-        logger.info(message)
-        write_to_txt_file(message)
-        task_status["hello1"] = "finished"
-        return message
+        try:
+            message = "Hello1 " + name
+            print(message)
+            logger.info(message)
+            write_to_txt_file(message)
+            task_status["hello1"] = "finished"
+            return message
+        except Exception as e:
+            error_message = f"Error in hello1: {e}"
+            print(error_message)
+            logger.error(error_message)
+            write_to_txt_file(error_message)
+            task_status["hello1"] = "failed"
+            return error_message
 
     def hello2(name):
         task_status["hello2"] = "started"
-        message = "Hello2 " + name
-        print(message)
-        logger.info(message)
-        write_to_txt_file(message)
-        task_status["hello2"] = "finished"
-        return message
+        try:
+            message = "Hello2 " + name
+            print(message)
+            logger.info(message)
+            write_to_txt_file(message)
+            task_status["hello2"] = "finished"
+            return message
+        except Exception as e:
+            error_message = f"Error in hello2: {e}"
+            print(error_message)
+            logger.error(error_message)
+            write_to_txt_file(error_message)
+            task_status["hello2"] = "failed"
+            return error_message
 
     def get_status(task_name):
         return task_status.get(task_name, "unknown")

@@ -3,6 +3,7 @@ from hypha_rpc import connect_to_server
 import os
 import dotenv
 import logging
+import sys
 
 dotenv.load_dotenv()
 
@@ -25,7 +26,7 @@ def write_to_txt_file(message):
     with open(txt_file, 'a', encoding='utf-8') as f:
         f.write(message + '\n')
 
-async def call_service_with_retries(server_url, service_id, task_name, workspace, token, max_retries=3, timeout=5):
+async def call_service_with_retries(server_url, service_id, task_name, workspace, token, max_retries=100, timeout=5):
     retries = 0
     while retries < max_retries:
         try:
@@ -34,6 +35,13 @@ async def call_service_with_retries(server_url, service_id, task_name, workspace
 
             # Check the status of the task
             status = await svc.get_status(task_name)
+            if status == "failed":
+                message = f"Task {task_name} failed. Stopping execution."
+                print(message)
+                logger.error(message)
+                write_to_txt_file(message)
+                sys.exit(1)  # Exit the program with a non-zero status
+
             if status == "not_started":
                 message = f"Starting the task {task_name}..."
                 print(message)
