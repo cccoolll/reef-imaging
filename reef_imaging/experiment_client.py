@@ -9,16 +9,26 @@ import dotenv
 # Load environment variables
 dotenv.load_dotenv()
 
-# Configure logging
+# Create logs directory if it doesn't exist
+log_dir = os.path.join(os.path.dirname(__file__), "logs")
+os.makedirs(log_dir, exist_ok=True)
+
+# Configure logging with absolute path
+log_file = os.path.join(log_dir, "experiment_client.log")
 logging.basicConfig(
-    level=logging.INFO,  # Set the logging level to INFO
+    level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(),  # Ensure logs are output to the console
-        logging.FileHandler("experiment_client.log")  # Log to a file
+        logging.StreamHandler(),
+        logging.FileHandler(log_file, mode='a', encoding='utf-8')  # 'a' for append mode
     ]
 )
 logger = logging.getLogger(__name__)
+
+# Log startup message to verify logging is working
+logger.info("="*50)
+logger.info("Starting Experiment Client")
+logger.info("="*50)
 
 # Constants
 MAX_RETRIES = 50000000

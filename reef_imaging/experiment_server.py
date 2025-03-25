@@ -10,16 +10,26 @@ import logging
 import dotenv
 import traceback
 
-# Configure logging
+# Create logs directory if it doesn't exist
+log_dir = os.path.join(os.path.dirname(__file__), "logs")
+os.makedirs(log_dir, exist_ok=True)
+
+# Configure logging with absolute path
+log_file = os.path.join(log_dir, "experiment_server.log")
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("experiment_server.log")  # Log to a file
+        logging.FileHandler(log_file, mode='a', encoding='utf-8')  # 'a' for append mode
     ]
 )
 logger = logging.getLogger(__name__)
+
+# Log startup message to verify logging is working
+logger.info("="*50)
+logger.info("Starting Experiment Server")
+logger.info("="*50)
 
 # Load environment variables
 dotenv.load_dotenv()  
@@ -34,22 +44,15 @@ class ExperimentService:
         self.server = None
         self.running = False
         
-        # State file path for persistence
-        self.state_file = os.path.join(os.path.dirname(__file__), "experiment_state.json")
+        # Remove state file path for persistence
+        # self.state_file = os.path.join(os.path.dirname(__file__), "experiment_state.json")
         
         # Load or initialize state
         self.state = self.load_state()
     
     def load_state(self):
         """Load the persisted state or initialize a new one"""
-        try:
-            if os.path.exists(self.state_file):
-                with open(self.state_file, 'r') as f:
-                    return json.load(f)
-        except Exception as e:
-            print(f"Error loading state: {e}")
-            logger.error(f"Error loading state: {e}")
-        
+        # Remove JSON file loading logic
         # Default state
         return {
             "last_completed_operation": None,
@@ -61,13 +64,8 @@ class ExperimentService:
     
     def save_state(self):
         """Persist the current state to disk"""
-        try:
-            self.state["timestamp"] = time.time()
-            with open(self.state_file, 'w') as f:
-                json.dump(self.state, f, indent=2)
-        except Exception as e:
-            print(f"Error saving state: {e}")
-            logger.error(f"Error saving state: {e}")
+        # Remove JSON file saving logic
+        pass
     
     @schema_function(skip_self=True)
     def get_state(self):
@@ -104,11 +102,10 @@ class ExperimentService:
             }
         
         # Update state to indicate operation is starting
-        operation_id = f"operation_1_{int(time.time())}"
+        operation_id = f"operation_1_{self.state['operation_count'] + 1}"
         self.state["status"] = "busy"
         self.state["current_operation"] = operation_id
         self.state["operation_count"] += 1
-        self.save_state()
         
         print(f"Starting long_operation_1 (ID: {operation_id}, duration: {duration}s)")
         logger.info(f"Starting long_operation_1 (ID: {operation_id}, duration: {duration}s)")
@@ -121,7 +118,6 @@ class ExperimentService:
             self.state["status"] = "idle"
             self.state["last_completed_operation"] = operation_id
             self.state["current_operation"] = None
-            self.save_state()
             
             print(f"Completed long_operation_1 (ID: {operation_id})")
             logger.info(f"Completed long_operation_1 (ID: {operation_id})")
@@ -155,11 +151,10 @@ class ExperimentService:
             }
         
         # Update state to indicate operation is starting
-        operation_id = f"operation_2_{int(time.time())}"
+        operation_id = f"operation_2_{self.state['operation_count'] + 1}"
         self.state["status"] = "busy"
         self.state["current_operation"] = operation_id
         self.state["operation_count"] += 1
-        self.save_state()
         
         print(f"Starting long_operation_2 (ID: {operation_id}, duration: {duration}s)")
         logger.info(f"Starting long_operation_2 (ID: {operation_id}, duration: {duration}s)")
@@ -172,7 +167,6 @@ class ExperimentService:
             self.state["status"] = "idle"
             self.state["last_completed_operation"] = operation_id
             self.state["current_operation"] = None
-            self.save_state()
             
             print(f"Completed long_operation_2 (ID: {operation_id})")
             logger.info(f"Completed long_operation_2 (ID: {operation_id})")
@@ -204,7 +198,7 @@ class ExperimentService:
             "status": "idle",
             "timestamp": time.time()
         }
-        self.save_state()
+        #self.save_state()
         return {"success": True, "message": "State reset successfully"}
 
     async def start_hypha_service(self, server):
