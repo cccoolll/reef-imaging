@@ -78,7 +78,20 @@ class ExperimentService:
         return self.state
     
     @schema_function(skip_self=True)
-    def long_operation_1(self, duration: int = Field(10, description="Operation duration in seconds")):
+    def get_operation_status(self, operation_id: str):
+        """
+        Get the status of a specific operation
+        Returns: A dictionary with the operation status
+        """
+        if self.state["current_operation"] == operation_id:
+            return {"status": "in_progress"}
+        elif self.state["last_completed_operation"] == operation_id:
+            return {"status": "completed"}
+        else:
+            return {"status": "not_started"}
+    
+    @schema_function(skip_self=True)
+    def long_operation_1(self, duration: int = Field(3, description="Operation duration in seconds")):
         """
         Simulate a long-running operation (e.g., grab sample)
         Returns: Operation result
@@ -104,14 +117,6 @@ class ExperimentService:
             # Simulate long operation
             time.sleep(duration)
             
-            # 20% chance to simulate a crash without updating state
-            if random.random() < 0.2:
-                print("Simulating a crash during operation!")
-                logger.warning("Simulating a crash during operation!")
-                # Don't update state to simulate incomplete operation
-                # Normally the service would crash here and not return
-                raise Exception("Simulated crash during operation")
-            
             # Update state after successful completion
             self.state["status"] = "idle"
             self.state["last_completed_operation"] = operation_id
@@ -129,8 +134,6 @@ class ExperimentService:
         except Exception as e:
             print(f"Error in long_operation_1: {e}")
             logger.error(f"Error in long_operation_1: {e}")
-            # In a real crash, this code wouldn't execute
-            # But for our simulation, we'll use it to return an error
             return {
                 "success": False, 
                 "message": f"Operation failed: {str(e)}", 
@@ -138,7 +141,7 @@ class ExperimentService:
             }
     
     @schema_function(skip_self=True)
-    def long_operation_2(self, duration: int = Field(15, description="Operation duration in seconds")):
+    def long_operation_2(self, duration: int = Field(5, description="Operation duration in seconds")):
         """
         Simulate another long-running operation (e.g., transport sample)
         Returns: Operation result
