@@ -185,7 +185,12 @@ async def run_cycle():
 
 async def run_time_lapse(round_time=3600):
     """Run the cycle every hour (xxx seconds)."""
+
     while True:
+
+        # set up connection every time
+        global incubator, microscope, robotic_arm
+        incubator, microscope, robotic_arm = await setup_connections()
         start_time = asyncio.get_event_loop().time()
         logger.info("Starting new cycle...")
         success = await run_cycle()
