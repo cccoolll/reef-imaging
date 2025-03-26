@@ -5,7 +5,7 @@ from IPython.display import Image, display
 from hypha_rpc import connect_to_server, login
 import os
 import dotenv
-import logging  # Added for better error logging
+import logging
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
@@ -57,138 +57,124 @@ async def setup_connections():
     print('Connected to devices.')
     return incubator, microscope, robotic_arm
 
-async def check_sample_loaded():
-    global sample_loaded
-    if sample_loaded:
-        print("Sample plate has already been loaded onto the microscope")
-    else:
-        print("Sample plate is not loaded yet")
-    return sample_loaded
+async def call_service_with_retries(service, method_name, *args, max_retries=3, timeout=15):
+    retries = 0
+    while retries < max_retries:
+        try:
+            # Check the status of the task
+            status = await service.get_task_status(method_name)
+            if status == "failed":
+                message = f"Task {method_name} failed. Stopping execution."
+                logger.error(message)
+                return False
+
+            if status == "not_started":
+                logger.info(f"Starting the task {method_name}...")
+                await asyncio.wait_for(getattr(service, method_name)(*args), timeout=timeout)
+
+            # Wait for the task to complete
+            while True:
+                status = await service.get_task_status(method_name)
+                if status == "finished":
+                    logger.info(f"Task {method_name} completed successfully.")
+                    await service.reset_task_status(method_name)
+                    return True
+                elif status == "failed":
+                    logger.error(f"Task {method_name} failed.")
+                    return False
+                await asyncio.sleep(1)
+
+        except asyncio.TimeoutError:
+            logger.warning(f"Operation {method_name} timed out. Retrying... ({retries + 1}/{max_retries})")
+        except Exception as e:
+            logger.error(f"Error: {e}. Retrying... ({retries + 1}/{max_retries})")
+        retries += 1
+        await asyncio.sleep(timeout)
+
+    logger.error(f"Max retries reached for task {method_name}. Terminating.")
+    return False
 
 async def load_plate_from_incubator_to_microscope(incubator_slot=10):
     global sample_loaded, incubator, microscope, robotic_arm
-    try:
-        assert not sample_loaded, "Sample plate has already been loaded"
-        await incubator.get_sample_from_slot_to_transfer_station(incubator_slot)
-        await microscope.home_stage()
-        print("Plate loaded on station.")
-        
-        try:
-            await robotic_arm.grab_sample_from_incubator()
-            print("Sample grabbed.")
-        except Exception as e:
-            logger.error(f"Error grabbing sample from incubator: {e}")
-            await robotic_arm.halt()
-            # Return early to prevent further steps from executing
-            return False
-            
-        try:
-            await robotic_arm.transport_from_incubator_to_microscope1()
-            print("Sample transported.")
-        except Exception as e:
-            robotic_arm.halt()
-            logger.error(f"Error transporting sample to microscope: {e}")
-            # Attempt to return sample to incubator if possible
-            try:
-                await robotic_arm.transport_from_microscope1_to_incubator()
-                await robotic_arm.put_sample_on_incubator()
-                await incubator.put_sample_from_transfer_station_to_slot(incubator_slot)
-            except:
-                robotic_arm.halt()
-                logger.error("Failed to return sample to incubator after transport failure")
-            return False
-            
-        # Continue with remaining operations with error handling
-        try:
-            await robotic_arm.put_sample_on_microscope1()
-            print("Sample placed on microscope.")
-        except Exception as e:
-            robotic_arm.halt()
-            logger.error(f"Error placing sample on microscope: {e}")
-            return False
-            
-        await microscope.return_stage()
-        print("Sample plate successfully loaded onto microscope stage.")
-        sample_loaded = True
+    if sample_loaded:
+        logger.info("Sample plate has already been loaded onto the microscope")
         return True
-    except Exception as e:
-        logger.error(f"Error during sample loading process: {e}")
+
+    if not await call_service_with_retries(incubator, "get_sample_from_slot_to_transfer_station", incubator_slot):
         return False
+
+    if not await call_service_with_retries(microscope, "home_stage"):
+        return False
+
+    if not await call_service_with_retries(robotic_arm, "grab_sample_from_incubator"):
+        return False
+
+    if not await call_service_with_retries(robotic_arm, "transport_from_incubator_to_microscope1"):
+        return False
+
+    if not await call_service_with_retries(robotic_arm, "put_sample_on_microscope1"):
+        return False
+
+    if not await call_service_with_retries(microscope, "return_stage"):
+        return False
+
+    logger.info("Sample plate successfully loaded onto microscope stage.")
+    sample_loaded = True
+    return True
 
 async def unload_plate_from_microscope(incubator_slot=10):
     global sample_loaded, incubator, microscope, robotic_arm
-    try:
-        assert sample_loaded, "Sample plate is not on the microscope"
-        await microscope.home_stage()
-        print("Microscope homed.")
-        
-        try:
-            await robotic_arm.grab_sample_from_microscope1()
-            print("Sample grabbed from microscope.")
-        except Exception as e:
-            robotic_arm.halt()
-            logger.error(f"Error grabbing sample from microscope: {e}")
-            return False
-            
-        try:
-            await robotic_arm.transport_from_microscope1_to_incubator()
-            print("Sample moved to incubator.")
-        except Exception as e:
-            logger.error(f"Error transporting sample to incubator: {e}")
-            return False
-            
-        try:
-            await robotic_arm.put_sample_on_incubator()
-            print("Sample placed on incubator.")
-        except Exception as e:
-            logger.error(f"Error placing sample on incubator: {e}")
-            return False
-            
-        await incubator.put_sample_from_transfer_station_to_slot(incubator_slot)
-        print("Sample moved to incubator.")
-        await microscope.return_stage()
-        print("Sample successfully unloaded from the microscopy stage.")
-        sample_loaded = False
+    if not sample_loaded:
+        logger.info("Sample plate is not on the microscope")
         return True
-    except Exception as e:
-        logger.error(f"Error during sample unloading process: {e}")
+
+    if not await call_service_with_retries(microscope, "home_stage"):
         return False
+
+    if not await call_service_with_retries(robotic_arm, "grab_sample_from_microscope1"):
+        return False
+
+    if not await call_service_with_retries(robotic_arm, "transport_from_microscope1_to_incubator"):
+        return False
+
+    if not await call_service_with_retries(robotic_arm, "put_sample_on_incubator"):
+        return False
+
+    if not await call_service_with_retries(incubator, "put_sample_from_transfer_station_to_slot", incubator_slot):
+        return False
+
+    if not await call_service_with_retries(microscope, "return_stage"):
+        return False
+
+    logger.info("Sample successfully unloaded from the microscopy stage.")
+    sample_loaded = False
+    return True
 
 async def run_cycle():
     """Run the complete load-scan-unload process."""
-    try:
-        loading_success = await load_plate_from_incubator_to_microscope(incubator_slot=10)
-        if not loading_success:
-            logger.error("Failed to load sample - aborting cycle")
-            return False
-            
-        try:
-            await microscope.scan_well_plate(
-                illuminate_channels=['BF LED matrix full','Fluorescence 488 nm Ex','Fluorescence 561 nm Ex'],
-                do_reflection_af=True,
-                scanning_zone=[(0,0),(7,11)], 
-                action_ID='20250313'
-            )
-        except Exception as e:
-            logger.error(f"Error during microscope scanning: {e}")
-            # Even if scanning fails, try to return the sample to incubator
-        
-        unloading_success = await unload_plate_from_microscope(incubator_slot=10)
-        if not unloading_success:
-            logger.error("Failed to unload sample - manual intervention may be required")
-            return False
-            
-        return True
-    except Exception as e:
-        logger.error(f"Unexpected error during cycle: {e}")
+    if not await load_plate_from_incubator_to_microscope(incubator_slot=10):
+        logger.error("Failed to load sample - aborting cycle")
         return False
+
+    try:
+        await microscope.scan_well_plate(
+            illuminate_channels=['BF LED matrix full','Fluorescence 488 nm Ex','Fluorescence 561 nm Ex'],
+            do_reflection_af=True,
+            scanning_zone=[(0,0),(7,11)], 
+            action_ID='20250313'
+        )
+    except Exception as e:
+        logger.error(f"Error during microscope scanning: {e}")
+
+    if not await unload_plate_from_microscope(incubator_slot=10):
+        logger.error("Failed to unload sample - manual intervention may be required")
+        return False
+
+    return True
 
 async def run_time_lapse(round_time=3600):
     """Run the cycle every hour (xxx seconds)."""
-
     while True:
-
-        # set up connection every time
         global incubator, microscope, robotic_arm
         incubator, microscope, robotic_arm = await setup_connections()
         start_time = asyncio.get_event_loop().time()
@@ -198,11 +184,11 @@ async def run_time_lapse(round_time=3600):
             logger.info("Cycle completed successfully")
         else:
             logger.warning("Cycle completed with errors")
-            
+
         end_time = asyncio.get_event_loop().time()
         elapsed = end_time - start_time
         sleep_time = max(0, round_time - elapsed)
-        print(f"Elapsed time: {elapsed:.2f} seconds. Waiting {sleep_time:.2f} seconds until next cycle.")
+        logger.info(f"Elapsed time: {elapsed:.2f} seconds. Waiting {sleep_time:.2f} seconds until next cycle.")
         await asyncio.sleep(sleep_time)
 
 async def main():
