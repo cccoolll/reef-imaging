@@ -57,7 +57,21 @@ async def setup_connections():
     print('Connected to devices.')
     return incubator, microscope, robotic_arm
 
-async def call_service_with_retries(service, method_name, *args, max_retries=3, timeout=15):
+async def disconnect_services():
+    """Disconnect from all services."""
+    global incubator, microscope, robotic_arm
+    try:
+        if incubator:
+            await incubator.disconnect()
+        if microscope:
+            await microscope.disconnect()
+        if robotic_arm:
+            await robotic_arm.disconnect()
+        print('Disconnected from devices.')
+    except Exception as e:
+        logger.error(f"Error during disconnection: {e}")
+
+async def call_service_with_retries(service, method_name, *args, max_retries=3, timeout=30):
     retries = 0
     while retries < max_retries:
         try:
@@ -100,22 +114,22 @@ async def load_plate_from_incubator_to_microscope(incubator_slot=10):
         logger.info("Sample plate has already been loaded onto the microscope")
         return True
 
-    if not await call_service_with_retries(incubator, "get_sample_from_slot_to_transfer_station", incubator_slot):
+    if not await call_service_with_retries(incubator, "get_sample_from_slot_to_transfer_station", incubator_slot, timeout=60):
         return False
 
-    if not await call_service_with_retries(microscope, "home_stage"):
+    if not await call_service_with_retries(microscope, "home_stage", timeout=30):
         return False
 
-    if not await call_service_with_retries(robotic_arm, "grab_sample_from_incubator"):
+    if not await call_service_with_retries(robotic_arm, "grab_sample_from_incubator", timeout=120):
         return False
 
-    if not await call_service_with_retries(robotic_arm, "transport_from_incubator_to_microscope1"):
+    if not await call_service_with_retries(robotic_arm, "transport_from_incubator_to_microscope1", timeout=120):
         return False
 
-    if not await call_service_with_retries(robotic_arm, "put_sample_on_microscope1"):
+    if not await call_service_with_retries(robotic_arm, "put_sample_on_microscope1", timeout=120):
         return False
 
-    if not await call_service_with_retries(microscope, "return_stage"):
+    if not await call_service_with_retries(microscope, "return_stage", timeout=30):
         return False
 
     logger.info("Sample plate successfully loaded onto microscope stage.")
@@ -128,22 +142,22 @@ async def unload_plate_from_microscope(incubator_slot=10):
         logger.info("Sample plate is not on the microscope")
         return True
 
-    if not await call_service_with_retries(microscope, "home_stage"):
+    if not await call_service_with_retries(microscope, "home_stage", timeout=30):
         return False
 
-    if not await call_service_with_retries(robotic_arm, "grab_sample_from_microscope1"):
+    if not await call_service_with_retries(robotic_arm, "grab_sample_from_microscope1", timeout=120):
         return False
 
-    if not await call_service_with_retries(robotic_arm, "transport_from_microscope1_to_incubator"):
+    if not await call_service_with_retries(robotic_arm, "transport_from_microscope1_to_incubator", timeout=120):
         return False
 
-    if not await call_service_with_retries(robotic_arm, "put_sample_on_incubator"):
+    if not await call_service_with_retries(robotic_arm, "put_sample_on_incubator", timeout=120):
         return False
 
-    if not await call_service_with_retries(incubator, "put_sample_from_transfer_station_to_slot", incubator_slot):
+    if not await call_service_with_retries(incubator, "put_sample_from_transfer_station_to_slot", incubator_slot, timeout=60):
         return False
 
-    if not await call_service_with_retries(microscope, "return_stage"):
+    if not await call_service_with_retries(microscope, "return_stage", timeout=30):
         return False
 
     logger.info("Sample successfully unloaded from the microscopy stage.")
@@ -157,14 +171,20 @@ async def run_cycle():
         return False
 
     try:
-        await microscope.scan_well_plate(
-            illuminate_channels=['BF LED matrix full','Fluorescence 488 nm Ex','Fluorescence 561 nm Ex'],
-            do_reflection_af=True,
-            scanning_zone=[(0,0),(7,11)], 
-            action_ID='20250313'
+        await asyncio.wait_for(
+            microscope.scan_well_plate(
+                illuminate_channels=['BF LED matrix full','Fluorescence 488 nm Ex','Fluorescence 561 nm Ex'],
+                do_reflection_af=True,
+                scanning_zone=[(0,0),(7,11)], 
+                action_ID='20250313'
+            ),
+            timeout=2400
         )
+    except asyncio.TimeoutError:
+        logger.error("Microscope scanning timed out.")
     except Exception as e:
         logger.error(f"Error during microscope scanning: {e}")
+        return False
 
     if not await unload_plate_from_microscope(incubator_slot=10):
         logger.error("Failed to unload sample - manual intervention may be required")
@@ -184,6 +204,8 @@ async def run_time_lapse(round_time=3600):
             logger.info("Cycle completed successfully")
         else:
             logger.warning("Cycle completed with errors")
+
+        await disconnect_services()
 
         end_time = asyncio.get_event_loop().time()
         elapsed = end_time - start_time
