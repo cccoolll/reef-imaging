@@ -20,10 +20,32 @@ app.mount("/static", StaticFiles(directory=os.path.join(base_dir, "static")), na
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
+#list all available cameras
+def count_available_cameras(max_tested=10):
+    count = 0
+    for i in range(max_tested):
+        cap = cv2.VideoCapture(i)
+        if cap.isOpened():
+            count += 1
+            cap.release()
+    return count
 
-# Change from a global camera to a function that returns a fresh camera object
+print("Number of available cameras:", count_available_cameras())
+
+def get_first_available_camera():
+    for i in range(10):  # Test first 10 indices
+        cap = cv2.VideoCapture(i)
+        if cap.isOpened():
+            logging.info(f"Found available camera at index {i}")
+            return i
+        cap.release()
+    logging.error("No available cameras found")
+    return 0  # Fallback to 0 if no camera found
+
 def get_camera():
-    cam = cv2.VideoCapture(1)
+    #camera_index = get_first_available_camera() # camera index is /dev/video4
+    camera_index = 4
+    cam = cv2.VideoCapture(camera_index)
     # Force camera settings refresh
     cam.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     return cam
@@ -93,7 +115,7 @@ def record_time_lapse():
                 break
 
         out.release()
-        logging.info(f"Time-lapse recording saved: {filename}")
+        #logging.info(f"Time-lapse recording saved: {filename}")
 
     logging.info("Time-lapse recording finished")
 
