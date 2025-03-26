@@ -27,7 +27,7 @@ def write_to_txt_file(message):
     with open(txt_file, 'a', encoding='utf-8') as f:
         f.write(message + '\n')
 
-async def call_service_with_retries(server_url, service_id, task_name, workspace, token, max_retries=1000, timeout=5):
+async def call_service_with_retries(server_url, service_id, task_name, workspace, token, max_retries=1000, timeout=15):
     retries = 0
     while retries < max_retries:
         try:

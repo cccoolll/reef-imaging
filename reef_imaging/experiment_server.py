@@ -33,12 +33,12 @@ async def start_server(server_url, workspace, token):
 
     def hello1(name):
         task_status["hello1"] = "started"
-        time.sleep(10)
         try:
             message = "Hello1 " + name
             print(message)
             logger.info(message)
             write_to_txt_file(message)
+            time.sleep(10)
             task_status["hello1"] = "finished"
             return message
         except Exception as e:
@@ -51,12 +51,12 @@ async def start_server(server_url, workspace, token):
 
     def hello2(name):
         task_status["hello2"] = "started"
-        time.sleep(10)
         try:
             message = "Hello2 " + name
             print(message)
             logger.info(message)
             write_to_txt_file(message)
+            time.sleep(10)
             task_status["hello2"] = "finished"
             return message
         except Exception as e:
