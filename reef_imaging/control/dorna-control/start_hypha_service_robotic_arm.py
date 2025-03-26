@@ -19,6 +19,22 @@ class RoboticArmService:
         self.robot = Dorna()
         self.ip = "192.168.2.20"
         self.connected = False
+        # Add task status tracking
+        self.task_status = {
+            "move_sample_from_microscope1_to_incubator": "not_started",
+            "move_sample_from_incubator_to_microscope1": "not_started",
+            "grab_sample_from_microscope1": "not_started",
+            "grab_sample_from_incubator": "not_started",
+            "put_sample_on_microscope1": "not_started",
+            "put_sample_on_incubator": "not_started",
+            "transport_from_incubator_to_microscope1": "not_started",
+            "transport_from_microscope1_to_incubator": "not_started",
+            "connect": "not_started",
+            "disconnect": "not_started",
+            "halt": "not_started",
+            "get_all_joints": "not_started",
+            "get_all_positions": "not_started"
+        }
 
     async def start_hypha_service(self, server):
         svc = await server.register_service({
@@ -41,6 +57,9 @@ class RoboticArmService:
             "halt": self.halt,
             "get_all_joints": self.get_all_joints,
             "get_all_positions": self.get_all_positions,
+            # Add status functions
+            "get_status": self.get_status,
+            "reset_status": self.reset_status
         })
 
         print(f"Robotic arm control service registered at workspace: {server.config.workspace}, id: {svc.id}")
@@ -61,16 +80,32 @@ class RoboticArmService:
 
         await self.start_hypha_service(server)
 
+    def get_status(self, task_name):
+        """Get the status of a specific task"""
+        return self.task_status.get(task_name, "unknown")
+
+    def reset_status(self, task_name):
+        """Reset the status of a specific task"""
+        if task_name in self.task_status:
+            self.task_status[task_name] = "not_started"
+
     @schema_function(skip_self=True)
     def connect(self):
         """
         Connect and occupy the robot, so that it can be controlled.
         Returns: bool
         """
-        self.robot.connect(self.ip)
-        self.connected = True
-        print("Connected to robot")
-        return True
+        self.task_status["connect"] = "started"
+        try:
+            self.robot.connect(self.ip)
+            self.connected = True
+            self.task_status["connect"] = "finished"
+            print("Connected to robot")
+            return True
+        except Exception as e:
+            self.task_status["connect"] = "failed"
+            print(f"Failed to connect: {e}")
+            return False
 
     @schema_function(skip_self=True)
     def disconnect(self):
@@ -78,10 +113,17 @@ class RoboticArmService:
         Disconnect the robot, so that it can be used by other clients.
         Returns: bool
         """
-        self.robot.close()
-        self.connected = False
-        print("Disconnected from robot")
-        return True
+        self.task_status["disconnect"] = "started"
+        try:
+            self.robot.close()
+            self.connected = False
+            self.task_status["disconnect"] = "finished"
+            print("Disconnected from robot")
+            return True
+        except Exception as e:
+            self.task_status["disconnect"] = "failed"
+            print(f"Failed to disconnect: {e}")
+            return False
 
     @schema_function(skip_self=True)
     def set_motor(self, state: int=Field(1, description="Enable or disable the motor, 1 for enable, 0 for disable")):
@@ -106,19 +148,35 @@ class RoboticArmService:
         Get the current position of all joints
         Returns: dict
         """
-        if not self.connected:
-            self.connect()
-        return self.robot.get_all_joint()
-    
+        self.task_status["get_all_joints"] = "started"
+        try:
+            if not self.connected:
+                self.connect()
+            result = self.robot.get_all_joint()
+            self.task_status["get_all_joints"] = "finished"
+            return result
+        except Exception as e:
+            self.task_status["get_all_joints"] = "failed"
+            print(f"Failed to get all joints: {e}")
+            return {}
+
     @schema_function(skip_self=True)
     def get_all_positions(self):
         """
         Get the current position of all joints
         Returns: dict
         """
-        if not self.connected:
-            self.connect()
-        return self.robot.get_all_pose()
+        self.task_status["get_all_positions"] = "started"
+        try:
+            if not self.connected:
+                self.connect()
+            result = self.robot.get_all_pose()
+            self.task_status["get_all_positions"] = "finished"
+            return result
+        except Exception as e:
+            self.task_status["get_all_positions"] = "failed"
+            print(f"Failed to get all positions: {e}")
+            return {}
 
     @schema_function(skip_self=True)
     def move_sample_from_microscope1_to_incubator(self):
@@ -126,12 +184,16 @@ class RoboticArmService:
         Move sample from microscope1 to incubator, the microscope need to be homed before
         Returns: bool
         """
+        task_name = "move_sample_from_microscope1_to_incubator"
+        self.task_status[task_name] = "started"
         self.set_motor(1)
         try:
             self.play_script("paths/microscope1_to_incubator.txt")
             print("Sample moved from microscope1 to incubator")
+            self.task_status[task_name] = "finished"
             return True
         except Exception as e:
+            self.task_status[task_name] = "failed"
             print(f"Failed to move sample from microscope1 to incubator: {e}")
             return False
 
@@ -141,12 +203,16 @@ class RoboticArmService:
         Move sample from incubator to microscope1, microscope need to be homed before
         Returns: bool
         """
+        task_name = "move_sample_from_incubator_to_microscope1"
+        self.task_status[task_name] = "started"
         self.set_motor(1)
         try:
             self.play_script("paths/incubator_to_microscope1.txt")
             print("Sample moved from incubator to microscope1")
+            self.task_status[task_name] = "finished"
             return True
         except Exception as e:
+            self.task_status[task_name] = "failed"
             print(f"Failed to move sample from incubator to microscope1: {e}")
             return False
 
@@ -156,12 +222,16 @@ class RoboticArmService:
         Transport a sample from microscope1 to the incubator
         Returns: bool
         """
+        task_name = "grab_sample_from_microscope1"
+        self.task_status[task_name] = "started"
         self.set_motor(1)
         try:
             self.play_script("paths/grab_from_microscope1.txt")
             print("Sample grabbed from microscope1")
+            self.task_status[task_name] = "finished"
             return True
         except Exception as e:
+            self.task_status[task_name] = "failed"
             print(f"Failed to grab sample from microscope1: {e}")
             return False
 
@@ -171,12 +241,16 @@ class RoboticArmService:
         Grab a sample from the incubator
         Returns: bool
         """
+        task_name = "grab_sample_from_incubator"
+        self.task_status[task_name] = "started"
         self.set_motor(1)
         try:
             self.play_script("paths/grab_from_incubator.txt")
             print("Sample grabbed from incubator")
+            self.task_status[task_name] = "finished"
             return True
         except Exception as e:
+            self.task_status[task_name] = "failed"
             print(f"Failed to grab sample from incubator: {e}")
             return False
 
@@ -186,12 +260,16 @@ class RoboticArmService:
         Place a sample on microscope1
         Returns: bool
         """
+        task_name = "put_sample_on_microscope1"
+        self.task_status[task_name] = "started"
         self.set_motor(1)
         try:
             self.play_script("paths/put_on_microscope1.txt")
             print("Sample placed on microscope1")
+            self.task_status[task_name] = "finished"
             return True
         except Exception as e:
+            self.task_status[task_name] = "failed"
             print(f"Failed to put sample on microscope1: {e}")
             return False
 
@@ -201,12 +279,16 @@ class RoboticArmService:
         Place a sample on the incubator.
         Returns: bool
         """
+        task_name = "put_sample_on_incubator"
+        self.task_status[task_name] = "started"
         self.set_motor(1)
         try:
             self.play_script("paths/put_on_incubator.txt")
             print("Sample placed on incubator")
+            self.task_status[task_name] = "finished"
             return True
         except Exception as e:
+            self.task_status[task_name] = "failed"
             print(f"Failed to put sample on incubator: {e}")
             return False
 
@@ -216,12 +298,16 @@ class RoboticArmService:
         Transport a sample from the incubator to microscope1
         Returns: bool
         """
+        task_name = "transport_from_incubator_to_microscope1"
+        self.task_status[task_name] = "started"
         self.set_motor(1)
         try:
             self.play_script("paths/transport_from_incubator_to_microscope1.txt")
             print("Sample moved from incubator to microscope1")
+            self.task_status[task_name] = "finished"
             return True
         except Exception as e:
+            self.task_status[task_name] = "failed"
             print(f"Failed to transport sample from incubator to microscope1: {e}")
             return False
 
@@ -231,12 +317,16 @@ class RoboticArmService:
         Transport a sample from microscope1 to the incubator
         Returns: bool
         """
+        task_name = "transport_from_microscope1_to_incubator"
+        self.task_status[task_name] = "started"
         self.set_motor(1)
         try:
             self.play_script("paths/transport_from_microscope1_to_incubator.txt")
             print("Sample moved from microscope1 to incubator")
+            self.task_status[task_name] = "finished"
             return True
         except Exception as e:
+            self.task_status[task_name] = "failed"
             print(f"Failed to transport sample from microscope1 to incubator: {e}")
             return False
 
@@ -246,11 +336,19 @@ class RoboticArmService:
         Halt/stop the robot, stop all the movements
         Returns: bool
         """
-        if not self.connected:
-            self.connect()
-        self.robot.halt()
-        print("Robot halted")
-        return True
+        task_name = "halt"
+        self.task_status[task_name] = "started"
+        try:
+            if not self.connected:
+                self.connect()
+            self.robot.halt()
+            print("Robot halted")
+            self.task_status[task_name] = "finished"
+            return True
+        except Exception as e:
+            self.task_status[task_name] = "failed"
+            print(f"Failed to halt robot: {e}")
+            return False
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Start the Hypha service for the robotic arm.")

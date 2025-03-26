@@ -49,6 +49,19 @@ class IncubatorService:
             self.plat_status = {sample["incubator_slot"]: sample["status"] for sample in samples}
         except Exception as e:
             self.plat_status = {}
+        # Add task status tracking
+        self.task_status = {
+            "initialize": "not_started",
+            "put_sample_from_transfer_station_to_slot": "not_started",
+            "get_sample_from_slot_to_transfer_station": "not_started",
+            "get_status": "not_started",
+            "is_busy": "not_started",
+            "reset_error_status": "not_started",
+            "get_sample_status": "not_started",
+            "get_temperature": "not_started",
+            "get_co2_level": "not_started",
+            "get_slot_information": "not_started"
+        }
 
     async def start_hypha_service(self, server):
         svc = await server.register_service({
@@ -68,6 +81,9 @@ class IncubatorService:
             "get_temperature": self.get_temperature,
             "get_co2_level": self.get_co2_level,
             "get_slot_information": self.get_slot_information,
+            # Add status functions
+            "get_task_status": self.get_task_status,
+            "reset_task_status": self.reset_task_status
         })
 
         print(f"Incubator control service registered at workspace: {server.config.workspace}, id: {svc.id}")
@@ -89,44 +105,93 @@ class IncubatorService:
 
         await self.start_hypha_service(server)
 
+    def get_task_status(self, task_name):
+        """Get the status of a specific task"""
+        return self.task_status.get(task_name, "unknown")
+
+    def reset_task_status(self, task_name):
+        """Reset the status of a specific task"""
+        if task_name in self.task_status:
+            self.task_status[task_name] = "not_started"
+
     @schema_function(skip_self=True)
     def initialize(self):
         """
         Clean up error status and initialize the incubator
         Returns:A string message        
         """
-        self.c.plate_handler.initialize()
-        self.c.wait_until_not_busy(timeout=60)
-        assert self.c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
-        return "Incubator initialized."
+        task_name = "initialize"
+        self.task_status[task_name] = "started"
+        try:
+            self.c.plate_handler.initialize()
+            self.c.wait_until_not_busy(timeout=60)
+            assert self.c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
+            self.task_status[task_name] = "finished"
+            return "Incubator initialized."
+        except Exception as e:
+            self.task_status[task_name] = "failed"
+            print(f"Failed to initialize incubator: {e}")
+            return f"Failed to initialize incubator: {e}"
     
     @schema_function(skip_self=True)
     def get_temperature(self):
         """Get the current temperature of the incubator"""
-        self.c.wait_until_not_busy(timeout=50)
-        print(f"Temperature: {self.c.climate_controller.current_temperature}")
-        return self.c.climate_controller.current_temperature
+        task_name = "get_temperature"
+        self.task_status[task_name] = "started"
+        try:
+            self.c.wait_until_not_busy(timeout=50)
+            temperature = self.c.climate_controller.current_temperature
+            print(f"Temperature: {temperature}")
+            self.task_status[task_name] = "finished"
+            return temperature
+        except Exception as e:
+            self.task_status[task_name] = "failed"
+            print(f"Failed to get temperature: {e}")
+            return None
     
     @schema_function(skip_self=True)
     def get_slot_information(self, slot: int = Field(1, description="Slot number, range: 1-42")):
         """Get the current slot information of the incubator"""
-        with open(self.samples_file, 'r') as file:
-            samples = json.load(file)
-        slot_info = next((sample for sample in samples if sample["incubator_slot"] == slot), None)
-        return slot_info
-
+        task_name = "get_slot_information"
+        self.task_status[task_name] = "started"
+        try:
+            with open(self.samples_file, 'r') as file:
+                samples = json.load(file)
+            slot_info = next((sample for sample in samples if sample["incubator_slot"] == slot), None)
+            self.task_status[task_name] = "finished"
+            return slot_info
+        except Exception as e:
+            self.task_status[task_name] = "failed"
+            print(f"Failed to get slot information: {e}")
+            return None
 
     @schema_function(skip_self=True)
     def get_co2_level(self):
         """Get the current CO2 level of the incubator"""
-        self.c.wait_until_not_busy(timeout=50)
-        print(f"CO2 level: {self.c.climate_controller.current_co2}")
-        return self.c.climate_controller.current_co2
+        task_name = "get_co2_level"
+        self.task_status[task_name] = "started"
+        try:
+            self.c.wait_until_not_busy(timeout=50)
+            co2_level = self.c.climate_controller.current_co2
+            print(f"CO2 level: {co2_level}")
+            self.task_status[task_name] = "finished"
+            return co2_level
+        except Exception as e:
+            self.task_status[task_name] = "failed"
+            print(f"Failed to get CO2 level: {e}")
+            return None
 
     @schema_function(skip_self=True)
     def reset_error_status(self):
         """Reset the error status of the incubator"""
-        self.c.maintenance_controller.reset_error_status()
+        task_name = "reset_error_status"
+        self.task_status[task_name] = "started"
+        try:
+            self.c.maintenance_controller.reset_error_status()
+            self.task_status[task_name] = "finished"
+        except Exception as e:
+            self.task_status[task_name] = "failed"
+            print(f"Failed to reset error status: {e}")
 
     @schema_function(skip_self=True)
     def get_status(self):
@@ -134,7 +199,20 @@ class IncubatorService:
         Get the status of the incubator
         Returns: A dictionary
         """
-        return {"error_status": self.c.error_status, "action_status": self.c.action_status, "busy": self.c.overview_status.busy}
+        task_name = "get_status"
+        self.task_status[task_name] = "started"
+        try:
+            status = {
+                "error_status": self.c.error_status,
+                "action_status": self.c.action_status,
+                "busy": self.c.overview_status.busy
+            }
+            self.task_status[task_name] = "finished"
+            return status
+        except Exception as e:
+            self.task_status[task_name] = "failed"
+            print(f"Failed to get status: {e}")
+            return {}
 
     @schema_function(skip_self=True)
     def move_plate(self, slot:int=Field(5, description="Slot number,range: 1-42")):
@@ -142,19 +220,24 @@ class IncubatorService:
         Move plate from slot to transfer station and back
         Returns: A string message
         """
-        c = self.c
-        c.wait_until_not_busy(timeout=50)
-        assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
-        c.wait_until_not_busy(timeout=50)
-        assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
-        c.plate_handler.move_plate_from_slot_to_transfer_station(slot)
-        c.wait_until_not_busy(timeout=100)
-        assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
-        c.plate_handler.move_plate_from_transfer_station_to_slot(slot)
-        c.wait_until_not_busy(timeout=50)
-
-        assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
-        return f"Plate moved to slot {slot} and back to transfer station."
+        task_name = "move_plate"
+        self.task_status[task_name] = "started"
+        try:
+            c = self.c
+            c.wait_until_not_busy(timeout=50)
+            assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
+            c.plate_handler.move_plate_from_slot_to_transfer_station(slot)
+            c.wait_until_not_busy(timeout=100)
+            assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
+            c.plate_handler.move_plate_from_transfer_station_to_slot(slot)
+            c.wait_until_not_busy(timeout=50)
+            assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
+            self.task_status[task_name] = "finished"
+            return f"Plate moved to slot {slot} and back to transfer station."
+        except Exception as e:
+            self.task_status[task_name] = "failed"
+            print(f"Failed to move plate: {e}")
+            return f"Failed to move plate: {e}"
     
     def update_sample_status(self, slot: int, status: str):
         # Update the sample's status in samples.json
@@ -173,40 +256,74 @@ class IncubatorService:
         Collect sample from transfer station to a slot
         Returns: A string message
         """
-        assert self.plat_status.get(slot) != "IN", "Plate is already inside the incubator"
-        c = self.c
-        c.plate_handler.move_plate_from_transfer_station_to_slot(slot)
-        c.wait_until_not_busy(timeout=50)
-        assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
-        self.plat_status[slot] = "IN"
-        self.update_sample_status(slot, "IN")
+        task_name = "put_sample_from_transfer_station_to_slot"
+        self.task_status[task_name] = "started"
+        try:
+            assert self.plat_status.get(slot) != "IN", "Plate is already inside the incubator"
+            c = self.c
+            c.plate_handler.move_plate_from_transfer_station_to_slot(slot)
+            c.wait_until_not_busy(timeout=50)
+            assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
+            self.plat_status[slot] = "IN"
+            self.update_sample_status(slot, "IN")
+            self.task_status[task_name] = "finished"
+            return f"Sample placed in slot {slot}."
+        except Exception as e:
+            self.task_status[task_name] = "failed"
+            print(f"Failed to put sample in slot {slot}: {e}")
+            return f"Failed to put sample in slot {slot}: {e}"
     
     @schema_function(skip_self=True)
     def get_sample_from_slot_to_transfer_station(self, slot: int = Field(5, description="Slot number,range: 1-42")):
         """Release sample from a incubator's slot to it's transfer station."""
-        assert self.plat_status.get(slot) != "OUT", "Plate is already outside the incubator"
-        c = self.c
-        c.plate_handler.move_plate_from_slot_to_transfer_station(slot)
-        c.wait_until_not_busy(timeout=50)
-        assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
-        self.plat_status[slot] = "OUT"
-        self.update_sample_status(slot, "OUT")
+        task_name = "get_sample_from_slot_to_transfer_station"
+        self.task_status[task_name] = "started"
+        try:
+            assert self.plat_status.get(slot) != "OUT", "Plate is already outside the incubator"
+            c = self.c
+            c.plate_handler.move_plate_from_slot_to_transfer_station(slot)
+            c.wait_until_not_busy(timeout=50)
+            assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
+            self.plat_status[slot] = "OUT"
+            self.update_sample_status(slot, "OUT")
+            self.task_status[task_name] = "finished"
+            return f"Sample removed from slot {slot}."
+        except Exception as e:
+            self.task_status[task_name] = "failed"
+            print(f"Failed to get sample from slot {slot}: {e}")
+            return f"Failed to get sample from slot {slot}: {e}"
 
     @schema_function(skip_self=True)
     def get_sample_status(self, slot: Optional[int] = Field(None, description="Slot number, range: 1-42, or None for all slots")):
         """Return the status of sample plates from samples.json"""
-        with open(self.samples_file, 'r') as file:
-            samples = json.load(file)
-        if slot is None:
-            return {sample["incubator_slot"]: sample["status"] for sample in samples}
-        else:
-            sample = next((s for s in samples if s["incubator_slot"] == slot), None)
-            return sample["status"] if sample else "Unknown"
-    
+        task_name = "get_sample_status"
+        self.task_status[task_name] = "started"
+        try:
+            with open(self.samples_file, 'r') as file:
+                samples = json.load(file)
+            if slot is None:
+                status = {sample["incubator_slot"]: sample["status"] for sample in samples}
+            else:
+                sample = next((s for s in samples if s["incubator_slot"] == slot), None)
+                status = sample["status"] if sample else "Unknown"
+            self.task_status[task_name] = "finished"
+            return status
+        except Exception as e:
+            self.task_status[task_name] = "failed"
+            print(f"Failed to get sample status: {e}")
+            return {}
 
     def is_busy(self):
-        c = self.c
-        return c.overview_status.busy
+        task_name = "is_busy"
+        self.task_status[task_name] = "started"
+        try:
+            busy = self.c.overview_status.busy
+            self.task_status[task_name] = "finished"
+            return busy
+        except Exception as e:
+            self.task_status[task_name] = "failed"
+            print(f"Failed to check if incubator is busy: {e}")
+            return False
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Start the Hypha service for the incubator.")
