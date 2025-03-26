@@ -1,5 +1,6 @@
 import asyncio
 from hypha_rpc import connect_to_server
+
 import os
 import dotenv
 import logging
@@ -56,6 +57,7 @@ async def call_service_with_retries(server_url, service_id, task_name, workspace
                 print(message)
                 logger.info(message)
                 write_to_txt_file(message)
+                await server.disconnect()
                 return
 
             # Wait for the task to complete
@@ -67,6 +69,7 @@ async def call_service_with_retries(server_url, service_id, task_name, workspace
                 write_to_txt_file(message)
                 # Reset the status for the next loop
                 await svc.reset_status(task_name)
+                await server.disconnect()
                 return
 
         except asyncio.TimeoutError:
