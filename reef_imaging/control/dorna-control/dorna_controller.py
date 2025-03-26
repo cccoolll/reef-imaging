@@ -69,6 +69,12 @@ class DornaController:
     def halt(self):
         self.robot.halt()
         print("Robot halted")
+    
+    def light_on(self):
+        self.robot.set_output(7, 0) # set the value of the out0 to 1
+
+    def light_off(self):
+        self.robot.set_output(7, 1) # set the value of the out0 to 0
 
         
 
@@ -80,4 +86,8 @@ if __name__ == "__main__":
     print("Is robot busy?", controller.is_busy())
     #controller.halt()
     print(controller.robot.get_all_joint())
+
+    controller.light_on()
+    time.sleep(1)
+    controller.light_off()
     controller.disconnect()
