@@ -3,7 +3,7 @@ from hypha_rpc import connect_to_server
 import dotenv
 import os
 import logging
-
+import time
 # Configure logging
 log_dir = os.path.join(os.path.dirname(__file__), "logs")
 os.makedirs(log_dir, exist_ok=True)
@@ -33,6 +33,7 @@ async def start_server(server_url, workspace, token):
 
     def hello1(name):
         task_status["hello1"] = "started"
+        time.sleep(10)
         try:
             message = "Hello1 " + name
             print(message)
@@ -50,6 +51,7 @@ async def start_server(server_url, workspace, token):
 
     def hello2(name):
         task_status["hello2"] = "started"
+        time.sleep(10)
         try:
             message = "Hello2 " + name
             print(message)

@@ -95,7 +95,7 @@ async def main_loop(server_url, service_id, workspace, token):
         await call_service_with_retries(server_url, service_id, "hello1", workspace, token)
         await call_service_with_retries(server_url, service_id, "hello2", workspace, token)
         # Add a delay between loops if needed
-        await asyncio.sleep(10)
+        await asyncio.sleep(1)
 
 if __name__ == "__main__":
     server_url = "https://hypha.aicell.io"
