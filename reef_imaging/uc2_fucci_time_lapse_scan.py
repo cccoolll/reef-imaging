@@ -6,7 +6,7 @@ from hypha_rpc import connect_to_server, login
 import os
 import dotenv
 import logging
-
+import sys
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 logger = logging.getLogger(__name__)
@@ -204,9 +204,10 @@ async def run_time_lapse(round_time=3600):
             logger.info("Cycle completed successfully")
         else:
             logger.warning("Cycle completed with errors")
+            await disconnect_services()
+            sys.exit(1)
 
         await disconnect_services()
-
         end_time = asyncio.get_event_loop().time()
         elapsed = end_time - start_time
         sleep_time = max(0, round_time - elapsed)
@@ -214,8 +215,6 @@ async def run_time_lapse(round_time=3600):
         await asyncio.sleep(sleep_time)
 
 async def main():
-    global incubator, microscope, robotic_arm
-    incubator, microscope, robotic_arm = await setup_connections()
     await run_time_lapse(round_time=3600)
 
 if __name__ == '__main__':
