@@ -19,7 +19,7 @@ import base64
 #Acknowledgement: This script is adapted from the original script provided by the authors: @Nils Mechetel, https://github.com/bioimage-io/bioimageio-colab/blob/main/bioimageio_colab/register_sam_service.py.
 # The micro_sam is originally developed by Constantin Pape, see https://github.com/computational-cell-analytics/micro-sam
 
-# This Python script registers a SAM (Segment Anything Model) annotation service on the BioImageIO Colab workspace, 
+# This Python script registers a SAM (Segment Anything Model) annotation service on the reef-imaging workspace, 
 # enabling interactive image segmentation functionalities through a series of image-processing and mask-generation utilities. 
 # Users can load models, compute embeddings, perform segmentation with initial or existing embeddings, and segment all cells in an image.
 
