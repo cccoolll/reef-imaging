@@ -27,6 +27,13 @@ microscope = None
 robotic_arm = None
 sample_loaded = False
 
+# Configuration settings
+IMAGING_INTERVAL = 3600  # Time between cycles in seconds
+INCUBATOR_SLOT = 10  # Slot number in the incubator
+ILLUMINATE_CHANNELS = ['BF LED matrix full', 'Fluorescence 488 nm Ex', 'Fluorescence 561 nm Ex']
+SCANNING_ZONE = [(0, 0), (7, 11)]
+ACTION_ID = '20250313'
+
 async def setup_connections():
     global reef_token, squid_token, incubator, microscope, robotic_arm
     if not reef_token or not squid_token:
@@ -108,7 +115,7 @@ async def call_service_with_retries(service, method_name, *args, max_retries=3, 
     logger.error(f"Max retries reached for task {method_name}. Terminating.")
     return False
 
-async def load_plate_from_incubator_to_microscope(incubator_slot=10):
+async def load_plate_from_incubator_to_microscope(incubator_slot=INCUBATOR_SLOT):
     global sample_loaded, incubator, microscope, robotic_arm
     if sample_loaded:
         logger.info("Sample plate has already been loaded onto the microscope")
@@ -136,7 +143,7 @@ async def load_plate_from_incubator_to_microscope(incubator_slot=10):
     sample_loaded = True
     return True
 
-async def unload_plate_from_microscope(incubator_slot=10):
+async def unload_plate_from_microscope(incubator_slot=INCUBATOR_SLOT):
     global sample_loaded, incubator, microscope, robotic_arm
     if not sample_loaded:
         logger.info("Sample plate is not on the microscope")
@@ -166,17 +173,17 @@ async def unload_plate_from_microscope(incubator_slot=10):
 
 async def run_cycle():
     """Run the complete load-scan-unload process."""
-    if not await load_plate_from_incubator_to_microscope(incubator_slot=10):
+    if not await load_plate_from_incubator_to_microscope(incubator_slot=INCUBATOR_SLOT):
         logger.error("Failed to load sample - aborting cycle")
         return False
 
     try:
         await asyncio.wait_for(
             microscope.scan_well_plate(
-                illuminate_channels=['BF LED matrix full','Fluorescence 488 nm Ex','Fluorescence 561 nm Ex'],
+                illuminate_channels=ILLUMINATE_CHANNELS,
                 do_reflection_af=True,
-                scanning_zone=[(0,0),(7,11)], 
-                action_ID='20250313'
+                scanning_zone=SCANNING_ZONE,
+                action_ID=ACTION_ID
             ),
             timeout=2400
         )
@@ -186,13 +193,13 @@ async def run_cycle():
         logger.error(f"Error during microscope scanning: {e}")
         return False
 
-    if not await unload_plate_from_microscope(incubator_slot=10):
+    if not await unload_plate_from_microscope(incubator_slot=INCUBATOR_SLOT):
         logger.error("Failed to unload sample - manual intervention may be required")
         return False
 
     return True
 
-async def run_time_lapse(round_time=3600):
+async def run_time_lapse(round_time=IMAGING_INTERVAL):
     """Run the cycle every hour (xxx seconds)."""
     while True:
         global incubator, microscope, robotic_arm
@@ -215,7 +222,7 @@ async def run_time_lapse(round_time=3600):
         await asyncio.sleep(sleep_time)
 
 async def main():
-    await run_time_lapse(round_time=3600)
+    await run_time_lapse(round_time=IMAGING_INTERVAL)
 
 if __name__ == '__main__':
     asyncio.run(main())
