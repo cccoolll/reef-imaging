@@ -43,12 +43,6 @@ class IncubatorService:
         self.server_url = "http://localhost:9527" if local else "https://hypha.aicell.io"
         self.c = Cytomat("/dev/ttyUSB1", json_path="/home/tao/workspace/cytomat-controller/docs/config.json")
         self.samples_file = "/home/tao/workspace/reef-imaging/reef_imaging/control/cytomat-control/samples.json"
-        try:
-            with open(self.samples_file, 'r') as file:
-                samples = json.load(file)
-            self.plat_status = {sample["incubator_slot"]: sample["status"] for sample in samples}
-        except Exception as e:
-            self.plat_status = {}
         # Add task status tracking
         self.task_status = {
             "initialize": "not_started",
@@ -271,12 +265,15 @@ class IncubatorService:
         task_name = "put_sample_from_transfer_station_to_slot"
         self.task_status[task_name] = "started"
         try:
-            assert self.plat_status.get(slot) != "IN", "Plate is already inside the incubator"
+            # Access status directly from JSON file
+            with open(self.samples_file, 'r') as file:
+                samples = json.load(file)
+            current_status = next((sample["status"] for sample in samples if sample["incubator_slot"] == slot), None)
+            assert current_status != "IN", "Plate is already inside the incubator"
             c = self.c
             c.plate_handler.move_plate_from_transfer_station_to_slot(slot)
             c.wait_until_not_busy(timeout=50)
             assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
-            self.plat_status[slot] = "IN"
             self.update_sample_status(slot, "IN")
             self.task_status[task_name] = "finished"
             return f"Sample placed in slot {slot}."
@@ -291,12 +288,15 @@ class IncubatorService:
         task_name = "get_sample_from_slot_to_transfer_station"
         self.task_status[task_name] = "started"
         try:
-            assert self.plat_status.get(slot) != "OUT", "Plate is already outside the incubator"
+            # Access status directly from JSON file
+            with open(self.samples_file, 'r') as file:
+                samples = json.load(file)
+            current_status = next((sample["status"] for sample in samples if sample["incubator_slot"] == slot), None)
+            assert current_status != "OUT", "Plate is already outside the incubator"
             c = self.c
             c.plate_handler.move_plate_from_slot_to_transfer_station(slot)
             c.wait_until_not_busy(timeout=50)
             assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
-            self.plat_status[slot] = "OUT"
             self.update_sample_status(slot, "OUT")
             self.task_status[task_name] = "finished"
             return f"Sample removed from slot {slot}."
@@ -313,13 +313,11 @@ class IncubatorService:
         try:
             with open(self.samples_file, 'r') as file:
                 samples = json.load(file)
-            # Update plat_status from samples.json
-            self.plat_status = {sample["incubator_slot"]: sample["status"] for sample in samples}
             
             if slot is None:
-                status = self.plat_status
+                status = {sample["incubator_slot"]: sample["status"] for sample in samples}
             else:
-                status = self.plat_status.get(slot, "Unknown")
+                status = next((sample["status"] for sample in samples if sample["incubator_slot"] == slot), "Unknown")
             
             self.task_status[task_name] = "finished"
             return status
