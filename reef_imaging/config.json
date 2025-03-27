@@ -3,7 +3,27 @@
         {
             "name": "Sample1",
             "settings": {
-                "incubator_slot": 3
+                "incubator_slot": 3,
+                "time_added": "2025-03-27T12:00:00Z",
+                "time_start_imaging": "2025-03-27T12:00:00Z",
+                "time_end_imaging": "2025-03-27T12:00:00Z",
+                "imaging_interval": 3600,
+                "imaging_zone": [[0,0],[7,11]],
+                "illuminate_channels": ["BF LED matrix full","Fluorescence 488 nm Ex","Fluorescence 561 nm Ex"],
+                "do_reflection_af": true
+            }
+        },
+        {
+            "name": "Sample2",
+            "settings": {
+                "incubator_slot": 4,
+                "time_added": "2025-03-27T12:00:00Z",
+                "time_start_imaging": "2025-03-27T12:00:00Z",
+                "time_end_imaging": "2025-03-27T12:00:00Z",
+                "imaging_interval": 3600,
+                "imaging_zone": [[0,0],[7,11]],
+                "illuminate_channels": ["BF LED matrix full","Fluorescence 488 nm Ex","Fluorescence 561 nm Ex"],
+                "do_reflection_af": true
             }
         }
     ],
@@ -11,7 +31,14 @@
         {
             "name": "Microscope1",
             "settings": {
-                "id": "ws-user-zenith-glue-70976543/HbMMyVRaCXVkvXxybPaELs:microscope-control-squid-real-microscope0_local",
+                "id": "microscope-control-squid-real-microscope-reef-1",
+                "objective": "20x"
+            }
+        },
+        {
+            "name": "Microscope2",
+            "settings": {
+                "id": "microscope-control-squid-real-microscope-reef-2",
                 "objective": "20x"
             }
         }
@@ -19,13 +46,13 @@
     "incubator": {
         "name": "cytomat",
         "settings": {
-            "id": "ws-user-twisty-cafe-26457667/DSPmPtjZtcZZDXtdFgSgXU:incubator-control"
+            "id": "incubator-control"
         }
     },
     "robotic_arm": {
         "name": "robotic_arm",
         "settings": {
-            "id": "ws-user-furtive-charger-52893638/URyPGWwJpSphcjwtcnH6vF:robotic-arm-control"
+            "id": "robotic-arm-control"
         }
     }
 }
