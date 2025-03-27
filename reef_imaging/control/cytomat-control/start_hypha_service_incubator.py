@@ -83,7 +83,8 @@ class IncubatorService:
             "get_slot_information": self.get_slot_information,
             # Add status functions
             "get_task_status": self.get_task_status,
-            "reset_task_status": self.reset_task_status
+            "reset_task_status": self.reset_task_status,
+            "reset_all_task_status": self.reset_all_task_status
         })
 
         print(f"Incubator control service registered at workspace: {server.config.workspace}, id: {svc.id}")
@@ -118,6 +119,11 @@ class IncubatorService:
     def reset_task_status(self, task_name):
         """Reset the status of a specific task"""
         if task_name in self.task_status:
+            self.task_status[task_name] = "not_started"
+
+    def reset_all_task_status(self):
+        """Reset the status of all tasks"""
+        for task_name in self.task_status:
             self.task_status[task_name] = "not_started"
 
     @schema_function(skip_self=True)
