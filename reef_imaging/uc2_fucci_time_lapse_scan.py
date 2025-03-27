@@ -46,11 +46,11 @@ robotic_arm = None
 sample_loaded = False
 
 # Configuration settings
-IMAGING_INTERVAL = 360  # Time between cycles in seconds
-INCUBATOR_SLOT = 10  # Slot number in the incubator
+IMAGING_INTERVAL = 3600  # Time between cycles in seconds
+INCUBATOR_SLOT = 36  # Slot number in the incubator
 ILLUMINATE_CHANNELS = ['BF LED matrix full', 'Fluorescence 488 nm Ex', 'Fluorescence 561 nm Ex']
 SCANNING_ZONE = [(0, 0), (7, 11)]
-ACTION_ID = '20250313'
+ACTION_ID = '20250327-before-drug-treatment'
 
 async def setup_connections():
     global reef_token, squid_token, incubator, microscope, robotic_arm
@@ -216,16 +216,15 @@ async def run_cycle():
         return False
 
     try:
-        # await asyncio.wait_for(
-        #     microscope.scan_well_plate(
-        #         illuminate_channels=ILLUMINATE_CHANNELS,
-        #         do_reflection_af=True,
-        #         scanning_zone=SCANNING_ZONE,
-        #         action_ID=ACTION_ID
-        #     ),
-        #     timeout=2400
-        # )
-        await asyncio.sleep(20)
+        await asyncio.wait_for(
+            microscope.scan_well_plate(
+                illuminate_channels=ILLUMINATE_CHANNELS,
+                do_reflection_af=True,
+                scanning_zone=SCANNING_ZONE,
+                action_ID=ACTION_ID
+            ),
+            timeout=2400
+        )
     except asyncio.TimeoutError:
         logger.error("Microscope scanning timed out.")
     except Exception as e:
