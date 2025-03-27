@@ -313,11 +313,14 @@ class IncubatorService:
         try:
             with open(self.samples_file, 'r') as file:
                 samples = json.load(file)
+            # Update plat_status from samples.json
+            self.plat_status = {sample["incubator_slot"]: sample["status"] for sample in samples}
+            
             if slot is None:
-                status = {sample["incubator_slot"]: sample["status"] for sample in samples}
+                status = self.plat_status
             else:
-                sample = next((s for s in samples if s["incubator_slot"] == slot), None)
-                status = sample["status"] if sample else "Unknown"
+                status = self.plat_status.get(slot, "Unknown")
+            
             self.task_status[task_name] = "finished"
             return status
         except Exception as e:
