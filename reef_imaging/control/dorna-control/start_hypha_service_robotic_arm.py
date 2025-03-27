@@ -58,8 +58,8 @@ class RoboticArmService:
             "get_all_joints": self.get_all_joints,
             "get_all_positions": self.get_all_positions,
             # Add status functions
-            "get_status": self.get_status,
-            "reset_status": self.reset_status
+            "get_task_status": self.get_task_status,
+            "reset_task_status": self.reset_task_status
         })
 
         print(f"Robotic arm control service registered at workspace: {server.config.workspace}, id: {svc.id}")
@@ -80,11 +80,11 @@ class RoboticArmService:
 
         await self.start_hypha_service(server)
 
-    def get_status(self, task_name):
+    def get_task_status(self, task_name):
         """Get the status of a specific task"""
         return self.task_status.get(task_name, "unknown")
 
-    def reset_status(self, task_name):
+    def reset_task_status(self, task_name):
         """Reset the status of a specific task"""
         if task_name in self.task_status:
             self.task_status[task_name] = "not_started"

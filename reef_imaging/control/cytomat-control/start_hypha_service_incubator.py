@@ -107,7 +107,13 @@ class IncubatorService:
 
     def get_task_status(self, task_name):
         """Get the status of a specific task"""
-        return self.task_status.get(task_name, "unknown")
+        try:
+            status = self.task_status.get(task_name, "unknown")
+            print(f"Task {task_name} status: {status}")  # Add logging
+            return status
+        except Exception as e:
+            print(f"Error getting task status for {task_name}: {e}")
+            return "unknown"
 
     def reset_task_status(self, task_name):
         """Reset the status of a specific task"""
