@@ -33,7 +33,9 @@ class RoboticArmService:
             "disconnect": "not_started",
             "halt": "not_started",
             "get_all_joints": "not_started",
-            "get_all_positions": "not_started"
+            "get_all_positions": "not_started",
+            "light_on": "not_started",
+            "light_off": "not_started"
         }
 
     async def start_hypha_service(self, server):
@@ -60,7 +62,9 @@ class RoboticArmService:
             # Add status functions
             "get_task_status": self.get_task_status,
             "reset_task_status": self.reset_task_status,
-            "reset_all_task_status": self.reset_all_task_status
+            "reset_all_task_status": self.reset_all_task_status,
+            "light_on": self.light_on,
+            "light_off": self.light_off
         })
 
         print(f"Robotic arm control service registered at workspace: {server.config.workspace}, id: {svc.id}")
@@ -354,6 +358,38 @@ class RoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             print(f"Failed to halt robot: {e}")
+            return False
+    
+    @schema_function(skip_self=True)
+    def light_on(self):
+        """
+        Turn on the light
+        """
+        task_name = "light_on"
+        self.task_status[task_name] = "started"
+        try:
+            self.robot.set_output(7, 0)
+            self.task_status[task_name] = "finished"
+            return True
+        except Exception as e:
+            self.task_status[task_name] = "failed"
+            print(f"Failed to turn on light: {e}")
+            return False
+
+    @schema_function(skip_self=True)
+    def light_off(self):    
+        """
+        Turn off the light
+        """
+        task_name = "light_off"
+        self.task_status[task_name] = "started"
+        try:
+            self.robot.set_output(7, 1)
+            self.task_status[task_name] = "finished"
+            return True
+        except Exception as e:
+            self.task_status[task_name] = "failed"
+            print(f"Failed to turn off light: {e}")
             return False
 
 if __name__ == "__main__":
