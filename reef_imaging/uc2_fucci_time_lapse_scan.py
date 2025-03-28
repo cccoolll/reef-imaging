@@ -50,6 +50,8 @@ IMAGING_INTERVAL = 3600  # Time between cycles in seconds
 INCUBATOR_SLOT = 36  # Slot number in the incubator
 ILLUMINATE_CHANNELS = ['BF LED matrix full', 'Fluorescence 488 nm Ex', 'Fluorescence 561 nm Ex']
 SCANNING_ZONE = [(0, 0), (7, 11)]
+Nx = 3
+Ny = 3
 ACTION_ID = '20250327-before-drug-treatment'
 
 async def setup_connections():
@@ -221,6 +223,8 @@ async def run_cycle():
                 illuminate_channels=ILLUMINATE_CHANNELS,
                 do_reflection_af=True,
                 scanning_zone=SCANNING_ZONE,
+                Nx=Nx,
+                Ny=Ny,
                 action_ID=ACTION_ID
             ),
             timeout=2400
