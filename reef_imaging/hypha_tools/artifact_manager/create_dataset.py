@@ -4,7 +4,7 @@ from hypha_rpc import connect_to_server
 from dotenv import load_dotenv
 
 load_dotenv()
-token = os.getenv("AGENT_LENS_WORKSPACE_TOKEN")
+token = os.getenv("REEF_WORKSPACE_TOKEN")
 SERVER_URL = "https://hypha.aicell.io"
 
 
@@ -21,8 +21,8 @@ async def main():
         "description": "A dataset containing imaging map tiles of a microscopy sample",
     }
     await artifact_manager.create(
-        parent_id="agent-lens/microscopy-data",
-        alias="microscopy-tiles-complete",
+        parent_id="reef-imaging/u2os-fucci-drug-treatment",
+        alias="20250328-treatment-out-of-incubator",
         manifest=dataset_manifest,
         version="stage",
         overwrite=True,

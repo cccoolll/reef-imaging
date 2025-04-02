@@ -4,7 +4,7 @@ from hypha_rpc import connect_to_server
 from dotenv import load_dotenv
 
 load_dotenv()
-token = os.getenv("AGENT_LENS_WORKSPACE_TOKEN")
+token = os.getenv("REEF_WORKSPACE_TOKEN")
 SERVER_URL = "https://hypha.aicell.io"
 
 
@@ -17,12 +17,12 @@ async def main():
 
     # Create a collection for the Dataset Gallery
     gallery_manifest = {
-        "name": "Microscopy Images",
+        "name": "U2OS FUCCI Drug Treatment",
         "description": "A collection for organizing imaging datasets acquired by microscopes",
     }
     await artifact_manager.create(
         type="collection",
-        alias="agent-lens/microscopy-data",
+        alias="reef-imaging/u2os-fucci-drug-treatment",
         manifest=gallery_manifest,
         config={"permissions": {"*": "r+", "@": "r+"}},
         overwrite=True,
