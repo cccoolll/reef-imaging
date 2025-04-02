@@ -64,7 +64,9 @@ class RoboticArmService:
             "reset_task_status": self.reset_task_status,
             "reset_all_task_status": self.reset_all_task_status,
             "light_on": self.light_on,
-            "light_off": self.light_off
+            "light_off": self.light_off,
+            "get_actions": self.get_actions,
+            "execute_action": self.execute_action
         })
 
         print(f"Robotic arm control service registered at workspace: {server.config.workspace}, id: {svc.id}")
@@ -390,6 +392,144 @@ class RoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             print(f"Failed to turn off light: {e}")
+            return False
+
+    @schema_function(skip_self=True)
+    def get_actions(self):
+        """
+        Get a list of predefined actions that can be executed by the robot.
+        Each action has a name, description, and a list of positions.
+        Returns: dict
+        """
+        import os
+        import json
+        
+        actions = []
+        paths_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "paths")
+        
+        # Define action mappings
+        action_mappings = {
+            "grab_from_incubator.txt": {
+                "name": "Grab from Incubator",
+                "description": "Grab a sample from the incubator",
+                "id": "grab_from_incubator"
+            },
+            "put_on_incubator.txt": {
+                "name": "Put on Incubator",
+                "description": "Place a sample on the incubator",
+                "id": "put_on_incubator"
+            },
+            "put_on_microscope1.txt": {
+                "name": "Put on Microscope 1",
+                "description": "Place a sample on microscope 1",
+                "id": "put_on_microscope1"
+            },
+            "grab_from_microscope1.txt": {
+                "name": "Grab from Microscope 1",
+                "description": "Grab a sample from microscope 1",
+                "id": "grab_from_microscope1"
+            },
+            "transport_from_incubator_to_microscope1.txt": {
+                "name": "Transport from Incubator to Microscope 1",
+                "description": "Transport a sample from the incubator to microscope 1",
+                "id": "transport_from_incubator_to_microscope1"
+            },
+            "transport_from_microscope1_to_incubator.txt": {
+                "name": "Transport from Microscope 1 to Incubator",
+                "description": "Transport a sample from microscope 1 to the incubator",
+                "id": "transport_from_microscope1_to_incubator"
+            },
+            "incubator_to_microscope1.txt": {
+                "name": "Move from Incubator to Microscope 1",
+                "description": "Move a sample from the incubator to microscope 1 (complete sequence)",
+                "id": "incubator_to_microscope1"
+            },
+            "microscope1_to_incubator.txt": {
+                "name": "Move from Microscope 1 to Incubator",
+                "description": "Move a sample from microscope 1 to the incubator (complete sequence)",
+                "id": "microscope1_to_incubator"
+            }
+        }
+        
+        # Process each path file
+        for filename, action_info in action_mappings.items():
+            file_path = os.path.join(paths_dir, filename)
+            if os.path.exists(file_path):
+                positions = []
+                speeds = []
+                
+                with open(file_path, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#'):
+                            try:
+                                cmd = json.loads(line)
+                                if cmd.get('cmd') == 'jmove':
+                                    # Extract position data
+                                    pos = [
+                                        cmd.get('j0', 0),
+                                        cmd.get('j1', 0),
+                                        cmd.get('j2', 0),
+                                        cmd.get('j3', 0),
+                                        cmd.get('j4', 0),
+                                        cmd.get('j5', 0)
+                                    ]
+                                    positions.append(pos)
+                                    
+                                    # Extract speed if available, otherwise use default of 20
+                                    speed = cmd.get('vel', 20)
+                                    speeds.append(speed)
+                            except json.JSONDecodeError:
+                                continue
+                
+                # Create action object
+                action = {
+                    "name": action_info["name"],
+                    "description": action_info["description"],
+                    "id": action_info["id"],
+                    "positions": positions,
+                    "speeds": speeds
+                }
+                
+                actions.append(action)
+        
+        return {"actions": actions}
+
+    @schema_function(skip_self=True)
+    def execute_action(self, action_id):
+        """
+        Execute a predefined action by its ID
+        Returns: bool
+        """
+        if not self.connected:
+            self.connect()
+            
+        # Map action IDs to script paths
+        action_to_script = {
+            "grab_from_incubator": "paths/grab_from_incubator.txt",
+            "put_on_incubator": "paths/put_on_incubator.txt",
+            "put_on_microscope1": "paths/put_on_microscope1.txt",
+            "grab_from_microscope1": "paths/grab_from_microscope1.txt",
+            "transport_from_incubator_to_microscope1": "paths/transport_from_incubator_to_microscope1.txt",
+            "transport_from_microscope1_to_incubator": "paths/transport_from_microscope1_to_incubator.txt",
+            "incubator_to_microscope1": "paths/incubator_to_microscope1.txt",
+            "microscope1_to_incubator": "paths/microscope1_to_incubator.txt"
+        }
+        
+        if action_id not in action_to_script:
+            print(f"Unknown action ID: {action_id}")
+            return False
+            
+        script_path = action_to_script[action_id]
+        try:
+            self.set_motor(1)
+            result = self.robot.play_script(script_path)
+            if result != 2:
+                raise Exception("Error playing script")
+            print(f"Action {action_id} executed successfully")
+            return True
+        except Exception as e:
+            print(f"Failed to execute action {action_id}: {e}")
             return False
 
 if __name__ == "__main__":
