@@ -136,6 +136,11 @@ class Microscope:
         """Reset the status of a specific task"""
         if task_name in self.task_status:
             self.task_status[task_name] = "not_started"
+    
+    def reset_all_task_status(self):
+        """Reset the status of all tasks"""
+        for task_name in self.task_status:
+            self.task_status[task_name] = "not_started"
 
     @schema_function(skip_self=True)
     def move_by_distance(self, x: float=Field(1.0, description="disntance through X axis, unit: milimeter"), y: float=Field(1.0, description="disntance through Y axis, unit: milimeter"), z: float=Field(1.0, description="disntance through Z axis, unit: milimeter"), context=None):
@@ -436,7 +441,7 @@ class Microscope:
             return f"Failed to close illumination: {e}"
 
     @schema_function(skip_self=True)
-    def scan_well_plate(self, well_plate_type: str=Field("96", description="Type of the well plate (e.g., '6', '12', '24', '96', '384')"), illuminate_channels: List[str]=Field(default_factory=lambda: ['BF LED matrix full','Fluorescence 488 nm Ex','Fluorescence 561 nm Ex'], description="Light source to illuminate the well plate"), do_contrast_autofocus: bool=Field(False, description="Whether to do contrast based autofocus"), do_reflection_af: bool=Field(True, description="Whether to do reflection based autofocus"), scanning_zone: List[tuple]=Field(default_factory=lambda: [(0,0),(0,0)], description="The scanning zone of the well plate, for 91 well plate, it should be[(0,0),(7,11)] "), action_ID: str=Field('testPlateScan', description="The ID of the action"), context=None):
+    def scan_well_plate(self, well_plate_type: str=Field("96", description="Type of the well plate (e.g., '6', '12', '24', '96', '384')"), illuminate_channels: List[str]=Field(default_factory=lambda: ['BF LED matrix full','Fluorescence 488 nm Ex','Fluorescence 561 nm Ex'], description="Light source to illuminate the well plate"), do_contrast_autofocus: bool=Field(False, description="Whether to do contrast based autofocus"), do_reflection_af: bool=Field(True, description="Whether to do reflection based autofocus"), scanning_zone: List[tuple]=Field(default_factory=lambda: [(0,0),(0,0)], description="The scanning zone of the well plate, for 91 well plate, it should be[(0,0),(7,11)] "), Nx: int=Field(3, description="Number of columns to scan"), Ny: int=Field(3, description="Number of rows to scan"), action_ID: str=Field('testPlateScan', description="The ID of the action"), context=None):
         """
         Scan the well plate according to the pre-defined position list
         Returns: The message of the action
@@ -447,7 +452,7 @@ class Microscope:
             if illuminate_channels is None:
                 illuminate_channels = ['BF LED matrix full','Fluorescence 488 nm Ex','Fluorescence 561 nm Ex']
             print("Start scanning well plate")
-            self.squidController.plate_scan(well_plate_type, illuminate_channels, do_contrast_autofocus, do_reflection_af, scanning_zone, action_ID)
+            self.squidController.plate_scan(well_plate_type, illuminate_channels, do_contrast_autofocus, do_reflection_af, scanning_zone, Nx, Ny, action_ID)
             print("Well plate scanning completed")
             self.task_status[task_name] = "finished"
             return "Well plate scanning completed"
@@ -781,7 +786,8 @@ class Microscope:
                 "get_chatbot_url": self.get_chatbot_url,
                 # Add status functions
                 "get_task_status": self.get_task_status,
-                "reset_task_status": self.reset_task_status
+                "reset_task_status": self.reset_task_status,
+                "reset_all_task_status": self.reset_all_task_status
             },
         )
 
