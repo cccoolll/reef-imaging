@@ -54,60 +54,35 @@ Nx = 3
 Ny = 3
 ACTION_ID = '20250327-after-drug-treatment'
 
-async def setup_connections(max_retries=300, timeout=10):
-    """Set up connections to all services with retry mechanism."""
+async def setup_connections():
     global reef_token, squid_token, incubator, microscope, robotic_arm
-    retries = 0
-    
-    while retries < max_retries:
-        try:
-            if not reef_token or not squid_token:
-                token = await login({"server_url": server_url})
-                reef_token = token
-                squid_token = token
+    if not reef_token or not squid_token:
+        token = await login({"server_url": server_url})
+        reef_token = token
+        squid_token = token
 
-            reef_server = await asyncio.wait_for(
-                connect_to_server({
-                    "server_url": server_url,
-                    "token": reef_token,
-                    "workspace": "reef-imaging",
-                    "ping_interval": None
-                }),
-                timeout=timeout
-            )
-            
-            squid_server = await asyncio.wait_for(
-                connect_to_server({
-                    "server_url": server_url,
-                    "token": squid_token,
-                    "workspace": "squid-control",
-                    "ping_interval": None
-                }),
-                timeout=timeout
-            )
+    reef_server = await connect_to_server({
+        "server_url": server_url,
+        "token": reef_token,
+        "workspace": "reef-imaging",
+        "ping_interval": None
+    })
+    squid_server = await connect_to_server({
+        "server_url": server_url,
+        "token": squid_token,
+        "workspace": "squid-control",
+        "ping_interval": None
+    })
 
-            incubator_id = "incubator-control"
-            microscope_id = "microscope-control-squid-real-microscope-reef"
-            robotic_arm_id = "robotic-arm-control"
+    incubator_id = "incubator-control"
+    microscope_id = "microscope-control-squid-real-microscope-reef"
+    robotic_arm_id = "robotic-arm-control"
 
-            incubator = await asyncio.wait_for(reef_server.get_service(incubator_id), timeout=timeout)
-            microscope = await asyncio.wait_for(squid_server.get_service(microscope_id), timeout=timeout)
-            robotic_arm = await asyncio.wait_for(reef_server.get_service(robotic_arm_id), timeout=timeout)
-            
-            logger.info('Successfully connected to all devices.')
-            return incubator, microscope, robotic_arm
-            
-        except asyncio.TimeoutError:
-            logger.warning(f"Connection attempt {retries + 1}/{max_retries} timed out. Retrying...")
-        except Exception as e:
-            logger.error(f"Error during connection setup: {e}. Retrying... ({retries + 1}/{max_retries})")
-        
-        retries += 1
-        if retries < max_retries:
-            await asyncio.sleep(timeout)
-    
-    logger.error("Failed to establish connections after maximum retries. Terminating.")
-    raise ConnectionError("Failed to establish connections to required services")
+    incubator = await reef_server.get_service(incubator_id)
+    microscope = await squid_server.get_service(microscope_id)
+    robotic_arm = await reef_server.get_service(robotic_arm_id)
+    print('Connected to devices.')
+    return incubator, microscope, robotic_arm
 
 async def disconnect_services():
     """Disconnect from all services."""
@@ -123,7 +98,7 @@ async def disconnect_services():
     except Exception as e:
         logger.error(f"Error during disconnection: {e}")
 
-async def call_service_with_retries(service, method_name, *args, max_retries=30, timeout=30):
+async def call_service_with_retries(service, method_name, *args, max_retries=30, timeout=30, **kwargs):
     retries = 0
     while retries < max_retries:
         try:
@@ -137,7 +112,7 @@ async def call_service_with_retries(service, method_name, *args, max_retries=30,
 
             if status == "not_started":
                 logger.info(f"Starting the task {method_name}...")
-                await asyncio.wait_for(getattr(service, method_name)(*args), timeout=timeout)
+                await asyncio.wait_for(getattr(service, method_name)(*args, **kwargs), timeout=timeout)
 
             # Wait for the task to complete
             while True:
@@ -242,22 +217,18 @@ async def run_cycle():
         logger.error("Failed to load sample - aborting cycle")
         return False
 
-    try:
-        await asyncio.wait_for(
-            microscope.scan_well_plate(
-                illuminate_channels=ILLUMINATE_CHANNELS,
-                do_reflection_af=True,
-                scanning_zone=SCANNING_ZONE,
-                Nx=Nx,
-                Ny=Ny,
-                action_ID=ACTION_ID
-            ),
-            timeout=2400
-        )
-    except asyncio.TimeoutError:
-        logger.error("Microscope scanning timed out.")
-    except Exception as e:
-        logger.error(f"Error during microscope scanning: {e}")
+    if not await call_service_with_retries(
+        microscope,
+        "scan_well_plate",
+        illuminate_channels=ILLUMINATE_CHANNELS,
+        do_reflection_af=True,
+        scanning_zone=SCANNING_ZONE,
+        Nx=Nx,
+        Ny=Ny,
+        action_ID=ACTION_ID,
+        timeout=2400
+    ):
+        logger.error("Failed to complete microscope scanning")
         return False
 
     if not await unload_plate_from_microscope(incubator_slot=INCUBATOR_SLOT):
