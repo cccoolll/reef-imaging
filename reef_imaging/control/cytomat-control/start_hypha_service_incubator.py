@@ -41,7 +41,7 @@ class IncubatorService:
     def __init__(self, local):
         self.local = local
         self.server_url = "http://localhost:9527" if local else "https://hypha.aicell.io"
-        self.c = Cytomat("/dev/ttyUSB1", json_path="/home/tao/workspace/cytomat-controller/docs/config.json")
+        self.c = Cytomat("/dev/ttyUSB0")
         self.samples_file = "/home/tao/workspace/reef-imaging/reef_imaging/control/cytomat-control/samples.json"
         # Add task status tracking
         self.task_status = {

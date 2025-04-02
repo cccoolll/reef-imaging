@@ -54,35 +54,60 @@ Nx = 3
 Ny = 3
 ACTION_ID = '20250327-after-drug-treatment'
 
-async def setup_connections():
+async def setup_connections(max_retries=300, timeout=10):
+    """Set up connections to all services with retry mechanism."""
     global reef_token, squid_token, incubator, microscope, robotic_arm
-    if not reef_token or not squid_token:
-        token = await login({"server_url": server_url})
-        reef_token = token
-        squid_token = token
+    retries = 0
+    
+    while retries < max_retries:
+        try:
+            if not reef_token or not squid_token:
+                token = await login({"server_url": server_url})
+                reef_token = token
+                squid_token = token
 
-    reef_server = await connect_to_server({
-        "server_url": server_url,
-        "token": reef_token,
-        "workspace": "reef-imaging",
-        "ping_interval": None
-    })
-    squid_server = await connect_to_server({
-        "server_url": server_url,
-        "token": squid_token,
-        "workspace": "squid-control",
-        "ping_interval": None
-    })
+            reef_server = await asyncio.wait_for(
+                connect_to_server({
+                    "server_url": server_url,
+                    "token": reef_token,
+                    "workspace": "reef-imaging",
+                    "ping_interval": None
+                }),
+                timeout=timeout
+            )
+            
+            squid_server = await asyncio.wait_for(
+                connect_to_server({
+                    "server_url": server_url,
+                    "token": squid_token,
+                    "workspace": "squid-control",
+                    "ping_interval": None
+                }),
+                timeout=timeout
+            )
 
-    incubator_id = "incubator-control"
-    microscope_id = "microscope-control-squid-real-microscope-reef"
-    robotic_arm_id = "robotic-arm-control"
+            incubator_id = "incubator-control"
+            microscope_id = "microscope-control-squid-real-microscope-reef"
+            robotic_arm_id = "robotic-arm-control"
 
-    incubator = await reef_server.get_service(incubator_id)
-    microscope = await squid_server.get_service(microscope_id)
-    robotic_arm = await reef_server.get_service(robotic_arm_id)
-    print('Connected to devices.')
-    return incubator, microscope, robotic_arm
+            incubator = await asyncio.wait_for(reef_server.get_service(incubator_id), timeout=timeout)
+            microscope = await asyncio.wait_for(squid_server.get_service(microscope_id), timeout=timeout)
+            robotic_arm = await asyncio.wait_for(reef_server.get_service(robotic_arm_id), timeout=timeout)
+            
+            logger.info('Successfully connected to all devices.')
+            return incubator, microscope, robotic_arm
+            
+        except asyncio.TimeoutError:
+            logger.warning(f"Connection attempt {retries + 1}/{max_retries} timed out. Retrying...")
+        except Exception as e:
+            logger.error(f"Error during connection setup: {e}. Retrying... ({retries + 1}/{max_retries})")
+        
+        retries += 1
+        if retries < max_retries:
+            await asyncio.sleep(timeout)
+    
+    logger.error("Failed to establish connections after maximum retries. Terminating.")
+    raise ConnectionError("Failed to establish connections to required services")
 
 async def disconnect_services():
     """Disconnect from all services."""
