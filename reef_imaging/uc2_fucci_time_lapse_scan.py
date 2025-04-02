@@ -52,7 +52,7 @@ ILLUMINATE_CHANNELS = ['BF LED matrix full', 'Fluorescence 488 nm Ex', 'Fluoresc
 SCANNING_ZONE = [(0, 0), (7, 11)]
 Nx = 3
 Ny = 3
-ACTION_ID = '20250327-before-drug-treatment'
+ACTION_ID = '20250327-after-drug-treatment'
 
 async def setup_connections():
     global reef_token, squid_token, incubator, microscope, robotic_arm
