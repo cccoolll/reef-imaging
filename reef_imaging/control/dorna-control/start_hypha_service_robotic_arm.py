@@ -19,6 +19,8 @@ class RoboticArmService:
         self.robot = Dorna()
         self.ip = "192.168.2.20"
         self.connected = False
+        self.server = None
+        self.service_id = "robotic-arm-control"  # Define service ID here
         # Add task status tracking
         self.task_status = {
             "move_sample_from_microscope1_to_incubator": "not_started",
@@ -38,14 +40,43 @@ class RoboticArmService:
             "light_off": "not_started"
         }
 
+    async def check_service_health(self):
+        """Check if the service is healthy and rerun setup if needed"""
+        while True:
+            try:
+                # Try to get the service status
+                if self.service_id:
+                    service = await self.server.get_service(self.service_id)
+                    # Try a simple operation to verify service is working
+                    await service.hello_world()
+                    #print("Service health check passed")
+                else:
+                    print("Service ID not set, waiting for service registration")
+            except Exception as e:
+                print(f"Service health check failed: {e}")
+                print("Attempting to rerun setup...")
+                while True:
+                    try:
+                        # Rerun the setup method
+                        await self.setup()
+                        print("Setup successful")
+                        break  # Exit the loop if setup is successful
+                    except Exception as setup_error:
+                        print(f"Failed to rerun setup: {setup_error}")
+                        await asyncio.sleep(30)  # Wait before retrying
+            
+            await asyncio.sleep(30)  # Check every half minute
+
     async def start_hypha_service(self, server):
+        self.server = server
         svc = await server.register_service({
             "name": "Robotic Arm Control",
-            "id": "robotic-arm-control",
+            "id": self.service_id,  # Use the defined service ID
             "config": {
                 "visibility": "public",
                 "run_in_executor": True
             },
+            "hello_world": self.hello_world,
             "move_sample_from_microscope1_to_incubator": self.move_sample_from_microscope1_to_incubator,
             "move_sample_from_incubator_to_microscope1": self.move_sample_from_incubator_to_microscope1,
             "grab_sample_from_microscope1": self.grab_sample_from_microscope1,
@@ -74,6 +105,9 @@ class RoboticArmService:
         id = svc.id.split(":")[1]
         print(f"You can also test the service via the HTTP proxy: {self.server_url}/{server.config.workspace}/services/{id}/move_sample_from_microscope1_to_incubator")
 
+        # Start the health check task
+        asyncio.create_task(self.check_service_health())
+
     async def setup(self):
         if self.local:
             token = None
@@ -100,6 +134,13 @@ class RoboticArmService:
         """Reset the status of all tasks"""
         for task_name in self.task_status:
             self.task_status[task_name] = "not_started"
+
+    def hello_world(self):
+        """Hello world"""
+        task_name = "hello_world"
+        self.task_status[task_name] = "started"
+        self.task_status[task_name] = "finished"
+        return "Hello world"
 
     @schema_function(skip_self=True)
     def connect(self):

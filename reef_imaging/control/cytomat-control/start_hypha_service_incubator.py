@@ -43,6 +43,8 @@ class IncubatorService:
         self.server_url = "http://localhost:9527" if local else "https://hypha.aicell.io"
         self.c = Cytomat("/dev/ttyUSB0")
         self.samples_file = "/home/tao/workspace/reef-imaging/reef_imaging/control/cytomat-control/samples.json"
+        self.server = None
+        self.service_id = "incubator-control"  # Define service ID here
         # Add task status tracking
         self.task_status = {
             "initialize": "not_started",
@@ -57,14 +59,44 @@ class IncubatorService:
             "get_slot_information": "not_started"
         }
 
+    async def check_service_health(self):
+        """Check if the service is healthy and rerun setup if needed"""
+        while True:
+            try:
+                # Try to get the service status
+                if self.service_id:
+                    service = await self.server.get_service(self.service_id)
+                    await service.hello_world()
+                    # Try a simple operation to verify service is working
+                    #await service.get_status()
+                    #print("Service health check passed")
+                else:
+                    print("Service ID not set, waiting for service registration")
+            except Exception as e:
+                print(f"Service health check failed: {e}")
+                print("Attempting to rerun setup...")
+                while True:
+                    try:
+                        # Rerun the setup method
+                        await self.setup()
+                        print("Setup successful")
+                        break  # Exit the loop if setup is successful
+                    except Exception as setup_error:
+                        print(f"Failed to rerun setup: {setup_error}")
+                        await asyncio.sleep(30)  # Wait before retrying
+            
+            await asyncio.sleep(30)  # Check every half minute
+
     async def start_hypha_service(self, server):
+        self.server = server
         svc = await server.register_service({
             "name": "Incubator Control",
-            "id": "incubator-control",
+            "id": self.service_id,  # Use the defined service ID
             "config": {
                 "visibility": "public",
                 "run_in_executor": True
             },
+            "hello_world": self.hello_world,
             "initialize": self.initialize,
             "put_sample_from_transfer_station_to_slot": self.put_sample_from_transfer_station_to_slot,
             "get_sample_from_slot_to_transfer_station": self.get_sample_from_slot_to_transfer_station,
@@ -85,6 +117,9 @@ class IncubatorService:
         print(f'You can use this service using the service id: {svc.id}')
         id = svc.id.split(":")[1]
         print(f"You can also test the service via the HTTP proxy: {self.server_url}/{server.config.workspace}/services/{id}/initialize")
+
+        # Start the health check task
+        asyncio.create_task(self.check_service_health())
 
     async def setup(self):
         self.c.maintenance_controller.reset_error_status()
@@ -154,6 +189,14 @@ class IncubatorService:
             self.task_status[task_name] = "failed"
             print(f"Failed to get temperature: {e}")
             return None
+    
+    @schema_function(skip_self=True)
+    def hello_world(self):
+        """Hello world"""
+        task_name = "hello_world"
+        self.task_status[task_name] = "started"
+        self.task_status[task_name] = "finished"
+        return "Hello world"
     
     @schema_function(skip_self=True)
     def get_slot_information(self, slot: int = Field(1, description="Slot number, range: 1-42")):
