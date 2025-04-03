@@ -34,6 +34,7 @@ class RoboticArmService:
             "connect": "not_started",
             "disconnect": "not_started",
             "halt": "not_started",
+            "set_alarm": "not_started",
             "get_all_joints": "not_started",
             "get_all_positions": "not_started",
             "light_on": "not_started",
@@ -103,6 +104,7 @@ class RoboticArmService:
             "get_task_status": self.get_task_status,
             "reset_task_status": self.reset_task_status,
             "reset_all_task_status": self.reset_all_task_status,
+            "set_alarm": self.set_alarm,
             "light_on": self.light_on,
             "light_off": self.light_off,
             "get_actions": self.get_actions,
@@ -412,6 +414,22 @@ class RoboticArmService:
             print(f"Failed to halt robot: {e}")
             return False
     
+    @schema_function(skip_self=True)
+    def set_alarm(self, state: int=Field(1, description="Enable or disable the alarm, 1 for enable, 0 for disable")):
+        """
+        Set the alarm state
+        """
+        task_name = "set_alarm"
+        self.task_status[task_name] = "started"
+        try:
+            self.robot.set_alarm(state)
+            self.task_status[task_name] = "finished"
+            return True
+        except Exception as e:
+            self.task_status[task_name] = "failed"
+            print(f"Failed to set alarm: {e}")
+            return False
+
     @schema_function(skip_self=True)
     def light_on(self):
         """
