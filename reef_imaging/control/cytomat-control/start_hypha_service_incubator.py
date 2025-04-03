@@ -75,6 +75,15 @@ class IncubatorService:
             except Exception as e:
                 print(f"Service health check failed: {e}")
                 print("Attempting to rerun setup...")
+                # Clean up Hypha service-related connections and variables
+                try:
+                    if self.server:
+                        await self.server.disconnect()
+                except Exception as disconnect_error:
+                    print(f"Error during disconnect: {disconnect_error}")
+                finally:
+                    self.server = None
+
                 while True:
                     try:
                         # Rerun the setup method
