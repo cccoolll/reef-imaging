@@ -1,6 +1,7 @@
 import asyncio
 import time
 import base64
+import json
 from IPython.display import Image, display
 from hypha_rpc import connect_to_server, login
 import os
@@ -8,9 +9,11 @@ import dotenv
 import logging
 import sys
 import logging.handlers
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 
 # Set up logging
-def setup_logging(log_file="uc2_fucci_time_lapse_scan.log", max_bytes=100000, backup_count=3):
+def setup_logging(log_file="uc2_fucci_time_lapse_scan_v2.log", max_bytes=100000, backup_count=3):
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.INFO)
@@ -46,13 +49,21 @@ robotic_arm = None
 sample_loaded = False
 
 # Configuration settings
-IMAGING_INTERVAL = 3600  # Time between cycles in seconds
-INCUBATOR_SLOT = 36  # Slot number in the incubator
-ILLUMINATE_CHANNELS = ['BF LED matrix full', 'Fluorescence 488 nm Ex', 'Fluorescence 561 nm Ex']
-SCANNING_ZONE = [(0, 0), (7, 11)]
-Nx = 3
-Ny = 3
-ACTION_ID = '20250327-after-drug-treatment'
+config_file_path = "reef_imaging/config.json"
+
+class ConfigHandler(FileSystemEventHandler):
+    def __init__(self, config_path):
+        self.config_path = config_path
+        self.config_data = self.load_config()
+
+    def load_config(self):
+        with open(self.config_path, 'r') as file:
+            return json.load(file)
+
+    def on_modified(self, event):
+        if event.src_path == self.config_path:
+            logger.info("Config file changed, reloading...")
+            self.config_data = self.load_config()
 
 async def setup_connections():
     global reef_token, squid_token, incubator, microscope, robotic_arm
@@ -137,11 +148,14 @@ async def call_service_with_retries(service, method_name, *args, max_retries=30,
     logger.error(f"Max retries reached for task {method_name}. Terminating.")
     return False
 
-async def load_plate_from_incubator_to_microscope(incubator_slot=INCUBATOR_SLOT):
+async def load_plate_from_incubator_to_microscope(sample):
     global sample_loaded, incubator, microscope, robotic_arm
     if sample_loaded:
         logger.info("Sample plate has already been loaded onto the microscope")
         return True
+
+    incubator_slot = sample['settings']['incubator_slot']
+    microscope_id = sample['settings']['allocated_microscope']
 
     logger.info(f"Loading sample from incubator slot {incubator_slot} to transfer station...")
 
@@ -151,7 +165,6 @@ async def load_plate_from_incubator_to_microscope(incubator_slot=INCUBATOR_SLOT)
     gather = await asyncio.gather(p1, p2)
     if not all(gather):
         return False
-
 
     logger.info(f"Grabbing sample from incubator...")
     if not await call_service_with_retries(robotic_arm, "grab_sample_from_incubator", timeout=120):
@@ -173,11 +186,13 @@ async def load_plate_from_incubator_to_microscope(incubator_slot=INCUBATOR_SLOT)
     sample_loaded = True
     return True
 
-async def unload_plate_from_microscope(incubator_slot=INCUBATOR_SLOT):
+async def unload_plate_from_microscope(sample):
     global sample_loaded, incubator, microscope, robotic_arm
     if not sample_loaded:
         logger.info("Sample plate is not on the microscope")
         return True
+
+    incubator_slot = sample['settings']['incubator_slot']
 
     logger.info(f"Homing the microscope stage...")
     if not await call_service_with_retries(microscope, "home_stage", timeout=30):
@@ -203,68 +218,78 @@ async def unload_plate_from_microscope(incubator_slot=INCUBATOR_SLOT):
     if not all(gather):
         return False
 
-
     logger.info("Sample successfully unloaded from the microscopy stage.")
     sample_loaded = False
     return True
 
-async def run_cycle():
-    """Run the complete load-scan-unload process."""
+async def run_cycle(sample):
+    """Run the complete load-scan-unload process for a sample."""
 
     #reset all task status
     await call_service_with_retries(microscope, "reset_all_task_status", timeout=30)
     await call_service_with_retries(incubator, "reset_all_task_status", timeout=30)
     await call_service_with_retries(robotic_arm, "reset_all_task_status", timeout=30)
 
-
-    if not await load_plate_from_incubator_to_microscope(incubator_slot=INCUBATOR_SLOT):
+    if not await load_plate_from_incubator_to_microscope(sample):
         logger.error("Failed to load sample - aborting cycle")
         return False
 
     if not await call_service_with_retries(
         microscope,
         "scan_well_plate",
-        illuminate_channels=ILLUMINATE_CHANNELS,
-        do_reflection_af=True,
-        scanning_zone=SCANNING_ZONE,
+        illuminate_channels=sample['settings']['illuminate_channels'],
+        do_reflection_af=sample['settings']['do_reflection_af'],
+        scanning_zone=sample['settings']['imaging_zone'],
         Nx=Nx,
         Ny=Ny,
-        action_ID=ACTION_ID,
+        action_ID=sample['name'],
         timeout=2400
     ):
         logger.error("Failed to complete microscope scanning")
         return False
 
-    if not await unload_plate_from_microscope(incubator_slot=INCUBATOR_SLOT):
+    if not await unload_plate_from_microscope(sample):
         logger.error("Failed to unload sample - manual intervention may be required")
         return False
 
     return True
 
-async def run_time_lapse(round_time=IMAGING_INTERVAL):
-    """Run the cycle every hour (xxx seconds)."""
-    while True:
-        global incubator, microscope, robotic_arm
-        incubator, microscope, robotic_arm = await setup_connections()
-        start_time = asyncio.get_event_loop().time()
-        logger.info("Starting new cycle...")
-        success = await run_cycle()
-        if success:
-            logger.info("Cycle completed successfully")
-        else:
-            logger.warning("Cycle completed with errors")
-            await disconnect_services()
-            sys.exit(1)
+async def run_time_lapse():
+    """Run the cycle for each sample based on its schedule."""
+    config_handler = ConfigHandler(config_file_path)
+    observer = Observer()
+    observer.schedule(config_handler, path=os.path.dirname(config_file_path), recursive=False)
+    observer.start()
 
-        await disconnect_services()
-        end_time = asyncio.get_event_loop().time()
-        elapsed = end_time - start_time
-        sleep_time = max(0, round_time - elapsed)
-        logger.info(f"Elapsed time: {elapsed:.2f} seconds. Waiting {sleep_time:.2f} seconds until next cycle.")
-        await asyncio.sleep(sleep_time)
+    try:
+        while True:
+            current_time = time.time()
+            for sample in config_handler.config_data['samples']:
+                time_start = time.mktime(time.strptime(sample['settings']['time_start_imaging'], "%Y-%m-%dT%H:%M:%SZ"))
+                time_end = time.mktime(time.strptime(sample['settings']['time_end_imaging'], "%Y-%m-%dT%H:%M:%SZ"))
+                imaging_interval = sample['settings']['imaging_interval']
+
+                if time_start <= current_time < time_end:
+                    incubator, microscope, robotic_arm = await setup_connections()
+                    logger.info(f"Starting new cycle for sample {sample['name']}...")
+                    success = await run_cycle(sample)
+                    if success:
+                        logger.info(f"Cycle for sample {sample['name']} completed successfully")
+                    else:
+                        logger.warning(f"Cycle for sample {sample['name']} completed with errors")
+                        await disconnect_services()
+                        sys.exit(1)
+
+                    await disconnect_services()
+                    await asyncio.sleep(imaging_interval)
+
+            await asyncio.sleep(60)  # Check every minute for new samples or changes
+    finally:
+        observer.stop()
+        observer.join()
 
 async def main():
-    await run_time_lapse(round_time=IMAGING_INTERVAL)
+    await run_time_lapse()
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    asyncio.run(main()) 

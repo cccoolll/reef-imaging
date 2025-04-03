@@ -4,6 +4,7 @@
             "name": "Sample1",
             "settings": {
                 "incubator_slot": 3,
+                "allocated_microscope": "microscope-control-squid-1",
                 "time_added": "2025-03-27T12:00:00Z",
                 "time_start_imaging": "2025-03-27T12:00:00Z",
                 "time_end_imaging": "2025-03-27T12:00:00Z",
@@ -17,6 +18,7 @@
             "name": "Sample2",
             "settings": {
                 "incubator_slot": 4,
+                "allocated_microscope": "microscope-control-squid-2",
                 "time_added": "2025-03-27T12:00:00Z",
                 "time_start_imaging": "2025-03-27T12:00:00Z",
                 "time_end_imaging": "2025-03-27T12:00:00Z",
@@ -31,14 +33,14 @@
         {
             "name": "Microscope1",
             "settings": {
-                "id": "microscope-control-squid-real-microscope-reef-1",
+                "id": "microscope-control-squid-1",
                 "objective": "20x"
             }
         },
         {
             "name": "Microscope2",
             "settings": {
-                "id": "microscope-control-squid-real-microscope-reef-2",
+                "id": "microscope-control-squid-2",
                 "objective": "20x"
             }
         }
