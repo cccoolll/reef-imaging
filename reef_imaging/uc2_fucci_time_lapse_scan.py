@@ -144,12 +144,14 @@ async def load_plate_from_incubator_to_microscope(incubator_slot=INCUBATOR_SLOT)
         return True
 
     logger.info(f"Loading sample from incubator slot {incubator_slot} to transfer station...")
-    if not await call_service_with_retries(incubator, "get_sample_from_slot_to_transfer_station", incubator_slot, timeout=60):
-        return False
 
     logger.info(f"Homing the microscope stage...")
-    if not await call_service_with_retries(microscope, "home_stage", timeout=30):
+    p1  = await call_service_with_retries(incubator, "get_sample_from_slot_to_transfer_station", incubator_slot, timeout=60)
+    p2 = await call_service_with_retries(microscope, "home_stage", timeout=30)
+    gather = await asyncio.gather(p1, p2)
+    if not all(gather):
         return False
+
 
     logger.info(f"Grabbing sample from incubator...")
     if not await call_service_with_retries(robotic_arm, "grab_sample_from_incubator", timeout=120):
@@ -194,12 +196,13 @@ async def unload_plate_from_microscope(incubator_slot=INCUBATOR_SLOT):
         return False
 
     logger.info(f"Putting sample on incubator slot {incubator_slot}...")    
-    if not await call_service_with_retries(incubator, "put_sample_from_transfer_station_to_slot", incubator_slot, timeout=60):
+    logger.info(f"Returning microscope stage to loading position...")
+    p1 = await call_service_with_retries(incubator, "put_sample_from_transfer_station_to_slot", incubator_slot, timeout=60)
+    p2 = await call_service_with_retries(microscope, "return_stage", timeout=30)
+    gather = await asyncio.gather(p1, p2)
+    if not all(gather):
         return False
 
-    logger.info(f"Returning microscope stage to loading position...")
-    if not await call_service_with_retries(microscope, "return_stage", timeout=30):
-        return False
 
     logger.info("Sample successfully unloaded from the microscopy stage.")
     sample_loaded = False
@@ -209,9 +212,10 @@ async def run_cycle():
     """Run the complete load-scan-unload process."""
 
     #reset all task status
-    await robotic_arm.reset_all_task_status()
-    await incubator.reset_all_task_status()
-    await microscope.reset_all_task_status()
+    await call_service_with_retries(microscope, "reset_all_task_status", timeout=30)
+    await call_service_with_retries(incubator, "reset_all_task_status", timeout=30)
+    await call_service_with_retries(robotic_arm, "reset_all_task_status", timeout=30)
+
 
     if not await load_plate_from_incubator_to_microscope(incubator_slot=INCUBATOR_SLOT):
         logger.error("Failed to load sample - aborting cycle")
