@@ -1,29 +1,18 @@
 {
     "samples": [
         {
-            "name": "Sample1",
+            "name": "20250404-fucci-time-lapse-scan",
             "settings": {
                 "incubator_slot": 3,
                 "allocated_microscope": "microscope-control-squid-1",
-                "time_added": "2025-03-27T12:00:00Z",
-                "time_start_imaging": "2025-03-27T12:00:00Z",
-                "time_end_imaging": "2025-03-27T12:00:00Z",
+                "time_added": "2025-04-04T12:00:00Z",
+                "time_start_imaging": "2025-04-04T14:00:00Z",
+                "time_end_imaging": "2025-04-14T12:00:00Z",
                 "imaging_interval": 3600,
                 "imaging_zone": [[0,0],[7,11]],
-                "illuminate_channels": ["BF LED matrix full","Fluorescence 488 nm Ex","Fluorescence 561 nm Ex"],
-                "do_reflection_af": true
-            }
-        },
-        {
-            "name": "Sample2",
-            "settings": {
-                "incubator_slot": 4,
-                "allocated_microscope": "microscope-control-squid-2",
-                "time_added": "2025-03-27T12:00:00Z",
-                "time_start_imaging": "2025-03-27T12:00:00Z",
-                "time_end_imaging": "2025-03-27T12:00:00Z",
-                "imaging_interval": 3600,
-                "imaging_zone": [[0,0],[7,11]],
+                "Nx": 3,
+                "Ny": 3,
+                "current_location": "incubator",
                 "illuminate_channels": ["BF LED matrix full","Fluorescence 488 nm Ex","Fluorescence 561 nm Ex"],
                 "do_reflection_af": true
             }
