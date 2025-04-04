@@ -131,6 +131,7 @@ class RoboticArmService:
             "get_all_positions": self.get_all_positions,
             # Add status functions
             "get_task_status": self.get_task_status,
+            "get_all_task_status": self.get_all_task_status,
             "reset_task_status": self.reset_task_status,
             "reset_all_task_status": self.reset_all_task_status,
             "set_alarm": self.set_alarm,
@@ -165,6 +166,12 @@ class RoboticArmService:
     def get_task_status(self, task_name):
         """Get the status of a specific task"""
         return self.task_status.get(task_name, "unknown")
+    
+    @schema_function(skip_self=True)
+    def get_all_task_status(self):
+        """Get the status of all tasks"""
+        logger.info(f"Task status: {self.task_status}")
+        return self.task_status
 
     def reset_task_status(self, task_name):
         """Reset the status of a specific task"""

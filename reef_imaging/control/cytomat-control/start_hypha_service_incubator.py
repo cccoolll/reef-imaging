@@ -147,6 +147,7 @@ class IncubatorService:
             "get_slot_information": self.get_slot_information,
             # Add status functions
             "get_task_status": self.get_task_status,
+            "get_all_task_status": self.get_all_task_status,
             "reset_task_status": self.reset_task_status,
             "reset_all_task_status": self.reset_all_task_status
         })
@@ -182,7 +183,13 @@ class IncubatorService:
         except Exception as e:
             logger.error(f"Error getting task status for {task_name}: {e}")
             return "unknown"
-
+    
+    @schema_function(skip_self=True)
+    def get_all_task_status(self):
+        """Get the status of all tasks"""
+        logger.info(f"Task status: {self.task_status}")
+        return self.task_status
+    
     def reset_task_status(self, task_name):
         """Reset the status of a specific task"""
         if task_name in self.task_status:
