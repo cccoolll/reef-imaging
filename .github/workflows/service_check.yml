@@ -16,7 +16,7 @@ jobs:
         if [ "$response" != "Hello world" ]; then
           echo "Incubator Control Service is down" >> error.log
         fi
-        task_status=$(curl -s https://hypha.aicell.io/reef-imaging/services/incubator-control/get_task_status)
+        task_status=$(curl -s https://hypha.aicell.io/reef-imaging/services/incubator-control/get_all_task_status)
         if echo "$task_status" | grep -q "failed"; then
           echo "Incubator Control Service has failed tasks" >> error.log
         fi
@@ -27,7 +27,7 @@ jobs:
         if [ "$response" != "Hello world" ]; then
           echo "Microscope Control Service is down" >> error.log
         fi
-        task_status=$(curl -s https://hypha.aicell.io/squid-control/services/microscope-control-squid-1/get_task_status)
+        task_status=$(curl -s https://hypha.aicell.io/squid-control/services/microscope-control-squid-1/get_all_task_status)
         if echo "$task_status" | grep -q "failed"; then
           echo "Microscope Control Service has failed tasks" >> error.log
         fi
@@ -38,7 +38,7 @@ jobs:
         if [ "$response" != "Hello world" ]; then
           echo "Robotic Arm Control Service is down" >> error.log
         fi
-        task_status=$(curl -s https://hypha.aicell.io/reef-imaging/services/robotic-arm-control/get_task_status)
+        task_status=$(curl -s https://hypha.aicell.io/reef-imaging/services/robotic-arm-control/get_all_task_status)
         if echo "$task_status" | grep -q "failed"; then
           echo "Robotic Arm Control Service has failed tasks" >> error.log
         fi
