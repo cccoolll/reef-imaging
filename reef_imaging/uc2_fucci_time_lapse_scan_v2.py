@@ -226,9 +226,9 @@ async def run_cycle(sample):
     """Run the complete load-scan-unload process for a sample."""
 
     #reset all task status
-    await call_service_with_retries(microscope, "reset_all_task_status", timeout=30)
-    await call_service_with_retries(incubator, "reset_all_task_status", timeout=30)
-    await call_service_with_retries(robotic_arm, "reset_all_task_status", timeout=30)
+    microscope.reset_all_task_status()
+    incubator.reset_all_task_status()
+    robotic_arm.reset_all_task_status()
 
     if not await load_plate_from_incubator_to_microscope(sample):
         logger.error("Failed to load sample - aborting cycle")

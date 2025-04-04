@@ -47,12 +47,12 @@ sample_loaded = False
 
 # Configuration settings
 IMAGING_INTERVAL = 3600  # Time between cycles in seconds
-INCUBATOR_SLOT = 36  # Slot number in the incubator
+INCUBATOR_SLOT = 28  # Slot number in the incubator
 ILLUMINATE_CHANNELS = ['BF LED matrix full', 'Fluorescence 488 nm Ex', 'Fluorescence 561 nm Ex']
 SCANNING_ZONE = [(0, 0), (7, 11)]
 Nx = 3
 Ny = 3
-ACTION_ID = '20250327-after-drug-treatment'
+ACTION_ID = '20250404-fucci-time-lapse-scan'
 
 async def setup_connections():
     global reef_token, squid_token, incubator, microscope, robotic_arm
@@ -75,7 +75,7 @@ async def setup_connections():
     })
 
     incubator_id = "incubator-control"
-    microscope_id = "microscope-control-squid-2"
+    microscope_id = "microscope-control-squid-1"
     robotic_arm_id = "robotic-arm-control"
 
     incubator = await reef_server.get_service(incubator_id)
@@ -146,8 +146,8 @@ async def load_plate_from_incubator_to_microscope(incubator_slot=INCUBATOR_SLOT)
     logger.info(f"Loading sample from incubator slot {incubator_slot} to transfer station...")
 
     logger.info(f"Homing the microscope stage...")
-    p1  = await call_service_with_retries(incubator, "get_sample_from_slot_to_transfer_station", incubator_slot, timeout=60)
-    p2 = await call_service_with_retries(microscope, "home_stage", timeout=30)
+    p1 = call_service_with_retries(incubator, "get_sample_from_slot_to_transfer_station", incubator_slot, timeout=60)
+    p2 = call_service_with_retries(microscope, "home_stage", timeout=30)
     gather = await asyncio.gather(p1, p2)
     if not all(gather):
         return False
@@ -197,8 +197,8 @@ async def unload_plate_from_microscope(incubator_slot=INCUBATOR_SLOT):
 
     logger.info(f"Putting sample on incubator slot {incubator_slot}...")    
     logger.info(f"Returning microscope stage to loading position...")
-    p1 = await call_service_with_retries(incubator, "put_sample_from_transfer_station_to_slot", incubator_slot, timeout=60)
-    p2 = await call_service_with_retries(microscope, "return_stage", timeout=30)
+    p1 = call_service_with_retries(incubator, "put_sample_from_transfer_station_to_slot", incubator_slot, timeout=60)
+    p2 = call_service_with_retries(microscope, "return_stage", timeout=30)
     gather = await asyncio.gather(p1, p2)
     if not all(gather):
         return False
@@ -212,9 +212,9 @@ async def run_cycle():
     """Run the complete load-scan-unload process."""
 
     #reset all task status
-    await call_service_with_retries(microscope, "reset_all_task_status", timeout=30)
-    await call_service_with_retries(incubator, "reset_all_task_status", timeout=30)
-    await call_service_with_retries(robotic_arm, "reset_all_task_status", timeout=30)
+    microscope.reset_all_task_status()
+    incubator.reset_all_task_status()
+    robotic_arm.reset_all_task_status()
 
 
     if not await load_plate_from_incubator_to_microscope(incubator_slot=INCUBATOR_SLOT):
