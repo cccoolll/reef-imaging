@@ -47,7 +47,7 @@ sample_loaded = False
 
 # Configuration settings
 IMAGING_INTERVAL = 3600  # Time between cycles in seconds
-INCUBATOR_SLOT = 28  # Slot number in the incubator
+INCUBATOR_SLOT = 32  # Slot number in the incubator
 ILLUMINATE_CHANNELS = ['BF LED matrix full', 'Fluorescence 488 nm Ex', 'Fluorescence 561 nm Ex']
 SCANNING_ZONE = [(0, 0), (7, 11)]
 Nx = 3
