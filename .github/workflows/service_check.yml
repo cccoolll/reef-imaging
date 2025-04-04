@@ -1,0 +1,46 @@
+name: Service Health Check
+
+on:
+  schedule:
+    - cron: '*/3 * * * *'  # Every 3 minutes
+
+jobs:
+  check_services:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check Incubator Control Service
+      run: |
+        response=$(curl -s https://hypha.aicell.io/reef-imaging/services/incubator-control/hello_world)
+        if [ "$response" != "Hello world" ]; then
+          echo "Incubator Control Service is down" >> error.log
+        fi
+
+    - name: Check Microscope Control Service
+      run: |
+        response=$(curl -s https://hypha.aicell.io/squid-control/services/microscope-control-squid-1/hello_world)
+        if [ "$response" != "Hello world" ]; then
+          echo "Microscope Control Service is down" >> error.log
+        fi
+
+    - name: Check Robotic Arm Control Service
+      run: |
+        response=$(curl -s https://hypha.aicell.io/reef-imaging/services/robotic-arm-control/hello_world)
+        if [ "$response" != "Hello world" ]; then
+          echo "Robotic Arm Control Service is down" >> error.log
+        fi
+
+    - name: Send Email if Errors
+      if: ${{ failure() || steps.check_services.outputs.error_log }}
+      uses: dawidd6/action-send-mail@v3
+      with:
+        server_address: smtp.example.com
+        server_port: 587
+        username: ${{ secrets.EMAIL_USERNAME }}
+        password: ${{ secrets.EMAIL_PASSWORD }}
+        subject: "Service Health Check Alert"
+        to: your-email@example.com
+        from: your-email@example.com
+        body: |
+          The following services are down:
+          $(cat error.log)
