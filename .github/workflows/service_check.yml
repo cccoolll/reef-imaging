@@ -16,6 +16,10 @@ jobs:
         if [ "$response" != "Hello world" ]; then
           echo "Incubator Control Service is down" >> error.log
         fi
+        task_status=$(curl -s https://hypha.aicell.io/reef-imaging/services/incubator-control/get_task_status)
+        if echo "$task_status" | grep -q "failed"; then
+          echo "Incubator Control Service has failed tasks" >> error.log
+        fi
 
     - name: Check Microscope Control Service
       run: |
@@ -23,12 +27,20 @@ jobs:
         if [ "$response" != "Hello world" ]; then
           echo "Microscope Control Service is down" >> error.log
         fi
+        task_status=$(curl -s https://hypha.aicell.io/squid-control/services/microscope-control-squid-1/get_task_status)
+        if echo "$task_status" | grep -q "failed"; then
+          echo "Microscope Control Service has failed tasks" >> error.log
+        fi
 
     - name: Check Robotic Arm Control Service
       run: |
         response=$(curl -s https://hypha.aicell.io/reef-imaging/services/robotic-arm-control/hello_world)
         if [ "$response" != "Hello world" ]; then
           echo "Robotic Arm Control Service is down" >> error.log
+        fi
+        task_status=$(curl -s https://hypha.aicell.io/reef-imaging/services/robotic-arm-control/get_task_status)
+        if echo "$task_status" | grep -q "failed"; then
+          echo "Robotic Arm Control Service has failed tasks" >> error.log
         fi
 
     - name: Send Email if Errors
@@ -43,5 +55,5 @@ jobs:
         to: your-email@example.com
         from: your-email@example.com
         body: |
-          The following services are down:
+          The following services are down or have failed tasks:
           $(cat error.log)
