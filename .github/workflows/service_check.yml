@@ -3,6 +3,7 @@ name: Service Health Check
 on:
   schedule:
     - cron: '*/3 * * * *'  # Every 3 minutes
+  workflow_dispatch:  # Allows manual triggering of the workflow
 
 jobs:
   check_services:
