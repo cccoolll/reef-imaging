@@ -45,7 +45,6 @@ class RoboticArmService:
         self.server = None
         self.service_id = "robotic-arm-control"  # Define service ID here
         self.setup_task = None  # Track the setup task
-        self.initial_setup_task = None  # Track the initial setup task
         # Add task status tracking
         self.task_status = {
             "move_sample_from_microscope1_to_incubator": "not_started",
@@ -89,9 +88,6 @@ class RoboticArmService:
                     if self.setup_task:
                         self.setup_task.cancel()  # Cancel the previous setup task
                         self.setup_task = None
-                    if self.initial_setup_task:
-                        self.initial_setup_task.cancel()  # Cancel the initial setup task
-                        self.initial_setup_task = None
                 except Exception as disconnect_error:
                     logger.error(f"Error during disconnect: {disconnect_error}")
                 finally:
@@ -645,8 +641,8 @@ if __name__ == "__main__":
 
     async def main():
         try:
-            robotic_arm_service.initial_setup_task = asyncio.create_task(robotic_arm_service.setup())
-            await robotic_arm_service.initial_setup_task
+            robotic_arm_service.setup_task = asyncio.create_task(robotic_arm_service.setup())
+            await robotic_arm_service.setup_task
         except Exception as e:
             logger.error(f"Error setting up robotic arm service: {e}")
             raise e
