@@ -8,6 +8,8 @@ from hypha_rpc.utils.schema import schema_function
 from typing import Optional
 import dotenv
 import json
+import logging
+import logging.handlers
 
 dotenv.load_dotenv()  
 ENV_FILE = dotenv.find_dotenv()  
@@ -36,6 +38,27 @@ ERROR_CODES = {
     20: "Shaker clamp not closed",
     255: "Critical"
 }
+
+# Set up logging
+
+def setup_logging(log_file="incubator_service.log", max_bytes=100000, backup_count=3):
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+
+    # Rotating file handler
+    file_handler = logging.handlers.RotatingFileHandler(log_file, maxBytes=max_bytes, backupCount=backup_count)
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+
+    return logger
+
+logger = setup_logging()
 
 class IncubatorService:
     def __init__(self, local):
@@ -71,16 +94,16 @@ class IncubatorService:
                     #await service.get_status()
                     #print("Service health check passed")
                 else:
-                    print("Service ID not set, waiting for service registration")
+                    logger.info("Service ID not set, waiting for service registration")
             except Exception as e:
-                print(f"Service health check failed: {e}")
-                print("Attempting to rerun setup...")
+                logger.error(f"Service health check failed: {e}")
+                logger.info("Attempting to rerun setup...")
                 # Clean up Hypha service-related connections and variables
                 try:
                     if self.server:
                         await self.server.disconnect()
                 except Exception as disconnect_error:
-                    print(f"Error during disconnect: {disconnect_error}")
+                    logger.error(f"Error during disconnect: {disconnect_error}")
                 finally:
                     self.server = None
 
@@ -88,10 +111,10 @@ class IncubatorService:
                     try:
                         # Rerun the setup method
                         await self.setup()
-                        print("Setup successful")
+                        logger.info("Setup successful")
                         break  # Exit the loop if setup is successful
                     except Exception as setup_error:
-                        print(f"Failed to rerun setup: {setup_error}")
+                        logger.error(f"Failed to rerun setup: {setup_error}")
                         await asyncio.sleep(30)  # Wait before retrying
             
             await asyncio.sleep(30)  # Check every half minute
@@ -122,10 +145,10 @@ class IncubatorService:
             "reset_all_task_status": self.reset_all_task_status
         })
 
-        print(f"Incubator control service registered at workspace: {server.config.workspace}, id: {svc.id}")
-        print(f'You can use this service using the service id: {svc.id}')
+        logger.info(f"Incubator control service registered at workspace: {server.config.workspace}, id: {svc.id}")
+        logger.info(f'You can use this service using the service id: {svc.id}')
         id = svc.id.split(":")[1]
-        print(f"You can also test the service via the HTTP proxy: {self.server_url}/{server.config.workspace}/services/{id}/initialize")
+        logger.info(f"You can also test the service via the HTTP proxy: {self.server_url}/{server.config.workspace}/services/{id}/initialize")
 
         # Start the health check task
         asyncio.create_task(self.check_service_health())
@@ -148,10 +171,10 @@ class IncubatorService:
         """Get the status of a specific task"""
         try:
             status = self.task_status.get(task_name, "unknown")
-            print(f"Task {task_name} status: {status}")  # Add logging
+            logger.info(f"Task {task_name} status: {status}")
             return status
         except Exception as e:
-            print(f"Error getting task status for {task_name}: {e}")
+            logger.error(f"Error getting task status for {task_name}: {e}")
             return "unknown"
 
     def reset_task_status(self, task_name):
@@ -180,7 +203,7 @@ class IncubatorService:
             return "Incubator initialized."
         except Exception as e:
             self.task_status[task_name] = "failed"
-            print(f"Failed to initialize incubator: {e}")
+            logger.error(f"Failed to initialize incubator: {e}")
             return f"Failed to initialize incubator: {e}"
     
     @schema_function(skip_self=True)
@@ -191,12 +214,12 @@ class IncubatorService:
         try:
             self.c.wait_until_not_busy(timeout=50)
             temperature = self.c.climate_controller.current_temperature
-            print(f"Temperature: {temperature}")
+            logger.info(f"Temperature: {temperature}")
             self.task_status[task_name] = "finished"
             return temperature
         except Exception as e:
             self.task_status[task_name] = "failed"
-            print(f"Failed to get temperature: {e}")
+            logger.error(f"Failed to get temperature: {e}")
             return None
     
     @schema_function(skip_self=True)
@@ -220,7 +243,7 @@ class IncubatorService:
             return slot_info
         except Exception as e:
             self.task_status[task_name] = "failed"
-            print(f"Failed to get slot information: {e}")
+            logger.error(f"Failed to get slot information: {e}")
             return None
 
     @schema_function(skip_self=True)
@@ -231,12 +254,12 @@ class IncubatorService:
         try:
             self.c.wait_until_not_busy(timeout=50)
             co2_level = self.c.climate_controller.current_co2
-            print(f"CO2 level: {co2_level}")
+            logger.info(f"CO2 level: {co2_level}")
             self.task_status[task_name] = "finished"
             return co2_level
         except Exception as e:
             self.task_status[task_name] = "failed"
-            print(f"Failed to get CO2 level: {e}")
+            logger.error(f"Failed to get CO2 level: {e}")
             return None
 
     @schema_function(skip_self=True)
@@ -249,7 +272,7 @@ class IncubatorService:
             self.task_status[task_name] = "finished"
         except Exception as e:
             self.task_status[task_name] = "failed"
-            print(f"Failed to reset error status: {e}")
+            logger.error(f"Failed to reset error status: {e}")
 
     @schema_function(skip_self=True)
     def get_status(self):
@@ -269,7 +292,7 @@ class IncubatorService:
             return status
         except Exception as e:
             self.task_status[task_name] = "failed"
-            print(f"Failed to get status: {e}")
+            logger.error(f"Failed to get status: {e}")
             return {}
 
     @schema_function(skip_self=True)
@@ -294,7 +317,7 @@ class IncubatorService:
             return f"Plate moved to slot {slot} and back to transfer station."
         except Exception as e:
             self.task_status[task_name] = "failed"
-            print(f"Failed to move plate: {e}")
+            logger.error(f"Failed to move plate: {e}")
             return f"Failed to move plate: {e}"
     
     def update_sample_status(self, slot: int, status: str):
@@ -331,7 +354,7 @@ class IncubatorService:
             return f"Sample placed in slot {slot}."
         except Exception as e:
             self.task_status[task_name] = "failed"
-            print(f"Failed to put sample in slot {slot}: {e}")
+            logger.error(f"Failed to put sample in slot {slot}: {e}")
             return f"Failed to put sample in slot {slot}: {e}"
     
     @schema_function(skip_self=True)
@@ -354,7 +377,7 @@ class IncubatorService:
             return f"Sample removed from slot {slot}."
         except Exception as e:
             self.task_status[task_name] = "failed"
-            print(f"Failed to get sample from slot {slot}: {e}")
+            logger.error(f"Failed to get sample from slot {slot}: {e}")
             return f"Failed to get sample from slot {slot}: {e}"
 
     @schema_function(skip_self=True)
@@ -375,7 +398,7 @@ class IncubatorService:
             return status
         except Exception as e:
             self.task_status[task_name] = "failed"
-            print(f"Failed to get sample status: {e}")
+            logger.error(f"Failed to get sample status: {e}")
             return {}
 
     def is_busy(self):
@@ -387,7 +410,7 @@ class IncubatorService:
             return busy
         except Exception as e:
             self.task_status[task_name] = "failed"
-            print(f"Failed to check if incubator is busy: {e}")
+            logger.error(f"Failed to check if incubator is busy: {e}")
             return False
 
 if __name__ == "__main__":
@@ -403,7 +426,7 @@ if __name__ == "__main__":
         try:
             await incubator_service.setup()
         except Exception as e:
-            print(f"Error setting up incubator service: {e}")
+            logger.error(f"Error setting up incubator service: {e}")
             raise e
 
     loop.create_task(main())

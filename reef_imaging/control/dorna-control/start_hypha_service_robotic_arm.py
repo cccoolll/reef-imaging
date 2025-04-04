@@ -6,11 +6,34 @@ from dorna2 import Dorna
 import dotenv
 from pydantic import Field
 from hypha_rpc.utils.schema import schema_function
+import logging
+import logging.handlers
 
 dotenv.load_dotenv()  
 ENV_FILE = dotenv.find_dotenv()  
 if ENV_FILE:  
     dotenv.load_dotenv(ENV_FILE)  
+
+# Set up logging
+
+def setup_logging(log_file="robotic_arm_service.log", max_bytes=100000, backup_count=3):
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+
+    # Rotating file handler
+    file_handler = logging.handlers.RotatingFileHandler(log_file, maxBytes=max_bytes, backupCount=backup_count)
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+
+    return logger
+
+logger = setup_logging()
 
 class RoboticArmService:
     def __init__(self, local):
@@ -52,16 +75,16 @@ class RoboticArmService:
                     await service.hello_world()
                     #print("Service health check passed")
                 else:
-                    print("Service ID not set, waiting for service registration")
+                    logger.info("Service ID not set, waiting for service registration")
             except Exception as e:
-                print(f"Service health check failed: {e}")
-                print("Attempting to rerun setup...")
+                logger.error(f"Service health check failed: {e}")
+                logger.info("Attempting to rerun setup...")
                 # Clean up Hypha service-related connections and variables
                 try:
                     if self.server:
                         await self.server.disconnect()
                 except Exception as disconnect_error:
-                    print(f"Error during disconnect: {disconnect_error}")
+                    logger.error(f"Error during disconnect: {disconnect_error}")
                 finally:
                     self.server = None
 
@@ -69,10 +92,10 @@ class RoboticArmService:
                     try:
                         # Rerun the setup method to reset Hypha service
                         await self.setup()
-                        print("Setup successful")
+                        logger.info("Setup successful")
                         break  # Exit the loop if setup is successful
                     except Exception as setup_error:
-                        print(f"Failed to rerun setup: {setup_error}")
+                        logger.error(f"Failed to rerun setup: {setup_error}")
                         await asyncio.sleep(30)  # Wait before retrying
             
             await asyncio.sleep(30)  # Check every half minute
@@ -111,10 +134,10 @@ class RoboticArmService:
             "execute_action": self.execute_action
         })
 
-        print(f"Robotic arm control service registered at workspace: {server.config.workspace}, id: {svc.id}")
-        print(f'You can use this service using the service id: {svc.id}')
+        logger.info(f"Robotic arm control service registered at workspace: {server.config.workspace}, id: {svc.id}")
+        logger.info(f'You can use this service using the service id: {svc.id}')
         id = svc.id.split(":")[1]
-        print(f"You can also test the service via the HTTP proxy: {self.server_url}/{server.config.workspace}/services/{id}/move_sample_from_microscope1_to_incubator")
+        logger.info(f"You can also test the service via the HTTP proxy: {self.server_url}/{server.config.workspace}/services/{id}/move_sample_from_microscope1_to_incubator")
 
         # Start the health check task
         asyncio.create_task(self.check_service_health())
@@ -164,11 +187,11 @@ class RoboticArmService:
             self.robot.connect(self.ip)
             self.connected = True
             self.task_status["connect"] = "finished"
-            print("Connected to robot")
+            logger.info("Connected to robot")
             return True
         except Exception as e:
             self.task_status["connect"] = "failed"
-            print(f"Failed to connect: {e}")
+            logger.error(f"Failed to connect: {e}")
             return False
 
     @schema_function(skip_self=True)
@@ -182,11 +205,11 @@ class RoboticArmService:
             self.robot.close()
             self.connected = False
             self.task_status["disconnect"] = "finished"
-            print("Disconnected from robot")
+            logger.info("Disconnected from robot")
             return True
         except Exception as e:
             self.task_status["disconnect"] = "failed"
-            print(f"Failed to disconnect: {e}")
+            logger.error(f"Failed to disconnect: {e}")
             return False
 
     @schema_function(skip_self=True)
@@ -221,7 +244,7 @@ class RoboticArmService:
             return result
         except Exception as e:
             self.task_status["get_all_joints"] = "failed"
-            print(f"Failed to get all joints: {e}")
+            logger.error(f"Failed to get all joints: {e}")
             return {}
 
     @schema_function(skip_self=True)
@@ -239,7 +262,7 @@ class RoboticArmService:
             return result
         except Exception as e:
             self.task_status["get_all_positions"] = "failed"
-            print(f"Failed to get all positions: {e}")
+            logger.error(f"Failed to get all positions: {e}")
             return {}
 
     @schema_function(skip_self=True)
@@ -253,12 +276,12 @@ class RoboticArmService:
         self.set_motor(1)
         try:
             self.play_script("paths/microscope1_to_incubator.txt")
-            print("Sample moved from microscope1 to incubator")
+            logger.info("Sample moved from microscope1 to incubator")
             self.task_status[task_name] = "finished"
             return True
         except Exception as e:
             self.task_status[task_name] = "failed"
-            print(f"Failed to move sample from microscope1 to incubator: {e}")
+            logger.error(f"Failed to move sample from microscope1 to incubator: {e}")
             return False
 
     @schema_function(skip_self=True)
@@ -272,12 +295,12 @@ class RoboticArmService:
         self.set_motor(1)
         try:
             self.play_script("paths/incubator_to_microscope1.txt")
-            print("Sample moved from incubator to microscope1")
+            logger.info("Sample moved from incubator to microscope1")
             self.task_status[task_name] = "finished"
             return True
         except Exception as e:
             self.task_status[task_name] = "failed"
-            print(f"Failed to move sample from incubator to microscope1: {e}")
+            logger.error(f"Failed to move sample from incubator to microscope1: {e}")
             return False
 
     @schema_function(skip_self=True)
@@ -291,12 +314,12 @@ class RoboticArmService:
         self.set_motor(1)
         try:
             self.play_script("paths/grab_from_microscope1.txt")
-            print("Sample grabbed from microscope1")
+            logger.info("Sample grabbed from microscope1")
             self.task_status[task_name] = "finished"
             return True
         except Exception as e:
             self.task_status[task_name] = "failed"
-            print(f"Failed to grab sample from microscope1: {e}")
+            logger.error(f"Failed to grab sample from microscope1: {e}")
             return False
 
     @schema_function(skip_self=True)
@@ -310,12 +333,12 @@ class RoboticArmService:
         self.set_motor(1)
         try:
             self.play_script("paths/grab_from_incubator.txt")
-            print("Sample grabbed from incubator")
+            logger.info("Sample grabbed from incubator")
             self.task_status[task_name] = "finished"
             return True
         except Exception as e:
             self.task_status[task_name] = "failed"
-            print(f"Failed to grab sample from incubator: {e}")
+            logger.error(f"Failed to grab sample from incubator: {e}")
             return False
 
     @schema_function(skip_self=True)
@@ -329,12 +352,12 @@ class RoboticArmService:
         self.set_motor(1)
         try:
             self.play_script("paths/put_on_microscope1.txt")
-            print("Sample placed on microscope1")
+            logger.info("Sample placed on microscope1")
             self.task_status[task_name] = "finished"
             return True
         except Exception as e:
             self.task_status[task_name] = "failed"
-            print(f"Failed to put sample on microscope1: {e}")
+            logger.error(f"Failed to put sample on microscope1: {e}")
             return False
 
     @schema_function(skip_self=True)
@@ -348,12 +371,12 @@ class RoboticArmService:
         self.set_motor(1)
         try:
             self.play_script("paths/put_on_incubator.txt")
-            print("Sample placed on incubator")
+            logger.info("Sample placed on incubator")
             self.task_status[task_name] = "finished"
             return True
         except Exception as e:
             self.task_status[task_name] = "failed"
-            print(f"Failed to put sample on incubator: {e}")
+            logger.error(f"Failed to put sample on incubator: {e}")
             return False
 
     @schema_function(skip_self=True)
@@ -367,12 +390,12 @@ class RoboticArmService:
         self.set_motor(1)
         try:
             self.play_script("paths/transport_from_incubator_to_microscope1.txt")
-            print("Sample moved from incubator to microscope1")
+            logger.info("Sample moved from incubator to microscope1")
             self.task_status[task_name] = "finished"
             return True
         except Exception as e:
             self.task_status[task_name] = "failed"
-            print(f"Failed to transport sample from incubator to microscope1: {e}")
+            logger.error(f"Failed to transport sample from incubator to microscope1: {e}")
             return False
 
     @schema_function(skip_self=True)
@@ -386,12 +409,12 @@ class RoboticArmService:
         self.set_motor(1)
         try:
             self.play_script("paths/transport_from_microscope1_to_incubator.txt")
-            print("Sample moved from microscope1 to incubator")
+            logger.info("Sample moved from microscope1 to incubator")
             self.task_status[task_name] = "finished"
             return True
         except Exception as e:
             self.task_status[task_name] = "failed"
-            print(f"Failed to transport sample from microscope1 to incubator: {e}")
+            logger.error(f"Failed to transport sample from microscope1 to incubator: {e}")
             return False
 
     @schema_function(skip_self=True)
@@ -406,12 +429,12 @@ class RoboticArmService:
             if not self.connected:
                 self.connect()
             self.robot.halt()
-            print("Robot halted")
+            logger.info("Robot halted")
             self.task_status[task_name] = "finished"
             return True
         except Exception as e:
             self.task_status[task_name] = "failed"
-            print(f"Failed to halt robot: {e}")
+            logger.error(f"Failed to halt robot: {e}")
             return False
     
     @schema_function(skip_self=True)
@@ -427,7 +450,7 @@ class RoboticArmService:
             return True
         except Exception as e:
             self.task_status[task_name] = "failed"
-            print(f"Failed to set alarm: {e}")
+            logger.error(f"Failed to set alarm: {e}")
             return False
 
     @schema_function(skip_self=True)
@@ -443,7 +466,7 @@ class RoboticArmService:
             return True
         except Exception as e:
             self.task_status[task_name] = "failed"
-            print(f"Failed to turn on light: {e}")
+            logger.error(f"Failed to turn on light: {e}")
             return False
 
     @schema_function(skip_self=True)
@@ -459,7 +482,7 @@ class RoboticArmService:
             return True
         except Exception as e:
             self.task_status[task_name] = "failed"
-            print(f"Failed to turn off light: {e}")
+            logger.error(f"Failed to turn off light: {e}")
             return False
 
     @schema_function(skip_self=True)
@@ -585,7 +608,7 @@ class RoboticArmService:
         }
         
         if action_id not in action_to_script:
-            print(f"Unknown action ID: {action_id}")
+            logger.error(f"Unknown action ID: {action_id}")
             return False
             
         script_path = action_to_script[action_id]
@@ -594,10 +617,10 @@ class RoboticArmService:
             result = self.robot.play_script(script_path)
             if result != 2:
                 raise Exception("Error playing script")
-            print(f"Action {action_id} executed successfully")
+            logger.info(f"Action {action_id} executed successfully")
             return True
         except Exception as e:
-            print(f"Failed to execute action {action_id}: {e}")
+            logger.error(f"Failed to execute action {action_id}: {e}")
             return False
 
 if __name__ == "__main__":
@@ -613,7 +636,7 @@ if __name__ == "__main__":
         try:
             await robotic_arm_service.setup()
         except Exception as e:
-            print(f"Error setting up robotic arm service: {e}")
+            logger.error(f"Error setting up robotic arm service: {e}")
             raise e
 
     loop.create_task(main())
