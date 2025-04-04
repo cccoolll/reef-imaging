@@ -160,8 +160,8 @@ async def load_plate_from_incubator_to_microscope(sample):
     logger.info(f"Loading sample from incubator slot {incubator_slot} to transfer station...")
 
     logger.info(f"Homing the microscope stage...")
-    p1  = await call_service_with_retries(incubator, "get_sample_from_slot_to_transfer_station", incubator_slot, timeout=60)
-    p2 = await call_service_with_retries(microscope, "home_stage", timeout=30)
+    p1  = call_service_with_retries(incubator, "get_sample_from_slot_to_transfer_station", incubator_slot, timeout=60)
+    p2 = call_service_with_retries(microscope, "home_stage", timeout=30)
     gather = await asyncio.gather(p1, p2)
     if not all(gather):
         return False
@@ -212,8 +212,8 @@ async def unload_plate_from_microscope(sample):
 
     logger.info(f"Putting sample on incubator slot {incubator_slot}...")    
     logger.info(f"Returning microscope stage to loading position...")
-    p1 = await call_service_with_retries(incubator, "put_sample_from_transfer_station_to_slot", incubator_slot, timeout=60)
-    p2 = await call_service_with_retries(microscope, "return_stage", timeout=30)
+    p1 = call_service_with_retries(incubator, "put_sample_from_transfer_station_to_slot", incubator_slot, timeout=60)
+    p2 = call_service_with_retries(microscope, "return_stage", timeout=30)
     gather = await asyncio.gather(p1, p2)
     if not all(gather):
         return False
