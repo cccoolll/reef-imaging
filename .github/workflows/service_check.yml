@@ -52,8 +52,8 @@ jobs:
         username: ${{ secrets.EMAIL_USERNAME }}
         password: ${{ secrets.EMAIL_PASSWORD }}
         subject: "Service Health Check Alert"
-        to: your-email@example.com
-        from: your-email@example.com
+        to: songtao.cheng@scilifelab.se
+        from: songtao.cheng@scilifelab.se
         body: |
           The following services are down or have failed tasks:
           $(cat error.log)
