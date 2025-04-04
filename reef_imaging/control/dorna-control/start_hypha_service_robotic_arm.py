@@ -44,6 +44,8 @@ class RoboticArmService:
         self.connected = False
         self.server = None
         self.service_id = "robotic-arm-control"  # Define service ID here
+        self.setup_task = None  # Track the setup task
+        self.initial_setup_task = None  # Track the initial setup task
         # Add task status tracking
         self.task_status = {
             "move_sample_from_microscope1_to_incubator": "not_started",
@@ -83,6 +85,13 @@ class RoboticArmService:
                 try:
                     if self.server:
                         await self.server.disconnect()
+                        self.server = None  # Ensure server is set to None after disconnecting
+                    if self.setup_task:
+                        self.setup_task.cancel()  # Cancel the previous setup task
+                        self.setup_task = None
+                    if self.initial_setup_task:
+                        self.initial_setup_task.cancel()  # Cancel the initial setup task
+                        self.initial_setup_task = None
                 except Exception as disconnect_error:
                     logger.error(f"Error during disconnect: {disconnect_error}")
                 finally:
@@ -91,7 +100,8 @@ class RoboticArmService:
                 while True:
                     try:
                         # Rerun the setup method to reset Hypha service
-                        await self.setup()
+                        self.setup_task = asyncio.create_task(self.setup())
+                        await self.setup_task
                         logger.info("Setup successful")
                         break  # Exit the loop if setup is successful
                     except Exception as setup_error:
@@ -137,7 +147,7 @@ class RoboticArmService:
         logger.info(f"Robotic arm control service registered at workspace: {server.config.workspace}, id: {svc.id}")
         logger.info(f'You can use this service using the service id: {svc.id}')
         id = svc.id.split(":")[1]
-        logger.info(f"You can also test the service via the HTTP proxy: {self.server_url}/{server.config.workspace}/services/{id}/move_sample_from_microscope1_to_incubator")
+        logger.info(f"You can also test the service via the HTTP proxy: {self.server_url}/{server.config.workspace}/services/{id}/hello_world")
 
         # Start the health check task
         asyncio.create_task(self.check_service_health())
@@ -153,6 +163,7 @@ class RoboticArmService:
                 token = await login({"server_url": self.server_url})
             server = await connect_to_server({"server_url": self.server_url, "token": token, "workspace": "reef-imaging", "ping_interval": None})
 
+        self.server = server
         await self.start_hypha_service(server)
 
     def get_task_status(self, task_name):
@@ -634,7 +645,8 @@ if __name__ == "__main__":
 
     async def main():
         try:
-            await robotic_arm_service.setup()
+            robotic_arm_service.initial_setup_task = asyncio.create_task(robotic_arm_service.setup())
+            await robotic_arm_service.initial_setup_task
         except Exception as e:
             logger.error(f"Error setting up robotic arm service: {e}")
             raise e

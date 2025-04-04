@@ -68,6 +68,7 @@ class IncubatorService:
         self.samples_file = "/home/tao/workspace/reef-imaging/reef_imaging/control/cytomat-control/samples.json"
         self.server = None
         self.service_id = "incubator-control"  # Define service ID here
+        self.setup_task = None  # Track the setup task
         # Add task status tracking
         self.task_status = {
             "initialize": "not_started",
@@ -102,6 +103,10 @@ class IncubatorService:
                 try:
                     if self.server:
                         await self.server.disconnect()
+                        self.server = None
+                    if self.setup_task:
+                        self.setup_task.cancel()  # Cancel the previous setup task
+                        self.setup_task = None
                 except Exception as disconnect_error:
                     logger.error(f"Error during disconnect: {disconnect_error}")
                 finally:
@@ -110,7 +115,8 @@ class IncubatorService:
                 while True:
                     try:
                         # Rerun the setup method
-                        await self.setup()
+                        self.setup_task = asyncio.create_task(self.setup())
+                        await self.setup_task
                         logger.info("Setup successful")
                         break  # Exit the loop if setup is successful
                     except Exception as setup_error:
@@ -151,7 +157,7 @@ class IncubatorService:
         logger.info(f"You can also test the service via the HTTP proxy: {self.server_url}/{server.config.workspace}/services/{id}/initialize")
 
         # Start the health check task
-        asyncio.create_task(self.check_service_health())
+        #asyncio.create_task(self.check_service_health())
 
     async def setup(self):
         self.c.maintenance_controller.reset_error_status()
@@ -424,7 +430,8 @@ if __name__ == "__main__":
 
     async def main():
         try:
-            await incubator_service.setup()
+            incubator_service.setup_task = asyncio.create_task(incubator_service.setup())
+            await incubator_service.setup_task
         except Exception as e:
             logger.error(f"Error setting up incubator service: {e}")
             raise e
