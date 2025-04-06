@@ -54,6 +54,23 @@ Nx = 3
 Ny = 3
 ACTION_ID = '20250404-fucci-time-lapse-scan'
 
+async def check_service_health(service, service_name):
+    """Check if the service is healthy and reset if needed"""
+    while True:
+        try:
+            # Try to get the service status
+            status = await service.get_status()
+            if status['error_status'] != 0:
+                logger.error(f"{service_name} service health check failed: {status}")
+                raise Exception("Service not healthy")
+            logger.info(f"{service_name} service is healthy")
+        except Exception as e:
+            logger.error(f"{service_name} service health check failed: {e}")
+            logger.info(f"Attempting to reset {service_name} service...")
+            await disconnect_services()
+            await setup_connections()
+        await asyncio.sleep(30)  # Check every half minute
+
 async def setup_connections():
     global reef_token, squid_token, incubator, microscope, robotic_arm
     if not reef_token or not squid_token:
@@ -82,6 +99,12 @@ async def setup_connections():
     microscope = await squid_server.get_service(microscope_id)
     robotic_arm = await reef_server.get_service(robotic_arm_id)
     print('Connected to devices.')
+
+    # Start health check tasks
+    asyncio.create_task(check_service_health(incubator, "Incubator"))
+    asyncio.create_task(check_service_health(microscope, "Microscope"))
+    asyncio.create_task(check_service_health(robotic_arm, "Robotic Arm"))
+
     return incubator, microscope, robotic_arm
 
 async def disconnect_services():
@@ -90,10 +113,13 @@ async def disconnect_services():
     try:
         if incubator:
             await incubator.disconnect()
+            incubator = None    
         if microscope:
             await microscope.disconnect()
+            microscope = None
         if robotic_arm:
             await robotic_arm.disconnect()
+            robotic_arm = None
         print('Disconnected from devices.')
     except Exception as e:
         logger.error(f"Error during disconnection: {e}")
