@@ -8,9 +8,9 @@ import dotenv
 import logging
 import sys
 import logging.handlers
-
+from datetime import datetime
 # Set up logging
-def setup_logging(log_file="uc2_fucci_time_lapse_scan.log", max_bytes=100000, backup_count=3):
+def setup_logging(log_file="orchestrator.log", max_bytes=100000, backup_count=3):
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.INFO)
@@ -27,7 +27,10 @@ def setup_logging(log_file="uc2_fucci_time_lapse_scan.log", max_bytes=100000, ba
 
     return logger
 
-logger = setup_logging()
+# add date and time to the log file name
+log_file = f"orchestrator-test-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log"
+logger = setup_logging(log_file=log_file)
+
 
 dotenv.load_dotenv()
 ENV_FILE = dotenv.find_dotenv()
@@ -45,8 +48,12 @@ microscope = None
 robotic_arm = None
 sample_loaded = False
 
+INCUBATOR_ID = "incubator-control-simulation"
+MICROSCOPE_ID = "microscope-squid-reef"
+ROBOTIC_ARM_ID = "robotic-arm-control-simulation"
+
 # Configuration settings
-IMAGING_INTERVAL = 3600  # Time between cycles in seconds
+IMAGING_INTERVAL = 1000  # Time between cycles in seconds
 INCUBATOR_SLOT = 32  # Slot number in the incubator
 ILLUMINATE_CHANNELS = ['BF LED matrix full', 'Fluorescence 488 nm Ex', 'Fluorescence 561 nm Ex']
 SCANNING_ZONE = [(0, 0), (7, 11)]
@@ -101,9 +108,9 @@ async def setup_connections():
         "ping_interval": None
     })
 
-    incubator_id = "incubator-control"
-    microscope_id = "microscope-control-squid-1"
-    robotic_arm_id = "robotic-arm-control"
+    incubator_id = INCUBATOR_ID
+    microscope_id = MICROSCOPE_ID
+    robotic_arm_id = ROBOTIC_ARM_ID
 
     incubator = await reef_server.get_service(incubator_id)
     microscope = await squid_server.get_service(microscope_id)

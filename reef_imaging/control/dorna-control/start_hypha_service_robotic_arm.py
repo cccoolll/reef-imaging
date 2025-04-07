@@ -661,9 +661,10 @@ class RoboticArmService:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Start the Hypha service for the robotic arm.")
     parser.add_argument('--local', action='store_true', help="Use localhost as server URL")
+    parser.add_argument('--simulation', action='store_true', help="Run in simulation mode")
     args = parser.parse_args()
 
-    robotic_arm_service = RoboticArmService(local=args.local)
+    robotic_arm_service = RoboticArmService(local=args.local, simulation=args.simulation)
 
     loop = asyncio.get_event_loop()
 
