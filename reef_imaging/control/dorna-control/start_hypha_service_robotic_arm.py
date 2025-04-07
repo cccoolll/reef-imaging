@@ -8,6 +8,7 @@ from pydantic import Field
 from hypha_rpc.utils.schema import schema_function
 import logging
 import logging.handlers
+import time
 
 dotenv.load_dotenv()  
 ENV_FILE = dotenv.find_dotenv()  
@@ -36,15 +37,16 @@ def setup_logging(log_file="robotic_arm_service.log", max_bytes=100000, backup_c
 logger = setup_logging()
 
 class RoboticArmService:
-    def __init__(self, local):
+    def __init__(self, local, simulation=False):
         self.local = local
+        self.simulation = simulation
         self.server_url = "http://localhost:9527" if local else "https://hypha.aicell.io"
-        self.robot = Dorna()
+        self.robot = Dorna() if not simulation else None
         self.ip = "192.168.2.20"
         self.connected = False
         self.server = None
-        self.service_id = "robotic-arm-control"  # Define service ID here
-        self.setup_task = None  # Track the setup task
+        self.service_id = "robotic-arm-control" + ("-simulation" if simulation else "")
+        self.setup_task = None
         # Add task status tracking
         self.task_status = {
             "move_sample_from_microscope1_to_incubator": "not_started",
@@ -131,6 +133,7 @@ class RoboticArmService:
             "get_all_positions": self.get_all_positions,
             # Add status functions
             "get_task_status": self.get_task_status,
+            "get_all_task_status": self.get_all_task_status,
             "reset_task_status": self.reset_task_status,
             "reset_all_task_status": self.reset_all_task_status,
             "set_alarm": self.set_alarm,
@@ -165,6 +168,12 @@ class RoboticArmService:
     def get_task_status(self, task_name):
         """Get the status of a specific task"""
         return self.task_status.get(task_name, "unknown")
+    
+    @schema_function(skip_self=True)
+    def get_all_task_status(self):
+        """Get the status of all tasks"""
+        logger.info(f"Task status: {self.task_status}")
+        return self.task_status
 
     def reset_task_status(self, task_name):
         """Reset the status of a specific task"""
@@ -191,7 +200,8 @@ class RoboticArmService:
         """
         self.task_status["connect"] = "started"
         try:
-            self.robot.connect(self.ip)
+            if not self.simulation:
+                self.robot.connect(self.ip)
             self.connected = True
             self.task_status["connect"] = "finished"
             logger.info("Connected to robot")
@@ -209,7 +219,8 @@ class RoboticArmService:
         """
         self.task_status["disconnect"] = "started"
         try:
-            self.robot.close()
+            if not self.simulation:
+                self.robot.close()
             self.connected = False
             self.task_status["disconnect"] = "finished"
             logger.info("Disconnected from robot")
@@ -223,18 +234,25 @@ class RoboticArmService:
     def set_motor(self, state: int=Field(1, description="Enable or disable the motor, 1 for enable, 0 for disable")):
         if not self.connected:
             self.connect()
-        self.robot.set_motor(state)
+        if not self.simulation:
+            self.robot.set_motor(state)
+        else:
+            time.sleep(10)
         return f"Motor set to {state}"
 
     @schema_function(skip_self=True)
     def play_script(self, script_path):
         if not self.connected:
             self.connect()
-        result = self.robot.play_script(script_path)
-        if result != 2:
-            raise Exception("Error playing script")
+        if not self.simulation:
+            result = self.robot.play_script(script_path)
+            if result != 2:
+                raise Exception("Error playing script")
+            else:
+                return "Script played"
         else:
-            return "Script played"
+            time.sleep(10)
+            return "Script played in simulation"
     
     @schema_function(skip_self=True)
     def get_all_joints(self):
@@ -246,7 +264,11 @@ class RoboticArmService:
         try:
             if not self.connected:
                 self.connect()
-            result = self.robot.get_all_joint()
+            if not self.simulation:
+                result = self.robot.get_all_joint()
+            else:
+                time.sleep(10)
+                result = {"joints": "Simulated"}
             self.task_status["get_all_joints"] = "finished"
             return result
         except Exception as e:
@@ -264,7 +286,11 @@ class RoboticArmService:
         try:
             if not self.connected:
                 self.connect()
-            result = self.robot.get_all_pose()
+            if not self.simulation:
+                result = self.robot.get_all_pose()
+            else:
+                time.sleep(10)
+                result = {"positions": "Simulated"}
             self.task_status["get_all_positions"] = "finished"
             return result
         except Exception as e:
@@ -282,6 +308,8 @@ class RoboticArmService:
         self.task_status[task_name] = "started"
         self.set_motor(1)
         try:
+            if not self.simulation:
+                self.play_script("paths/microscope1_to_incubator.txt")
             self.play_script("paths/microscope1_to_incubator.txt")
             logger.info("Sample moved from microscope1 to incubator")
             self.task_status[task_name] = "finished"
@@ -633,9 +661,10 @@ class RoboticArmService:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Start the Hypha service for the robotic arm.")
     parser.add_argument('--local', action='store_true', help="Use localhost as server URL")
+    parser.add_argument('--simulation', action='store_true', help="Run in simulation mode")
     args = parser.parse_args()
 
-    robotic_arm_service = RoboticArmService(local=args.local)
+    robotic_arm_service = RoboticArmService(local=args.local, simulation=args.simulation)
 
     loop = asyncio.get_event_loop()
 

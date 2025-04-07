@@ -10,6 +10,7 @@ import dotenv
 import json
 import logging
 import logging.handlers
+import time
 
 dotenv.load_dotenv()  
 ENV_FILE = dotenv.find_dotenv()  
@@ -61,14 +62,15 @@ def setup_logging(log_file="incubator_service.log", max_bytes=100000, backup_cou
 logger = setup_logging()
 
 class IncubatorService:
-    def __init__(self, local):
+    def __init__(self, local, simulation=False):
         self.local = local
+        self.simulation = simulation
         self.server_url = "http://localhost:9527" if local else "https://hypha.aicell.io"
-        self.c = Cytomat("/dev/ttyUSB0")
+        self.c = Cytomat("/dev/ttyUSB0") if not simulation else None
         self.samples_file = "/home/tao/workspace/reef-imaging/reef_imaging/control/cytomat-control/samples.json"
         self.server = None
-        self.service_id = "incubator-control"  # Define service ID here
-        self.setup_task = None  # Track the setup task
+        self.service_id = "incubator-control" + ("-simulation" if simulation else "")
+        self.setup_task = None
         # Add task status tracking
         self.task_status = {
             "initialize": "not_started",
@@ -147,6 +149,7 @@ class IncubatorService:
             "get_slot_information": self.get_slot_information,
             # Add status functions
             "get_task_status": self.get_task_status,
+            "get_all_task_status": self.get_all_task_status,
             "reset_task_status": self.reset_task_status,
             "reset_all_task_status": self.reset_all_task_status
         })
@@ -160,7 +163,8 @@ class IncubatorService:
         asyncio.create_task(self.check_service_health())
 
     async def setup(self):
-        self.c.maintenance_controller.reset_error_status()
+        if not self.simulation:
+            self.c.maintenance_controller.reset_error_status()
         if self.local:
             token = None
             server = await connect_to_server({"server_url": self.server_url, "token": token, "ping_interval": None})
@@ -182,7 +186,13 @@ class IncubatorService:
         except Exception as e:
             logger.error(f"Error getting task status for {task_name}: {e}")
             return "unknown"
-
+    
+    @schema_function(skip_self=True)
+    def get_all_task_status(self):
+        """Get the status of all tasks"""
+        logger.info(f"Task status: {self.task_status}")
+        return self.task_status
+    
     def reset_task_status(self, task_name):
         """Reset the status of a specific task"""
         if task_name in self.task_status:
@@ -202,9 +212,12 @@ class IncubatorService:
         task_name = "initialize"
         self.task_status[task_name] = "started"
         try:
-            self.c.plate_handler.initialize()
-            self.c.wait_until_not_busy(timeout=60)
-            assert self.c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
+            if not self.simulation:
+                self.c.plate_handler.initialize()
+                self.c.wait_until_not_busy(timeout=60)
+                assert self.c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
+            else:
+                time.sleep(10)
             self.task_status[task_name] = "finished"
             return "Incubator initialized."
         except Exception as e:
@@ -218,9 +231,13 @@ class IncubatorService:
         task_name = "get_temperature"
         self.task_status[task_name] = "started"
         try:
-            self.c.wait_until_not_busy(timeout=50)
-            temperature = self.c.climate_controller.current_temperature
-            logger.info(f"Temperature: {temperature}")
+            if not self.simulation:
+                self.c.wait_until_not_busy(timeout=50)
+                temperature = self.c.climate_controller.current_temperature
+                logger.info(f"Temperature: {temperature}")
+            else:
+                time.sleep(10)
+                temperature = 37.0  # Simulated temperature
             self.task_status[task_name] = "finished"
             return temperature
         except Exception as e:
@@ -242,9 +259,13 @@ class IncubatorService:
         task_name = "get_slot_information"
         self.task_status[task_name] = "started"
         try:
-            with open(self.samples_file, 'r') as file:
-                samples = json.load(file)
-            slot_info = next((sample for sample in samples if sample["incubator_slot"] == slot), None)
+            if not self.simulation:
+                with open(self.samples_file, 'r') as file:
+                    samples = json.load(file)
+                slot_info = next((sample for sample in samples if sample["incubator_slot"] == slot), None)
+            else:
+                time.sleep(10)
+                slot_info = {"incubator_slot": slot, "status": "Simulated"}
             self.task_status[task_name] = "finished"
             return slot_info
         except Exception as e:
@@ -258,9 +279,13 @@ class IncubatorService:
         task_name = "get_co2_level"
         self.task_status[task_name] = "started"
         try:
-            self.c.wait_until_not_busy(timeout=50)
-            co2_level = self.c.climate_controller.current_co2
-            logger.info(f"CO2 level: {co2_level}")
+            if not self.simulation:
+                self.c.wait_until_not_busy(timeout=50)
+                co2_level = self.c.climate_controller.current_co2
+                logger.info(f"CO2 level: {co2_level}")
+            else:
+                time.sleep(10)
+                co2_level = 5.0  # Simulated CO2 level
             self.task_status[task_name] = "finished"
             return co2_level
         except Exception as e:
@@ -274,7 +299,10 @@ class IncubatorService:
         task_name = "reset_error_status"
         self.task_status[task_name] = "started"
         try:
-            self.c.maintenance_controller.reset_error_status()
+            if not self.simulation:
+                self.c.maintenance_controller.reset_error_status()
+            else:
+                time.sleep(10)
             self.task_status[task_name] = "finished"
         except Exception as e:
             self.task_status[task_name] = "failed"
@@ -289,11 +317,15 @@ class IncubatorService:
         task_name = "get_status"
         self.task_status[task_name] = "started"
         try:
-            status = {
-                "error_status": self.c.error_status,
-                "action_status": self.c.action_status,
-                "busy": self.c.overview_status.busy
-            }
+            if not self.simulation:
+                status = {
+                    "error_status": self.c.error_status,
+                    "action_status": self.c.action_status,
+                    "busy": self.c.overview_status.busy
+                }
+            else:
+                time.sleep(10)
+                status = {"error_status": 0, "action_status": "Simulated", "busy": False}
             self.task_status[task_name] = "finished"
             return status
         except Exception as e:
@@ -310,15 +342,18 @@ class IncubatorService:
         task_name = "move_plate"
         self.task_status[task_name] = "started"
         try:
-            c = self.c
-            c.wait_until_not_busy(timeout=50)
-            assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
-            c.plate_handler.move_plate_from_slot_to_transfer_station(slot)
-            c.wait_until_not_busy(timeout=100)
-            assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
-            c.plate_handler.move_plate_from_transfer_station_to_slot(slot)
-            c.wait_until_not_busy(timeout=50)
-            assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
+            if not self.simulation:
+                c = self.c
+                c.wait_until_not_busy(timeout=50)
+                assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
+                c.plate_handler.move_plate_from_slot_to_transfer_station(slot)
+                c.wait_until_not_busy(timeout=100)
+                assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
+                c.plate_handler.move_plate_from_transfer_station_to_slot(slot)
+                c.wait_until_not_busy(timeout=50)
+                assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
+            else:
+                time.sleep(10)
             self.task_status[task_name] = "finished"
             return f"Plate moved to slot {slot} and back to transfer station."
         except Exception as e:
@@ -346,16 +381,19 @@ class IncubatorService:
         task_name = "put_sample_from_transfer_station_to_slot"
         self.task_status[task_name] = "started"
         try:
-            # Access status directly from JSON file
-            with open(self.samples_file, 'r') as file:
-                samples = json.load(file)
-            current_status = next((sample["status"] for sample in samples if sample["incubator_slot"] == slot), None)
-            assert current_status != "IN", "Plate is already inside the incubator"
-            c = self.c
-            c.plate_handler.move_plate_from_transfer_station_to_slot(slot)
-            c.wait_until_not_busy(timeout=50)
-            assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
-            self.update_sample_status(slot, "IN")
+            if not self.simulation:
+                # Access status directly from JSON file
+                with open(self.samples_file, 'r') as file:
+                    samples = json.load(file)
+                current_status = next((sample["status"] for sample in samples if sample["incubator_slot"] == slot), None)
+                assert current_status != "IN", "Plate is already inside the incubator"
+                c = self.c
+                c.plate_handler.move_plate_from_transfer_station_to_slot(slot)
+                c.wait_until_not_busy(timeout=50)
+                assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
+                self.update_sample_status(slot, "IN")
+            else:
+                time.sleep(10)
             self.task_status[task_name] = "finished"
             return f"Sample placed in slot {slot}."
         except Exception as e:
@@ -369,16 +407,19 @@ class IncubatorService:
         task_name = "get_sample_from_slot_to_transfer_station"
         self.task_status[task_name] = "started"
         try:
-            # Access status directly from JSON file
-            with open(self.samples_file, 'r') as file:
-                samples = json.load(file)
-            current_status = next((sample["status"] for sample in samples if sample["incubator_slot"] == slot), None)
-            assert current_status != "OUT", "Plate is already outside the incubator"
-            c = self.c
-            c.plate_handler.move_plate_from_slot_to_transfer_station(slot)
-            c.wait_until_not_busy(timeout=50)
-            assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
-            self.update_sample_status(slot, "OUT")
+            if not self.simulation:
+                # Access status directly from JSON file
+                with open(self.samples_file, 'r') as file:
+                    samples = json.load(file)
+                current_status = next((sample["status"] for sample in samples if sample["incubator_slot"] == slot), None)
+                assert current_status != "OUT", "Plate is already outside the incubator"
+                c = self.c
+                c.plate_handler.move_plate_from_slot_to_transfer_station(slot)
+                c.wait_until_not_busy(timeout=50)
+                assert c.error_status == 0, f"Error status: {ERROR_CODES[self.c.error_status]}"
+                self.update_sample_status(slot, "OUT")
+            else:
+                time.sleep(10)
             self.task_status[task_name] = "finished"
             return f"Sample removed from slot {slot}."
         except Exception as e:
@@ -392,14 +433,20 @@ class IncubatorService:
         task_name = "get_sample_status"
         self.task_status[task_name] = "started"
         try:
-            with open(self.samples_file, 'r') as file:
-                samples = json.load(file)
+            if not self.simulation:
+                with open(self.samples_file, 'r') as file:
+                    samples = json.load(file)
             
-            if slot is None:
-                status = {sample["incubator_slot"]: sample["status"] for sample in samples}
+                if slot is None:
+                    status = {sample["incubator_slot"]: sample["status"] for sample in samples}
+                else:
+                    status = next((sample["status"] for sample in samples if sample["incubator_slot"] == slot), "Unknown")
             else:
-                status = next((sample["status"] for sample in samples if sample["incubator_slot"] == slot), "Unknown")
-            
+                time.sleep(10)
+                if slot is None:
+                    status = {i: "Simulated" for i in range(1, 43)}
+                else:
+                    status = "Simulated"
             self.task_status[task_name] = "finished"
             return status
         except Exception as e:
@@ -411,7 +458,11 @@ class IncubatorService:
         task_name = "is_busy"
         self.task_status[task_name] = "started"
         try:
-            busy = self.c.overview_status.busy
+            if not self.simulation:
+                busy = self.c.overview_status.busy
+            else:
+                time.sleep(10)
+                busy = False
             self.task_status[task_name] = "finished"
             return busy
         except Exception as e:
@@ -422,9 +473,10 @@ class IncubatorService:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Start the Hypha service for the incubator.")
     parser.add_argument('--local', action='store_true', help="Use localhost as server URL")
+    parser.add_argument('--simulation', action='store_true', help="Run in simulation mode")
     args = parser.parse_args()
 
-    incubator_service = IncubatorService(local=args.local)
+    incubator_service = IncubatorService(local=args.local, simulation=args.simulation)
 
     loop = asyncio.get_event_loop()
 
