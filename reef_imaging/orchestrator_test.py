@@ -373,13 +373,7 @@ class OrchestrationSystem:
 
         if not await self.call_service_with_retries(
             'microscope',
-            "scan_well_plate",
-            illuminate_channels=ILLUMINATE_CHANNELS,
-            do_reflection_af=True,
-            scanning_zone=SCANNING_ZONE,
-            Nx=Nx,
-            Ny=Ny,
-            action_ID=ACTION_ID,
+            "scan_well_plate_simulated",
             timeout=2400
         ):
             logger.error("Failed to complete microscope scanning")
