@@ -268,7 +268,11 @@ class OrchestrationSystem:
 
                 if status == "not_started":
                     logger.info(f"Starting the task {method_name}...")
-                    await asyncio.wait_for(getattr(service, method_name)(*args, **kwargs), timeout=timeout)
+                    try:
+                        await asyncio.wait_for(getattr(service, method_name)(*args, **kwargs), timeout=timeout)
+                    except asyncio.TimeoutError:
+                        logger.warning(f"Operation {method_name} timed out, but continuing to check status")
+                        # Continue to the status checking loop below
 
                 # Wait for the task to complete
                 while True:
@@ -280,22 +284,7 @@ class OrchestrationSystem:
                     elif status == "failed":
                         logger.error(f"Task {method_name} failed.")
                         return False
-                    await asyncio.sleep(1)
-
-            except asyncio.TimeoutError:
-                logger.warning(f"Operation {method_name} timed out. Retrying... ({retries + 1}/{max_retries})")
-                # Check status every 5 seconds after timeout
-                while True:
-                    status = await service.get_task_status(method_name)
-                    logger.info(f"Task {method_name} status after timeout: {status}")
-                    if status == "finished":
-                        logger.info(f"Task {method_name} completed successfully after timeout.")
-                        await service.reset_task_status(method_name)
-                        return True
-                    elif status == "failed":
-                        logger.error(f"Task {method_name} failed after timeout.")
-                        return False
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(5)  # Check status every 5 seconds
 
             except Exception as e:
                 logger.error(f"Error: {e}. Retrying... ({retries + 1}/{max_retries})")
