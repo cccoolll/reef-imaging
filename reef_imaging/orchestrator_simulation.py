@@ -9,6 +9,8 @@ import logging
 import sys
 import logging.handlers
 from datetime import datetime
+import argparse
+
 # Set up logging
 def setup_logging(log_file="orchestrator.log", max_bytes=100000, backup_count=3):
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
@@ -57,7 +59,9 @@ MICROSCOPE_ID = "microscope-squid-reef"
 ROBOTIC_ARM_ID = "robotic-arm-control-simulation"
 
 class OrchestrationSystem:
-    def __init__(self):
+    def __init__(self, local=False):
+        self.local = local
+        self.server_url = "http://reef.dyn.scilifelab.se:9520" if local else server_url
         self.incubator = None
         self.microscope = None
         self.robotic_arm = None
@@ -65,21 +69,24 @@ class OrchestrationSystem:
     
     async def setup_connections(self):
         global reef_token, squid_token
+        if self.local:
+            reef_token = os.environ.get("REEF_LOCAL_TOKEN")
+            squid_token = os.environ.get("REEF_LOCAL_TOKEN")
         if not reef_token or not squid_token:
-            token = await login({"server_url": server_url})
+            token = await login({"server_url": self.server_url})
             reef_token = token
             squid_token = token
 
         reef_server = await connect_to_server({
-            "server_url": server_url,
+            "server_url": self.server_url,
             "token": reef_token,
-            "workspace": "reef-imaging",
+            "workspace": os.environ.get("REEF_LOCAL_WORKSPACE") if self.local else "reef-imaging",
             "ping_interval": None
         })
         squid_server = await connect_to_server({
-            "server_url": server_url,
+            "server_url": self.server_url,
             "token": squid_token,
-            "workspace": "squid-control",
+            "workspace": os.environ.get("REEF_LOCAL_WORKSPACE") if self.local else "squid-control",
             "ping_interval": None
         })
 
@@ -166,15 +173,15 @@ class OrchestrationSystem:
             global reef_token, squid_token
             
             if not reef_token or not squid_token:
-                token = await login({"server_url": server_url})
+                token = await login({"server_url": self.server_url})
                 reef_token = token
                 squid_token = token
             
             if service_type == 'incubator':
                 reef_server = await connect_to_server({
-                    "server_url": server_url,
+                    "server_url": self.server_url,
                     "token": reef_token,
-                    "workspace": "reef-imaging",
+                    "workspace": os.environ.get("REEF_LOCAL_WORKSPACE") if self.local else "reef-imaging",
                     "ping_interval": None
                 })
                 self.incubator = await reef_server.get_service(INCUBATOR_ID)
@@ -182,9 +189,9 @@ class OrchestrationSystem:
                 
             elif service_type == 'microscope':
                 squid_server = await connect_to_server({
-                    "server_url": server_url,
+                    "server_url": self.server_url,
                     "token": squid_token,
-                    "workspace": "squid-control",
+                    "workspace": os.environ.get("REEF_LOCAL_WORKSPACE") if self.local else "squid-control",
                     "ping_interval": None
                 })
                 self.microscope = await squid_server.get_service(MICROSCOPE_ID)
@@ -192,9 +199,9 @@ class OrchestrationSystem:
                 
             elif service_type == 'robotic_arm':
                 reef_server = await connect_to_server({
-                    "server_url": server_url,
+                    "server_url": self.server_url,
                     "token": reef_token,
-                    "workspace": "reef-imaging",
+                    "workspace": os.environ.get("REEF_LOCAL_WORKSPACE") if self.local else "reef-imaging",
                     "ping_interval": None
                 })
                 self.robotic_arm = await reef_server.get_service(ROBOTIC_ARM_ID)
@@ -410,7 +417,11 @@ class OrchestrationSystem:
             await asyncio.sleep(sleep_time)
 
 async def main():
-    orchestrator = OrchestrationSystem()
+    parser = argparse.ArgumentParser(description='Run the Orchestration System.')
+    parser.add_argument('--local', action='store_true', help='Run in local mode using REEF_LOCAL_TOKEN and REEF_LOCAL_WORKSPACE')
+    args = parser.parse_args()
+
+    orchestrator = OrchestrationSystem(local=args.local)
     await orchestrator.setup_connections()
     await orchestrator.run_time_lapse(round_time=IMAGING_INTERVAL)
 
