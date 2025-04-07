@@ -1,1 +1,3 @@
-squid-control
+hypha-rpc==0.20.48
+watchdog==6.0.0
+logging==0.5.1
