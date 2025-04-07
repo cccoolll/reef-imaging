@@ -20,7 +20,6 @@ class HyphaDataStore:
                 "config": {"visibility": visibility, "require_context": False},
                 "get": self.http_get,
             },
-            overwrite=True,
         )
 
     def get_url(self, obj_id: str):
@@ -114,7 +113,7 @@ class HyphaDataStore:
         raise IndexError("Not found: " + obj_id)
 
 
-async def test_data_store(server_url="https://ai.imjoy.io"):
+async def test_data_store(server_url="https://hypha.aicell.io"):
     from hypha_rpc import connect_to_server, login
 
     token = await login({"server_url": server_url})
