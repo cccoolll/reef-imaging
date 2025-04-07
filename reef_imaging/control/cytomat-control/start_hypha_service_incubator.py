@@ -65,7 +65,7 @@ class IncubatorService:
     def __init__(self, local, simulation=False):
         self.local = local
         self.simulation = simulation
-        self.server_url = "http://localhost:9527" if local else "https://hypha.aicell.io"
+        self.server_url = "http://localhost:9520" if local else "https://hypha.aicell.io"
         self.c = Cytomat("/dev/ttyUSB0") if not simulation else None
         self.samples_file = "/home/tao/workspace/reef-imaging/reef_imaging/control/cytomat-control/samples.json"
         self.server = None

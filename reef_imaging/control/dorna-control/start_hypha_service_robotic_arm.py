@@ -40,7 +40,7 @@ class RoboticArmService:
     def __init__(self, local, simulation=False):
         self.local = local
         self.simulation = simulation
-        self.server_url = "http://localhost:9527" if local else "https://hypha.aicell.io"
+        self.server_url = "http://localhost:9520" if local else "https://hypha.aicell.io"
         self.robot = Dorna() if not simulation else None
         self.ip = "192.168.2.20"
         self.connected = False
