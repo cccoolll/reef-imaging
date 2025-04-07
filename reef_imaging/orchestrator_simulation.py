@@ -403,7 +403,6 @@ class OrchestrationSystem:
                 await self.disconnect_services()
                 sys.exit(1)
 
-            await self.disconnect_services()
             end_time = asyncio.get_event_loop().time()
             elapsed = end_time - start_time
             sleep_time = max(0, round_time - elapsed)
