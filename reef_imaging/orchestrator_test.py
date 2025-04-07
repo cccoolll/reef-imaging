@@ -54,23 +54,29 @@ Nx = 3
 Ny = 3
 ACTION_ID = '20250404-fucci-time-lapse-scan'
 
-async def check_service_health(service, service_name):
+async def check_service_health(service):
     """Check if the service is healthy and reset if needed"""
     while True:
         try:
             # Get all task statuses
             task_statuses = await service.get_all_task_status()
-            logger.info(f"{service_name} task statuses: {task_statuses}")
 
             # Check if any task has failed
             if any(status == "failed" for status in task_statuses.values()):
-                logger.error(f"{service_name} service has failed tasks: {task_statuses}")
-                raise Exception("Service not healthy")
+                logger.error(f"{service} service has failed tasks: {task_statuses}")
+                # quit the program
+                sys.exit(1)
 
-            logger.info(f"{service_name} service is healthy")
+            # check hello_world
+            hello_world_result = await service.hello_world()
+
+            if hello_world_result != "Hello world": #also retry
+                logger.error(f"{service} service hello_world check failed: {hello_world_result}")
+                raise Exception("Service not healthy")
+            
         except Exception as e:
-            logger.error(f"{service_name} service health check failed: {e}")
-            logger.info(f"Attempting to reset {service_name} service...")
+            logger.error(f"{service} service health check failed: {e}")
+            logger.info(f"Attempting to reset service...")
             await disconnect_services()
             await setup_connections()
         await asyncio.sleep(30)  # Check every half minute
@@ -105,9 +111,9 @@ async def setup_connections():
     print('Connected to devices.')
 
     # Start health check tasks
-    asyncio.create_task(check_service_health(incubator, "hello_world"))
-    asyncio.create_task(check_service_health(microscope, "hello_world"))
-    asyncio.create_task(check_service_health(robotic_arm, "hello_world"))
+    asyncio.create_task(check_service_health(incubator))
+    asyncio.create_task(check_service_health(microscope))
+    asyncio.create_task(check_service_health(robotic_arm))
 
     return incubator, microscope, robotic_arm
 
@@ -253,13 +259,7 @@ async def run_cycle():
 
     if not await call_service_with_retries(
         microscope,
-        "scan_well_plate",
-        illuminate_channels=ILLUMINATE_CHANNELS,
-        do_reflection_af=True,
-        scanning_zone=SCANNING_ZONE,
-        Nx=Nx,
-        Ny=Ny,
-        action_ID=ACTION_ID,
+        "scan_well_plate_simulated",
         timeout=2400
     ):
         logger.error("Failed to complete microscope scanning")
