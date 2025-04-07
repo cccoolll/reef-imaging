@@ -184,3 +184,4 @@ reef_imaging/control/cytomat-control/samples.json
 reef_imaging/logs/experiment_client.txt
 reef_imaging/logs/experiment_server.txt
 *record.json
+reef_imaging/demo-async.ipynb
