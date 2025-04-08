@@ -57,7 +57,7 @@ ACTION_ID = '20250404-fucci-time-lapse-scan'
 class OrchestrationSystem:
     def __init__(self, local=False):
         self.local = local
-        self.server_url = "http://reef.dyn.scilifelab.se:9520" if local else "https://hypha.aicell.io"
+        self.server_url = "http://reef.dyn.scilifelab.se:9527" if local else "https://hypha.aicell.io"
         self.incubator = None
         self.microscope = None
         self.robotic_arm = None

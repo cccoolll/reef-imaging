@@ -11,13 +11,6 @@ This tutorial will guide you through running the `orchestrator_simulation.py` sc
   - `REEF_LOCAL_TOKEN`: Use this token for local operations.
   - `REEF_LOCAL_WORKSPACE`: Each token is associated with a single workspace. Make sure to set this in your `.env` file.
 
-## Generating a Token
-
-To generate a token, visit the following URL:
-
-```
-http://localhost:9520/public/services/ws/generate_token
-```
 
 ## Running the Script
 
@@ -28,7 +21,7 @@ http://localhost:9520/public/services/ws/generate_token
 python orchestrator_simulation.py --local
 ```
 
-This command will set the server URL to `http://reef.dyn.scilifelab.se:9520` and use the local token and workspace specified in your environment variables.
+This command will set the server URL to `http://reef.dyn.scilifelab.se:9527` and use the local token and workspace specified in your environment variables.
 
 ## Notes
 
