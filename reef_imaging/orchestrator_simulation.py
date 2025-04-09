@@ -55,7 +55,7 @@ ACTION_ID = '20250404-fucci-time-lapse-scan'
 
 # Service configuration
 INCUBATOR_ID = "incubator-control-simulation"
-MICROSCOPE_ID = "microscope-control-squid-1"
+MICROSCOPE_ID = "microscope-squid-reef"
 ROBOTIC_ARM_ID = "robotic-arm-control-simulation"
 
 class OrchestrationSystem:
