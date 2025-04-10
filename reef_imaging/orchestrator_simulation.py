@@ -102,7 +102,7 @@ class OrchestrationSystem:
 
     async def check_service_health(self, service):
         """Check if the service is healthy and reset if needed"""
-        service_name = service._id if hasattr(service, "_id") else "unknown"
+        service_name = service.id if hasattr(service, "id") else "unknown"
         service_type = None
         
         # Determine which service this is
