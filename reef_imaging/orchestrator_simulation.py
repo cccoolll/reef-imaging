@@ -12,13 +12,13 @@ from datetime import datetime
 import argparse
 
 # Set up logging
-def setup_logging(log_file="orchestrator.log", max_bytes=100000, backup_count=3):
+def setup_logging(log_file="orchestrator.log"):
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.INFO)
 
-    # Rotating file handler
-    file_handler = logging.handlers.RotatingFileHandler(log_file, maxBytes=max_bytes, backupCount=backup_count)
+    # Single file handler
+    file_handler = logging.FileHandler(log_file)
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
