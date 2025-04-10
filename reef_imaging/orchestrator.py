@@ -19,7 +19,7 @@ from datetime import datetime
 import argparse
 
 # Set up logging
-def setup_logging(log_file="orchestrator.log", max_bytes=100000, backup_count=3):
+def setup_logging(log_file="orchestrator.log", max_bytes=10*1024*1024, backup_count=5):
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.INFO)
@@ -49,10 +49,10 @@ if ENV_FILE:
 IMAGING_INTERVAL = 3600  # Time between cycles in seconds
 INCUBATOR_SLOT = 32  # Slot number in the incubator
 ILLUMINATE_CHANNELS = ['BF LED matrix full', 'Fluorescence 488 nm Ex', 'Fluorescence 561 nm Ex']
-SCANNING_ZONE = [(0, 0), (7, 11)]
+SCANNING_ZONE = [(0, 0), (7, 9)] # the last 2 rows have no cells
 Nx = 3
 Ny = 3
-ACTION_ID = '20250404-fucci-time-lapse-scan'
+ACTION_ID = '20250410-fucci-time-lapse-scan'
 
 class OrchestrationSystem:
     def __init__(self, local=False):
