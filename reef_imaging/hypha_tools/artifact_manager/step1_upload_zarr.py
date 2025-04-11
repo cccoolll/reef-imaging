@@ -10,10 +10,13 @@ from dotenv import load_dotenv
 load_dotenv()  # Loads environment variables, e.g. AGENT_LENS_WORKSPACE_TOKEN
 
 SERVER_URL = "https://hypha.aicell.io"
-WORKSPACE_TOKEN = os.getenv("AGENT_LENS_WORKSPACE_TOKEN")
-ZARR_PATH = os.getenv("ZARR_PATH")
-ARTIFACT_ALIAS = "microscopy-tiles-size-4000"
-SCALE_RANGE = range(0, 11)  # Upload only scales 3 through 10
+WORKSPACE_TOKEN = os.getenv("REEF_WORKSPACE_TOKEN")
+# Original zarr paths with .zarr extension
+ORIGINAL_ZARR_PATHS = [
+    "/media/reef/harddisk/test_stitch_zarr/2025-04-10_13-50-7.zarr",
+    "/media/reef/harddisk/test_stitch_zarr/2025-04-10_14-50-7.zarr"
+]
+ARTIFACT_ALIAS = "image-map-20250410-treatment"
 CONCURRENCY_LIMIT = 5  # Max number of concurrent uploads
 UPLOAD_RECORD_FILE = "upload_record.json"  # File to track uploaded files
 
@@ -104,24 +107,28 @@ async def main():
 
     # 1) Prepare a list of (local_file, relative_path) to upload
     to_upload = []
-    for root_dir, _, files in os.walk(ZARR_PATH):
-        current_path = os.path.relpath(root_dir, ZARR_PATH)
-        path_parts = current_path.split(os.sep)
-
-        # Decide if we skip based on scale number
-        if len(path_parts) >= 2 and path_parts[1].startswith("scale"):
-            try:
-                scale_num = int(path_parts[1].replace("scale", ""))
-                if scale_num not in SCALE_RANGE:
-                    continue
-            except ValueError:
-                pass
-
-        # Collect files
-        for filename in files:
-            local_file = os.path.join(root_dir, filename)
-            relative_path = os.path.relpath(local_file, ZARR_PATH)
-            to_upload.append((local_file, relative_path))
+    
+    for zarr_path in ORIGINAL_ZARR_PATHS:
+        # Extract the folder name without .zarr extension to use as the top-level directory
+        folder_name = os.path.basename(zarr_path).replace('.zarr', '')
+        
+        # Walk through the zarr directory
+        for root_dir, _, files in os.walk(zarr_path):
+            # Skip metadata files at the root level, we only want channel directories
+            rel_dir = os.path.relpath(root_dir, zarr_path)
+            if rel_dir == '.':
+                continue
+                
+            # Collect files
+            for filename in files:
+                local_file = os.path.join(root_dir, filename)
+                
+                # Create a new relative path with folder_name as the top directory
+                # and maintaining the internal structure (channel/scale/chunks)
+                internal_path = os.path.relpath(root_dir, zarr_path)
+                relative_path = os.path.join(folder_name, internal_path, filename)
+                
+                to_upload.append((local_file, relative_path))
 
     # Update total files count
     upload_record["total_files"] = len(to_upload)
@@ -162,4 +169,4 @@ if __name__ == "__main__":
     asyncio.run(main())
 
 # Created/Modified files during execution:
-print(["step1_upload_tiles_async.py", "upload_record.json"])
+print(["step1_upload_zarr.py", "upload_record.json"])

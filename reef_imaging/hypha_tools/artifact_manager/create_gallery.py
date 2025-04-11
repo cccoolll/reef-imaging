@@ -17,12 +17,12 @@ async def main():
 
     # Create a collection for the Dataset Gallery
     gallery_manifest = {
-        "name": "U2OS FUCCI Drug Treatment",
+        "name": "Image Map of U2OS FUCCI Drug Treatment",
         "description": "A collection for organizing imaging datasets acquired by microscopes",
     }
     await artifact_manager.create(
         type="collection",
-        alias="reef-imaging/u2os-fucci-drug-treatment",
+        alias="reef-imaging/image-map-of-u2os-fucci-drug-treatment",
         manifest=gallery_manifest,
         config={"permissions": {"*": "r+", "@": "r+"}},
         overwrite=True,

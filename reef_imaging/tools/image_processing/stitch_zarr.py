@@ -82,10 +82,14 @@ def parse_image_filenames(image_folder):
     image_info.sort(key=lambda x: (-x["x_idx"], x["y_idx"]))
     return image_info
 
-def create_ome_ngff(output_folder, canvas_width, canvas_height, channels, pyramid_levels=7, chunk_size=(2048, 2048)):
+def create_ome_ngff(output_folder, canvas_width, canvas_height, channels, zarr_filename=None, pyramid_levels=7, chunk_size=(2048, 2048)):
     """Create an OME-NGFF (zarr) file with a fixed canvas size and pyramid levels."""
     os.makedirs(output_folder, exist_ok=True)
-    zarr_path = os.path.join(output_folder, "stitched_images.zarr")
+    
+    # Use provided zarr_filename or default to "stitched_images.zarr"
+    zarr_filename = zarr_filename or "stitched_images.zarr"
+    zarr_path = os.path.join(output_folder, zarr_filename)
+    
     store = zarr.DirectoryStore(zarr_path)
     root = zarr.group(store=store)
 
@@ -342,82 +346,94 @@ def generate_coordinates_file(image_folder, config, wellplate_format):
 
 def main():
     # Paths and parameters
-    data_folder = "/media/reef/harddisk/20250410-fucci-time-lapse-scan_2025-04-10_13-50-7.762411"
-    image_folder = os.path.join(data_folder, "0")
-    parameter_file = os.path.join(data_folder, "acquisition parameters.json")
-    coordinates_file = os.path.join(image_folder, "coordinates.csv")
-    output_folder = "/media/reef/harddisk/test_stitch_zarr"
-    os.makedirs(output_folder, exist_ok=True)
-
-    # Load imaging parameters and coordinates
-    parameters = load_imaging_parameters(parameter_file)
+    data_folders = [
+        "/media/reef/harddisk/20250410-fucci-time-lapse-scan_2025-04-10_13-50-7.762411",
+        "/media/reef/harddisk/20250410-fucci-time-lapse-scan_2025-04-10_14-50-7.948398",
+        # Add other data folders here
+    ]
     
-    # Check if coordinates file exists, if not generate it
-    if not os.path.exists(coordinates_file):
-        print("Coordinates file not found, generating...")
-        config = {
-            "dx(mm)": 0.9,
-            "Nx": 1,
-            "dy(mm)": 0.9,
-            "Ny": 1,
-            "dz(um)": 1.5,
-            "Nz": 1,
-            "dt(s)": 0.0,
-            "Nt": 1,
-            "with AF": True,
-            "with reflection AF": False,
-            "objective": {"magnification": 20, "NA": 0.4, "tube_lens_f_mm": 180, "name": "20x"},
-            "sensor_pixel_size_um": 1.85,
-            "tube_lens_mm": 50
-        }
-        class WELLPLATE_FORMAT_96:
-            NUMBER_OF_SKIP = 0
-            WELL_SIZE_MM = 6.21
-            WELL_SPACING_MM = 9
-            A1_X_MM = 14.3
-            A1_Y_MM = 11.36
+    for data_folder in data_folders:
+        # Extract date and time from the folder name
+        folder_name = os.path.basename(data_folder)
+        date_time_str = folder_name.split('_')[1] + '_' + folder_name.split('_')[2].split('.')[0]
+        zarr_filename = f"{date_time_str}.zarr"
         
-        coordinates = generate_coordinates_file(image_folder, config, WELLPLATE_FORMAT_96)
-    else:
-        coordinates = pd.read_csv(coordinates_file)
+        image_folder = os.path.join(data_folder, "0")
+        parameter_file = os.path.join(data_folder, "acquisition parameters.json")
+        coordinates_file = os.path.join(image_folder, "coordinates.csv")
+        output_folder = "/media/reef/harddisk/test_stitch_zarr"
+        os.makedirs(output_folder, exist_ok=True)
 
-    # Predefined stage limits - define the boundaries of the microscope stage
-    stage_limits = {
-        "x_positive": 120,
-        "x_negative": 0,
-        "y_positive": 86,
-        "y_negative": 0,
-        "z_positive": 6
-    }
-    
-    # Get pixel size and calculate canvas size
-    pixel_size_xy = get_pixel_size(parameters)
-    canvas_width, canvas_height = create_canvas_size(stage_limits, pixel_size_xy)
+        # Load imaging parameters and coordinates
+        parameters = load_imaging_parameters(parameter_file)
+        
+        # Check if coordinates file exists, if not generate it
+        if not os.path.exists(coordinates_file):
+            print("Coordinates file not found, generating...")
+            config = {
+                "dx(mm)": 0.9,
+                "Nx": 1,
+                "dy(mm)": 0.9,
+                "Ny": 1,
+                "dz(um)": 1.5,
+                "Nz": 1,
+                "dt(s)": 0.0,
+                "Nt": 1,
+                "with AF": True,
+                "with reflection AF": False,
+                "objective": {"magnification": 20, "NA": 0.4, "tube_lens_f_mm": 180, "name": "20x"},
+                "sensor_pixel_size_um": 1.85,
+                "tube_lens_mm": 50
+            }
+            class WELLPLATE_FORMAT_96:
+                NUMBER_OF_SKIP = 0
+                WELL_SIZE_MM = 6.21
+                WELL_SPACING_MM = 9
+                A1_X_MM = 14.3
+                A1_Y_MM = 11.36
+            
+            coordinates = generate_coordinates_file(image_folder, config, WELLPLATE_FORMAT_96)
+        else:
+            coordinates = pd.read_csv(coordinates_file)
 
-    # Calculate appropriate number of pyramid levels
-    max_dimension = max(canvas_width, canvas_height)
-    max_levels = int(np.floor(np.log2(max_dimension)) // 2)  # Divide by 2 since we use 4^level
-    pyramid_levels = min(max_levels, 4)  # Limit to 4 levels or less
-    print(f"Using {pyramid_levels} pyramid levels for {canvas_width}x{canvas_height} canvas")
-    
-    # Parse image filenames and get unique channels
-    image_info = parse_image_filenames(image_folder)
-    channels = list(set(info["channel_name"] for info in image_info))
-    print(f"Found {len(image_info)} images with {len(channels)} channels")
-    selected_channel = ['Fluorescence_561_nm_Ex', 'Fluorescence_405_nm_Ex', 'Fluorescence_488_nm_Ex', 'Fluorescence_638_nm_Ex', 'BF_LED_matrix_full']
-    print(f"Selected channel: {selected_channel}")
+        # Predefined stage limits - define the boundaries of the microscope stage
+        stage_limits = {
+            "x_positive": 120,
+            "x_negative": 0,
+            "y_positive": 86,
+            "y_negative": 0,
+            "z_positive": 6
+        }
+        
+        # Get pixel size and calculate canvas size
+        pixel_size_xy = get_pixel_size(parameters)
+        canvas_width, canvas_height = create_canvas_size(stage_limits, pixel_size_xy)
 
-    # Check if dataset exists, if so, use it
-    if os.path.exists(os.path.join(output_folder, "stitched_images.zarr")):
-        print("Dataset exists, opening in append mode.")
-        datasets = zarr.open(os.path.join(output_folder, "stitched_images.zarr"), mode="a")
-    else:
-        # Create new OME-NGFF file
-        root, datasets = create_ome_ngff(output_folder, canvas_width, canvas_height, selected_channel, pyramid_levels=pyramid_levels)
-        print(f"Dataset created with channels: {selected_channel}")
+        # Calculate appropriate number of pyramid levels
+        max_dimension = max(canvas_width, canvas_height)
+        max_levels = int(np.floor(np.log2(max_dimension)) // 2)  # Divide by 2 since we use 4^level
+        pyramid_levels = min(max_levels, 4)  # Limit to 4 levels or less
+        print(f"Using {pyramid_levels} pyramid levels for {canvas_width}x{canvas_height} canvas")
+        
+        # Parse image filenames and get unique channels
+        image_info = parse_image_filenames(image_folder)
+        channels = list(set(info["channel_name"] for info in image_info))
+        print(f"Found {len(image_info)} images with {len(channels)} channels")
+        selected_channel = ['Fluorescence_561_nm_Ex', 'Fluorescence_488_nm_Ex', 'BF_LED_matrix_full']
+        print(f"Selected channel: {selected_channel}")
 
-    # Process images and stitch them
-    process_images(image_info, coordinates, datasets, pixel_size_xy, stage_limits, selected_channel=selected_channel, pyramid_levels=pyramid_levels)
+        # Check if dataset exists, if so, use it
+        zarr_file_path = os.path.join(output_folder, zarr_filename)
+        if os.path.exists(zarr_file_path):
+            print(f"Dataset {zarr_filename} exists, opening in append mode.")
+            datasets = zarr.open(zarr_file_path, mode="a")
+        else:
+            # Create new OME-NGFF file
+            root, datasets = create_ome_ngff(output_folder, canvas_width, canvas_height, selected_channel, zarr_filename=zarr_filename, pyramid_levels=pyramid_levels)
+            print(f"Dataset created with channels: {selected_channel}")
+
+        # Process images and stitch them
+        process_images(image_info, coordinates, datasets, pixel_size_xy, stage_limits, selected_channel=selected_channel, pyramid_levels=pyramid_levels)
 
 if __name__ == "__main__":
     main()

@@ -11,18 +11,18 @@ SERVER_URL = "https://hypha.aicell.io"
 async def main():
     # Connect to the Artifact Manager API
     api = await connect_to_server(
-        {"name": "test-client", "server_url": SERVER_URL, "token": token}
+        {"name": "test-client", "server_url": SERVER_URL}
     )
     artifact_manager = await api.get_service("public/artifact-manager")
 
     # Add a dataset to the gallery
     dataset_manifest = {
-        "name": "Squid Tile Dataset",
-        "description": "A dataset containing imaging map tiles of a microscopy sample",
+        "name": "image-map-20250410-treatment",
+        "description": "The Image Map of U2OS FUCCI Drug Treatment",
     }
     await artifact_manager.create(
-        parent_id="reef-imaging/u2os-fucci-drug-treatment",
-        alias="20250328-treatment-out-of-incubator",
+        parent_id="reef-imaging/image-map-of-u2os-fucci-drug-treatment",
+        alias="image-map-20250410-treatment",
         manifest=dataset_manifest,
         version="stage",
         overwrite=True,
