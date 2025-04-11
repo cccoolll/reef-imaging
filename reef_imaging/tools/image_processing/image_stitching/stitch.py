@@ -6,6 +6,7 @@ import zarr
 from numcodecs import Blosc
 from tqdm import tqdm
 import json
+import shutil  # For directory operations
 
 def get_pixel_size(parameters, default_pixel_size=1.85, default_tube_lens_mm=50.0, default_objective_tube_lens_mm=180.0, default_magnification=40.0):
     """Calculate pixel size based on imaging parameters."""
@@ -207,8 +208,13 @@ def create_ome_ngff(output_folder, canvas_width, canvas_height, channels, pyrami
     """Create an OME-NGFF (zarr) file with a fixed canvas size and pyramid levels."""
     os.makedirs(output_folder, exist_ok=True)
     zarr_path = os.path.join(output_folder, "stitched_images.zarr")
-    store = zarr.open(zarr_path, mode='w')
-    root = store
+    
+    # If zarr exists, remove it to start fresh
+    if os.path.exists(zarr_path):
+        shutil.rmtree(zarr_path)
+    
+    # Create zarr store with proper hierarchy
+    root = zarr.open_group(zarr_path, mode='w')
 
     # Print initial canvas size
     print(f"Initial canvas size: {canvas_width}x{canvas_height}")
@@ -315,7 +321,8 @@ def stitch_region_to_zarr(
     region_name="A1",
     channel_names=None,
     pyramid_levels=7,
-    chunk_size=(2048, 2048)
+    chunk_size=(2048, 2048),
+    force_recreate=False
 ):
     """
     Stitch images for a specific region and save to OME-ZARR format.
@@ -329,6 +336,7 @@ def stitch_region_to_zarr(
         channel_names (list): List of channel names to process
         pyramid_levels (int): Number of pyramid levels to create
         chunk_size (tuple): Chunk size for zarr storage
+        force_recreate (bool): If True, recreate zarr file if exists
     """
     # Default channel names if not specified
     if channel_names is None:
@@ -402,29 +410,19 @@ def stitch_region_to_zarr(
     
     # 8. Create OME-ZARR structure
     os.makedirs(output_folder, exist_ok=True)
-    zarr_path = os.path.join(output_folder, f"{region_name}.zarr")
+    zarr_path = os.path.join(output_folder, "stitched_images.zarr")
     
-    # Check if zarr already exists and delete if user wants to recreate
-    if os.path.exists(zarr_path):
-        print(f"Zarr dataset already exists at {zarr_path}")
-        while True:
-            choice = input("Do you want to (r)eplace it, (s)kip this region, or (a)ppend to it? [r/s/a]: ").lower()
-            if choice == 'r':
-                import shutil
-                shutil.rmtree(zarr_path)
-                break
-            elif choice == 's':
-                print(f"Skipping region {region_name}")
-                return
-            elif choice == 'a':
-                print(f"Appending to existing dataset")
-                break
-            else:
-                print("Invalid choice. Please enter 'r', 's', or 'a'.")
-    
-    # Create new zarr or open existing
-    mode = 'w' if not os.path.exists(zarr_path) else 'a'
-    root = zarr.open(zarr_path, mode=mode)
+    # Check if zarr exists and handle according to force_recreate setting
+    if os.path.exists(zarr_path) and force_recreate:
+        print(f"Recreating zarr file at {zarr_path}")
+        shutil.rmtree(zarr_path)
+        root = zarr.open_group(zarr_path, mode='w')
+    elif not os.path.exists(zarr_path):
+        print(f"Creating new zarr file at {zarr_path}")
+        root = zarr.open_group(zarr_path, mode='w')
+    else:
+        print(f"Opening existing zarr file at {zarr_path}")
+        root = zarr.open_group(zarr_path, mode='a')
     
     # Create datasets for each channel
     datasets = {}
@@ -442,42 +440,52 @@ def stitch_region_to_zarr(
             print(f"Channel {channel} not found in images for region {region_name}. Skipping.")
             continue
             
-        print(f"\nCreating dataset for channel: {channel}")
+        print(f"\nProcessing channel: {channel}")
         
-        # Check if this channel already exists in the zarr
-        if channel in root:
-            print(f"  Channel {channel} already exists in zarr")
-            datasets[channel] = root[channel]
+        # Check if channel exists in root
+        if channel in root and not force_recreate:
+            print(f"  Channel {channel} already exists")
+            channel_group = root[channel]
         else:
-            # Create new group for this channel
-            group = root.create_group(channel)
-            datasets[channel] = group
+            if channel in root:
+                # Remove existing channel if force_recreate
+                del root[channel]
+            print(f"  Creating channel {channel}")
+            channel_group = root.create_group(channel)
+        
+        datasets[channel] = {}
+        
+        # Create arrays for each scale level
+        for level in range(pyramid_levels):
+            scale_name = f"scale{level}"
             
-            # Create base resolution
-            print(f"  Creating scale0: {canvas_height_px}x{canvas_width_px}")
-            datasets[channel].zeros(
-                "scale0",
-                shape=(canvas_height_px, canvas_width_px),
-                chunks=chunk_size,
-                dtype=np.uint8
-            )
-            
-            # Create pyramid levels
-            for level in range(1, pyramid_levels):
-                scale_name = f"scale{level}"
-                level_shape = (
+            if level == 0:
+                shape = (canvas_height_px, canvas_width_px)
+            else:
+                shape = (
                     max(1, canvas_height_px // (2 ** level)),
                     max(1, canvas_width_px // (2 ** level))
                 )
-                level_chunks = (
-                    min(chunk_size[0], level_shape[0]),
-                    min(chunk_size[1], level_shape[1])
-                )
                 
-                print(f"  Creating {scale_name}: {level_shape} (chunks: {level_chunks})")
-                datasets[channel].zeros(
+            # Calculate appropriate chunk size
+            level_chunks = (
+                min(chunk_size[0], shape[0]),
+                min(chunk_size[1], shape[1])
+            )
+            
+            # Check if scale exists
+            if scale_name in channel_group and not force_recreate:
+                print(f"  Using existing {scale_name}: {shape}")
+                datasets[channel][scale_name] = channel_group[scale_name]
+            else:
+                if scale_name in channel_group:
+                    # Remove existing scale if force_recreate
+                    del channel_group[scale_name]
+                print(f"  Creating {scale_name}: {shape} (chunks: {level_chunks})")
+                # Create array with v2 chunk organization
+                datasets[channel][scale_name] = channel_group.zeros(
                     scale_name,
-                    shape=level_shape,
+                    shape=shape,
                     chunks=level_chunks,
                     dtype=np.uint8
                 )
@@ -545,6 +553,22 @@ def stitch_region_to_zarr(
             for level in range(1, pyramid_levels):
                 update_pyramid(datasets, channel, level, img, x_start, y_start)
     
+    # Clean up any 'c' directories if they exist (workaround for older zarr versions)
+    for channel in channel_names:
+        if channel in root:
+            for level in range(pyramid_levels):
+                scale_path = os.path.join(zarr_path, channel, f"scale{level}")
+                c_dir = os.path.join(scale_path, "c")
+                if os.path.exists(c_dir) and os.path.isdir(c_dir):
+                    print(f"  Removing 'c' directory in {scale_path}")
+                    # Move contents up one level
+                    for item in os.listdir(c_dir):
+                        src = os.path.join(c_dir, item)
+                        dst = os.path.join(scale_path, item)
+                        shutil.move(src, dst)
+                    # Remove empty c directory
+                    shutil.rmtree(c_dir)
+    
     print(f"Completed OME-ZARR stitching for region {region_name}")
     return zarr_path
 
@@ -554,7 +578,7 @@ def main():
     image_folder = data_folder
     coordinates_path = os.path.join(data_folder, "coordinates.csv")
     parameter_file = os.path.join(data_folder, "acquisition parameters.json")
-    output_folder = os.path.dirname(os.path.abspath(__file__))
+    output_folder = "/media/reef/harddisk/zarr_output"
     zarr_output_folder = os.path.join(output_folder, "zarr_output")
     
     # Create output folder if it doesn't exist
@@ -582,7 +606,7 @@ def main():
         coordinates_file=coordinates_path,
         parameters=parameters,
         region_name="A1",
-        output_filename=os.path.join(output_folder, "stitched_result_A1.jpg")
+        output_filename=os.path.join(zarr_output_folder, "stitched_result_A1.jpg")
     )
     
     # Get unique regions from coordinates file
@@ -619,7 +643,10 @@ def main():
     else:
         channels_to_process = [c.strip() for c in channels_to_process.split(',')]
     
-    # Process each region and create OME-ZARR files
+    # Ask if existing zarr should be recreated
+    force_recreate = input("Force recreate zarr file if it exists? (y/n): ").lower() == 'y'
+    
+    # Process each region and create a single OME-ZARR file
     for region in regions_to_process:
         print(f"\nProcessing region: {region}")
         zarr_path = stitch_region_to_zarr(
@@ -630,7 +657,8 @@ def main():
             region_name=region,
             channel_names=channels_to_process,
             pyramid_levels=4,  # Adjust based on image size
-            chunk_size=(2048, 2048)
+            chunk_size=(2048, 2048),
+            force_recreate=force_recreate
         )
         
         if zarr_path:
