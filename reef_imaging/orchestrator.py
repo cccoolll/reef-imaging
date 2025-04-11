@@ -4,6 +4,10 @@ Task:
 1. Load a plate from incubator to microscope
 2. Scan the plate
 3. Unload the plate from microscope to incubator
+# TODO: 1. Add mirror hypha service
+# TODO: 2. Add treatment data upload service
+# TODO: 3. Add image map stitching service
+# TODO: 4. Add image map upload service
 """
 import asyncio
 import time
