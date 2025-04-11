@@ -15,10 +15,14 @@ from typing import Optional
 load_dotenv()
 SERVER_URL = "https://hypha.aicell.io"
 WORKSPACE_TOKEN = os.getenv("REEF_WORKSPACE_TOKEN")
-DATASET_ALIAS = "20250328-treatment-out-of-incubator"
-SOURCE_DIR = os.path.expanduser("~/europa_disk/u2os-treatment/static/003_2025-03-28_16-20-35.283628")
+DATASET_ALIAS = "20250410-treatment"
+# List of source directories to upload
+SOURCE_DIRS = [
+    "/media/reef/harddisk/20250410-fucci-time-lapse-scan_2025-04-10_13-50-7.762411",
+    "/media/reef/harddisk/20250410-fucci-time-lapse-scan_2025-04-10_14-50-7.948398"
+]
 CONCURRENCY_LIMIT = 5  # Max number of concurrent uploads
-UPLOAD_RECORD_FILE = "treatment_upload_record.json"  # File to track uploaded files
+UPLOAD_RECORD_FILE = "treatment_upload_record-20250410.json"  # File to track uploaded files
 MAX_RETRIES = 30  # Maximum number of retry attempts
 INITIAL_RETRY_DELAY = 5  # Initial retry delay in seconds
 MAX_RETRY_DELAY = 60  # Maximum retry delay in seconds
@@ -45,12 +49,14 @@ def save_upload_record(record):
     with open(UPLOAD_RECORD_FILE, "w", encoding="utf-8") as f:
         json.dump(record_copy, f, indent=2)
 
-def get_timepoint_folder_name(timepoint):
-    """Generate the folder name based on the timepoint number"""
-    base_time = datetime(2025, 3, 28, 16, 20, 35, 283628)
-    # Each timepoint is 1 hour apart
-    new_time = base_time + timedelta(hours=int(timepoint))
-    return f"003_{new_time.strftime('%Y-%m-%d_%H-%M-%S.%f')}"
+def extract_date_time_from_path(path):
+    """Extract date and time from folder name"""
+    folder_name = os.path.basename(path)
+    parts = folder_name.split('_')
+    if len(parts) >= 3:
+        # Format: 20250410-fucci-time-lapse-scan_2025-04-10_13-50-7.762411
+        return parts[1] + '_' + parts[2].split('.')[0]  # Returns: 2025-04-10_13-50-7
+    return folder_name  # Fallback to full folder name if format doesn't match
 
 async def get_artifact_manager() -> tuple:
     """Get a new connection to the artifact manager"""
@@ -130,27 +136,22 @@ async def main():
     # 1) Prepare a list of (local_file, relative_path) to upload
     to_upload = []
     
-    # Get all timepoint folders (0, 1, 2, etc.)
-    timepoint_folders = [d for d in os.listdir(SOURCE_DIR) 
-                        if os.path.isdir(os.path.join(SOURCE_DIR, d)) and d.isdigit()]
-    
-    # Sort timepoint folders numerically
-    timepoint_folders.sort(key=int)
-    
-    for timepoint in timepoint_folders:
-        timepoint_dir = os.path.join(SOURCE_DIR, timepoint)
-        new_folder_name = get_timepoint_folder_name(timepoint)
+    # Process each source directory
+    for source_dir in SOURCE_DIRS:
+        # Extract date time string to use as folder name
+        folder_name = extract_date_time_from_path(source_dir)
+        print(f"Processing directory: {source_dir} -> {folder_name}")
         
-        # Get all files in the timepoint folder
-        for root, _, files in os.walk(timepoint_dir):
+        # Walk through the directory structure
+        for root, _, files in os.walk(source_dir):
             for file in files:
                 local_file = os.path.join(root, file)
                 
-                # Calculate the relative path within the timepoint folder
-                rel_path_in_timepoint = os.path.relpath(local_file, timepoint_dir)
+                # Calculate the relative path within the source directory
+                rel_path = os.path.relpath(local_file, source_dir)
                 
-                # Create the new path with the renamed folder
-                relative_path = os.path.join(new_folder_name, rel_path_in_timepoint)
+                # Create the new path with the folder name
+                relative_path = os.path.join(folder_name, rel_path)
                 
                 to_upload.append((local_file, relative_path))
 
