@@ -23,7 +23,7 @@ SOURCE_DIRS = [
 ]
 CONCURRENCY_LIMIT = 5  # Max number of concurrent uploads
 UPLOAD_RECORD_FILE = "treatment_upload_record-20250410.json"  # File to track uploaded files
-MAX_RETRIES = 30  # Maximum number of retry attempts
+MAX_RETRIES = 300  # Maximum number of retry attempts
 INITIAL_RETRY_DELAY = 5  # Initial retry delay in seconds
 MAX_RETRY_DELAY = 60  # Maximum retry delay in seconds
 
@@ -76,53 +76,95 @@ async def upload_single_file(
     upload_record,
 ):
     """
-    Requests a presigned URL from artifact_manager, then does an async PUT to upload the file.
-    Implements retry logic with exponential backoff.
+    Single attempt to upload a file. No internal retries.
     """
     # Skip if file was already uploaded
     if relative_path in upload_record["uploaded_files"]:
-        return
+        return True
 
+    try:
+        async with semaphore:
+            # 1) Get the presigned URL
+            put_url = await artifact_manager.put_file(
+                artifact_alias, file_path=relative_path
+            )
+
+            # 2) Use aiohttp session to PUT the data
+            async with session.put(put_url, data=open(local_file, "rb")) as resp:
+                if resp.status != 200:
+                    raise RuntimeError(
+                        f"File upload failed for {local_file}, status={resp.status}"
+                    )
+
+            # 3) Record successful upload
+            upload_record["uploaded_files"].add(relative_path)
+            upload_record["completed_files"] += 1
+
+            # 4) Save progress periodically (every 10 files)
+            if upload_record["completed_files"] % 10 == 0:
+                save_upload_record(upload_record)
+
+            print(
+                f"Uploaded file: {relative_path} ({upload_record['completed_files']}/{upload_record['total_files']})"
+            )
+            return True
+
+    except Exception as e:
+        print(f"Error uploading {relative_path}: {str(e)}")
+        return False
+
+async def retry_upload_with_new_connections(
+    local_file, 
+    relative_path, 
+    upload_record, 
+    retries=MAX_RETRIES, 
+    initial_delay=INITIAL_RETRY_DELAY
+):
+    """
+    Retry uploading a file with new connections for each attempt.
+    This avoids issues with WebSocket connections getting stuck.
+    """
     retry_count = 0
-    retry_delay = INITIAL_RETRY_DELAY
-
-    while retry_count < MAX_RETRIES:
-        try:
-            async with semaphore:
-                # 1) Get the presigned URL
-                put_url = await artifact_manager.put_file(
-                    artifact_alias, file_path=relative_path
-                )
-
-                # 2) Use aiohttp session to PUT the data
-                async with session.put(put_url, data=open(local_file, "rb")) as resp:
-                    if resp.status != 200:
-                        raise RuntimeError(
-                            f"File upload failed for {local_file}, status={resp.status}"
-                        )
-
-                # 3) Record successful upload
-                upload_record["uploaded_files"].add(relative_path)
-                upload_record["completed_files"] += 1
-
-                # 4) Save progress periodically (every 10 files)
-                if upload_record["completed_files"] % 10 == 0:
-                    save_upload_record(upload_record)
-
-                print(
-                    f"Uploaded file: {relative_path} ({upload_record['completed_files']}/{upload_record['total_files']})"
-                )
-                return  # Success, exit the retry loop
-
-        except Exception as e:
-            retry_count += 1
-            if retry_count == MAX_RETRIES:
-                print(f"Failed to upload {relative_path} after {MAX_RETRIES} attempts. Error: {str(e)}")
-                raise
-
-            print(f"Retry {retry_count}/{MAX_RETRIES} for {relative_path}. Error: {str(e)}")
+    retry_delay = initial_delay
+    
+    while retry_count < retries:
+        if retry_count > 0:
+            print(f"Retry {retry_count}/{retries} for {relative_path}")
             await asyncio.sleep(retry_delay)
-            retry_delay = min(retry_delay * 2, MAX_RETRY_DELAY)  # Exponential backoff with max limit
+            retry_delay = min(retry_delay * 2, MAX_RETRY_DELAY)  # Exponential backoff
+        
+        # Get a fresh connection for each retry
+        try:
+            api, artifact_manager = await get_artifact_manager()
+            semaphore = asyncio.Semaphore(1)  # Use 1 for individual retries
+            
+            async with aiohttp.ClientSession() as session:
+                success = await upload_single_file(
+                    artifact_manager,
+                    DATASET_ALIAS,
+                    local_file,
+                    relative_path,
+                    semaphore,
+                    session,
+                    upload_record
+                )
+                
+                if success:
+                    return True
+        
+        except Exception as e:
+            print(f"Connection error during retry {retry_count} for {relative_path}: {str(e)}")
+        
+        # Cleanup connection before retrying
+        try:
+            await api.close()
+        except:
+            pass
+            
+        retry_count += 1
+    
+    print(f"Failed to upload {relative_path} after {retries} attempts")
+    return False
 
 async def main():
     # Load upload record
@@ -159,12 +201,17 @@ async def main():
     upload_record["total_files"] = len(to_upload)
     save_upload_record(upload_record)
 
-    # 2) Create tasks to upload each file in parallel, with concurrency limit
+    # 2) First attempt to upload files in parallel
     semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
-    tasks = []
+    initial_tasks = []
+    failed_uploads = []
 
     async with aiohttp.ClientSession() as session:
+        # Create tasks for initial attempt
         for local_file, relative_path in to_upload:
+            if relative_path in upload_record["uploaded_files"]:
+                continue
+                
             task = asyncio.create_task(
                 upload_single_file(
                     artifact_manager,
@@ -176,27 +223,51 @@ async def main():
                     upload_record,
                 )
             )
-            tasks.append(task)
+            initial_tasks.append((task, local_file, relative_path))
+        
+        # Wait for all tasks to complete and collect failures
+        for task, local_file, relative_path in initial_tasks:
+            try:
+                success = await task
+                if not success:
+                    failed_uploads.append((local_file, relative_path))
+            except Exception as e:
+                print(f"Exception in task for {relative_path}: {str(e)}")
+                failed_uploads.append((local_file, relative_path))
 
-        # 3) Run tasks concurrently
-        try:
-            await asyncio.gather(*tasks)
-        except Exception as e:
-            print(f"Error during upload: {str(e)}")
-            print("Attempting to reset connection and continue...")
-            # Reset connection
-            await api.close()
-            api, artifact_manager = await get_artifact_manager()
-            # Retry failed uploads
-            failed_tasks = [t for t in tasks if not t.done() or t.exception()]
-            if failed_tasks:
-                print(f"Retrying {len(failed_tasks)} failed uploads...")
-                await asyncio.gather(*failed_tasks)
+    # Close the initial connection
+    await api.close()
+    
+    # 3) Retry failed uploads one by one with fresh connections
+    print(f"First pass completed. Retrying {len(failed_uploads)} failed uploads...")
+    
+    retry_tasks = []
+    for local_file, relative_path in failed_uploads:
+        task = asyncio.create_task(
+            retry_upload_with_new_connections(
+                local_file, 
+                relative_path, 
+                upload_record
+            )
+        )
+        retry_tasks.append(task)
+    
+    # Wait for all retry tasks to complete
+    await asyncio.gather(*retry_tasks)
 
-    # 4) Save final record and commit the dataset
+    # 4) Save final record and get a fresh connection to commit
     save_upload_record(upload_record)
-    await artifact_manager.commit(DATASET_ALIAS)
-    print("Dataset committed successfully.")
+    
+    # Final connection for commit
+    api, artifact_manager = await get_artifact_manager()
+    try:
+        await artifact_manager.commit(DATASET_ALIAS)
+        print("Dataset committed successfully.")
+    except Exception as e:
+        print(f"Error committing dataset: {str(e)}")
+    finally:
+        await api.close()
+        
     print(
         f"Total files uploaded: {upload_record['completed_files']}/{upload_record['total_files']}"
     )
