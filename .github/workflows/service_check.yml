@@ -16,7 +16,7 @@ jobs:
     - name: Check Incubator Control Service
       run: |
         response=$(curl -s -f https://hypha.aicell.io/reef-imaging/services/mirror-incubator-control/hello_world || echo "Service unreachable")
-        if [ "$response" != "Hello world" ]; then
+        if [[ "$response" != "Hello world" && "$response" != "\"Hello world\"" ]]; then
           echo "Incubator Control Service is down: $response" >> error.log
         fi
         
@@ -28,7 +28,7 @@ jobs:
     - name: Check Microscope Control Service
       run: |
         response=$(curl -s -f https://hypha.aicell.io/reef-imaging/services/mirror-microscope-control-squid-1/hello_world || echo "Service unreachable")
-        if [ "$response" != "Hello world" ]; then
+        if [[ "$response" != "Hello world" && "$response" != "\"Hello world\"" ]]; then
           echo "Microscope Control Service is down: $response" >> error.log
         fi
         
@@ -40,7 +40,7 @@ jobs:
     - name: Check Robotic Arm Control Service
       run: |
         response=$(curl -s -f https://hypha.aicell.io/reef-imaging/services/mirror-robotic-arm-control/hello_world || echo "Service unreachable")
-        if [ "$response" != "Hello world" ]; then
+        if [[ "$response" != "Hello world" && "$response" != "\"Hello world\"" ]]; then
           echo "Robotic Arm Control Service is down: $response" >> error.log
         fi
         
@@ -49,27 +49,12 @@ jobs:
           echo "Robotic Arm Control Service has failed tasks" >> error.log
         fi
 
-    - name: Check if any services are down
-      id: check_errors
+    - name: Exit with error if any services are down
       run: |
         if [ -s error.log ]; then
-          echo "errors=true" >> $GITHUB_OUTPUT
+          echo "Services have errors:"
           cat error.log
+          exit 1
         else
           echo "All services are functioning normally"
         fi
-
-    - name: Send Email if Errors
-      if: steps.check_errors.outputs.errors == 'true'
-      uses: dawidd6/action-send-mail@v3
-      with:
-        server_address: smtp.example.com
-        server_port: 587
-        username: ${{ secrets.EMAIL_USERNAME }}
-        password: ${{ secrets.EMAIL_PASSWORD }}
-        subject: "Service Health Check Alert"
-        to: songtao.cheng@scilifelab.se
-        from: songtao.cheng@scilifelab.se
-        body: |
-          The following services are down or have failed tasks:
-          $(cat error.log)
