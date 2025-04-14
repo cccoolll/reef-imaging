@@ -40,7 +40,7 @@ class MirrorMicroscopeService:
         self.cloud_server_url = "https://hypha.aicell.io"
         self.cloud_workspace = "reef-imaging"
         self.cloud_token = os.environ.get("REEF_WORKSPACE_TOKEN")
-        self.cloud_service_id = "mirror-squid-control"
+        self.cloud_service_id = "mirror-microscope-control-squid-1"
         self.cloud_server = None
         
         # Connection to local service
@@ -214,7 +214,7 @@ class MirrorMicroscopeService:
 
     def hello_world(self):
         """Hello world"""
-        return "Hello world from mirror service"
+        return "Hello world"
 
     def get_task_status(self, task_name):
         """Get the status of a specific task"""

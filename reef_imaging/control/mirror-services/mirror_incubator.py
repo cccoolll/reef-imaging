@@ -191,7 +191,7 @@ class MirrorIncubatorService:
 
     def hello_world(self):
         """Hello world"""
-        return "Hello world from incubator mirror service"
+        return "Hello world"
 
     def get_task_status(self, task_name):
         """Get the status of a specific task"""
