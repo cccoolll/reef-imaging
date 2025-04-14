@@ -16,7 +16,7 @@ jobs:
     - name: Check Incubator Control Service
       run: |
         response=$(curl -s -f https://hypha.aicell.io/reef-imaging/services/mirror-incubator-control/hello_world || echo "Service unreachable")
-        if [ "$response" != "Hello world" ]; then
+        if [[ "$response" != "Hello world" && "$response" != "\"Hello world\"" ]]; then
           echo "Incubator Control Service is down: $response" >> error.log
         fi
         
@@ -28,7 +28,7 @@ jobs:
     - name: Check Microscope Control Service
       run: |
         response=$(curl -s -f https://hypha.aicell.io/reef-imaging/services/mirror-microscope-control-squid-1/hello_world || echo "Service unreachable")
-        if [ "$response" != "Hello world" ]; then
+        if [[ "$response" != "Hello world" && "$response" != "\"Hello world\"" ]]; then
           echo "Microscope Control Service is down: $response" >> error.log
         fi
         
@@ -40,7 +40,7 @@ jobs:
     - name: Check Robotic Arm Control Service
       run: |
         response=$(curl -s -f https://hypha.aicell.io/reef-imaging/services/mirror-robotic-arm-control/hello_world || echo "Service unreachable")
-        if [ "$response" != "Hello world" ]; then
+        if [[ "$response" != "Hello world" && "$response" != "\"Hello world\"" ]]; then
           echo "Robotic Arm Control Service is down: $response" >> error.log
         fi
         
