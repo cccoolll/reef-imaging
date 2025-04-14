@@ -27,12 +27,12 @@ jobs:
 
     - name: Check Microscope Control Service
       run: |
-        response=$(curl -s -f https://hypha.aicell.io/squid-control/services/mirror-microscope-control-squid-1/hello_world || echo "Service unreachable")
+        response=$(curl -s -f https://hypha.aicell.io/reef-imaging/services/mirror-microscope-control-squid-1/hello_world || echo "Service unreachable")
         if [ "$response" != "Hello world" ]; then
           echo "Microscope Control Service is down: $response" >> error.log
         fi
         
-        task_status=$(curl -s -f https://hypha.aicell.io/squid-control/services/mirror-microscope-control-squid-1/get_all_task_status || echo "{}")
+        task_status=$(curl -s -f https://hypha.aicell.io/reef-imaging/services/mirror-microscope-control-squid-1/get_all_task_status || echo "{}")
         if echo "$task_status" | grep -q "failed"; then
           echo "Microscope Control Service has failed tasks" >> error.log
         fi
