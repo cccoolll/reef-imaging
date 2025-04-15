@@ -114,9 +114,7 @@ def extract_date_time_from_path(path):
 async def get_artifact_manager(timeout=CONNECTION_TIMEOUT):
     """Get a new connection to the artifact manager with timeout"""
     try:
-        # Direct import to avoid circular imports
         from hypha_rpc import connect_to_server
-        
         api = await asyncio.wait_for(
             connect_to_server({
                 "name": "test-client", 
@@ -132,6 +130,9 @@ async def get_artifact_manager(timeout=CONNECTION_TIMEOUT):
         return api, artifact_manager
     except asyncio.TimeoutError:
         print(f"Connection timed out after {timeout} seconds")
+        raise
+    except Exception as e:
+        print(f"Error connecting to artifact manager: {e}")
         raise
 
 
@@ -204,6 +205,47 @@ async def upload_single_file(
     return False
 
 
+async def process_batch(batch, artifact_manager, semaphore, session, upload_record):
+    """Process a batch of files with a timeout wrapper"""
+    tasks = []
+    for local_file, relative_path in batch:
+        if relative_path in upload_record["uploaded_files"]:
+            continue
+
+        task = asyncio.create_task(
+            upload_single_file(
+                artifact_manager,
+                DATASET_ALIAS,
+                local_file,
+                relative_path,
+                semaphore,
+                session,
+                upload_record,
+            )
+        )
+        tasks.append((task, local_file, relative_path))
+
+    # Wait for all tasks to complete with a timeout, collect failures
+    failed_uploads = []
+    for task, local_file, relative_path in tasks:
+        try:
+            # Set a reasonable timeout for the entire operation
+            success = await asyncio.wait_for(task, timeout=UPLOAD_TIMEOUT * 2)
+            if not success:
+                failed_uploads.append((local_file, relative_path))
+        except asyncio.TimeoutError:
+            print(f"Task timed out for {relative_path}")
+            # Cancel the task to prevent it from continuing in the background
+            if not task.done():
+                task.cancel()
+            failed_uploads.append((local_file, relative_path))
+        except Exception as e:
+            print(f"Exception in task for {relative_path}: {str(e)}")
+            failed_uploads.append((local_file, relative_path))
+
+    return failed_uploads
+
+
 async def retry_upload_with_new_connections(
     local_file, 
     relative_path, 
@@ -224,23 +266,24 @@ async def retry_upload_with_new_connections(
             await asyncio.sleep(retry_delay)
             retry_delay = min(retry_delay * 2, MAX_RETRY_DELAY)  # Exponential backoff
         
-        # Get a fresh connection for each retry
         api = None
         try:
-            # Create a new connection with timeout
             api, artifact_manager = await get_artifact_manager()
             semaphore = asyncio.Semaphore(1)  # Use 1 for individual retries
             
             async with aiohttp.ClientSession() as session:
-                success = await upload_single_file(
-                    artifact_manager,
-                    DATASET_ALIAS,
-                    local_file,
-                    relative_path,
-                    semaphore,
-                    session,
-                    upload_record
+                task = asyncio.create_task(
+                    upload_single_file(
+                        artifact_manager,
+                        DATASET_ALIAS,
+                        local_file,
+                        relative_path,
+                        semaphore,
+                        session,
+                        upload_record
+                    )
                 )
+                success = await asyncio.wait_for(task, timeout=UPLOAD_TIMEOUT * 2)
                 
                 if success:
                     return True
@@ -249,59 +292,17 @@ async def retry_upload_with_new_connections(
             print(f"Connection timed out during retry {retry_count} for {relative_path}")
         except Exception as e:
             print(f"Connection error during retry {retry_count} for {relative_path}: {str(e)}")
-        
-        # Cleanup connection before retrying
-        if api:
-            try:
-                await asyncio.wait_for(api.close(), timeout=5)
-            except:
-                print(f"Failed to cleanly close API connection for {relative_path}")
+        finally:
+            if api:
+                try:
+                    await asyncio.wait_for(api.disconnect(), timeout=5)
+                except Exception as e:
+                    print(f"Failed to cleanly disconnect API connection for {relative_path}: {e}")
             
         retry_count += 1
     
     print(f"Failed to upload {relative_path} after {retries} attempts")
     return False
-
-
-async def process_batch(batch, artifact_manager, semaphore, session, upload_record):
-    """Process a batch of files with a timeout wrapper"""
-    tasks = []
-    for local_file, relative_path in batch:
-        if relative_path in upload_record["uploaded_files"]:
-            continue
-            
-        task = asyncio.create_task(
-            upload_single_file(
-                artifact_manager,
-                DATASET_ALIAS,
-                local_file,
-                relative_path,
-                semaphore,
-                session,
-                upload_record,
-            )
-        )
-        tasks.append((task, local_file, relative_path))
-    
-    # Wait for all tasks to complete with a timeout, collect failures
-    failed_uploads = []
-    for task, local_file, relative_path in tasks:
-        try:
-            # Set a reasonable timeout for the entire operation
-            success = await asyncio.wait_for(task, timeout=UPLOAD_TIMEOUT * 2)
-            if not success:
-                failed_uploads.append((local_file, relative_path))
-        except asyncio.TimeoutError:
-            print(f"Task timed out for {relative_path}")
-            # Cancel the task to prevent it from continuing in the background
-            if not task.done():
-                task.cancel()
-            failed_uploads.append((local_file, relative_path))
-        except Exception as e:
-            print(f"Exception in task for {relative_path}: {str(e)}")
-            failed_uploads.append((local_file, relative_path))
-    
-    return failed_uploads
 
 
 async def process_folder(folder_path):
@@ -341,13 +342,13 @@ async def process_folder(folder_path):
             print(f"Error putting dataset in staging mode: {e}")
             if "not found" in str(e).lower():
                 print("Dataset not found. It may need to be created first.")
-                # Close the connection
-                await api.close()
+                # disconnect the connection
+                await api.disconnect()
                 return False
         finally:
-            # Close the connection
+            # disconnect the connection
             try:
-                await api.close()
+                await api.disconnect()
             except:
                 pass
     except Exception as e:
@@ -410,11 +411,11 @@ async def process_folder(folder_path):
                 if relative_path not in upload_record["uploaded_files"]:
                     failed_uploads.append((local_file, relative_path))
 
-    # Close the initial connection
+    # disconnect the initial connection
     try:
-        await asyncio.wait_for(api.close(), timeout=10)
+        await asyncio.wait_for(api.disconnect(), timeout=10)
     except:
-        print("Failed to cleanly close API connection")
+        print("Failed to cleanly disconnect API connection")
     
     # 3) Retry failed uploads one by one with fresh connections
     print(f"First pass completed. Retrying {len(failed_uploads)} failed uploads...")
@@ -464,7 +465,7 @@ async def process_folder(folder_path):
         finally:
             if api:
                 try:
-                    await asyncio.wait_for(api.close(), timeout=5)
+                    await asyncio.wait_for(api.disconnect(), timeout=5)
                 except:
                     pass
     
