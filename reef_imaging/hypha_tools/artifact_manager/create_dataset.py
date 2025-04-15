@@ -17,12 +17,12 @@ async def main():
 
     # Add a dataset to the gallery
     dataset_manifest = {
-        "name": "image-map-20250410-treatment",
+        "name": "20250410-treatment",
         "description": "The Image Map of U2OS FUCCI Drug Treatment",
     }
     await artifact_manager.create(
-        parent_id="reef-imaging/image-map-of-u2os-fucci-drug-treatment",
-        alias="image-map-20250410-treatment",
+        parent_id="reef-imaging/u2os-fucci-drug-treatment",
+        alias="20250410-treatment",
         manifest=dataset_manifest,
         version="stage",
         overwrite=True,

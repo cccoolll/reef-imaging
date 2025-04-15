@@ -620,44 +620,51 @@ async def upload_single_file(
 
 
 async def process_batch(batch, artifact_manager, semaphore, session, upload_record):
-    """Process a batch of files with a timeout wrapper"""
-    tasks = []
-    for local_file, relative_path in batch:
-        if relative_path in upload_record["uploaded_files"]:
-            continue
+    """Process a batch of files with a timeout wrapper, retrying the entire batch if any file fails."""
+    while True:  # Keep retrying the batch until all files are successfully uploaded
+        tasks = []
+        for local_file, relative_path in batch:
+            if relative_path in upload_record["uploaded_files"]:
+                continue
 
-        task = asyncio.create_task(
-            upload_single_file(
-                artifact_manager,
-                ARTIFACT_ALIAS,
-                local_file,
-                relative_path,
-                semaphore,
-                session,
-                upload_record,
+            task = asyncio.create_task(
+                upload_single_file(
+                    artifact_manager,
+                    ARTIFACT_ALIAS,
+                    local_file,
+                    relative_path,
+                    semaphore,
+                    session,
+                    upload_record,
+                )
             )
-        )
-        tasks.append((task, local_file, relative_path))
+            tasks.append((task, local_file, relative_path))
 
-    # Wait for all tasks to complete with a timeout, collect failures
-    failed_uploads = []
-    for task, local_file, relative_path in tasks:
-        try:
-            # Set a reasonable timeout for the entire operation
-            success = await asyncio.wait_for(task, timeout=UPLOAD_TIMEOUT * 2)
-            if not success:
+        # Wait for all tasks to complete with a timeout, collect failures
+        failed_uploads = []
+        for task, local_file, relative_path in tasks:
+            try:
+                # Set a reasonable timeout for the entire operation
+                success = await asyncio.wait_for(task, timeout=UPLOAD_TIMEOUT * 2)
+                if not success:
+                    failed_uploads.append((local_file, relative_path))
+            except asyncio.TimeoutError:
+                print(f"Task timed out for {relative_path}")
+                # Cancel the task to prevent it from continuing in the background
+                if not task.done():
+                    task.cancel()
                 failed_uploads.append((local_file, relative_path))
-        except asyncio.TimeoutError:
-            print(f"Task timed out for {relative_path}")
-            # Cancel the task to prevent it from continuing in the background
-            if not task.done():
-                task.cancel()
-            failed_uploads.append((local_file, relative_path))
-        except Exception as e:
-            print(f"Exception in task for {relative_path}: {str(e)}")
-            failed_uploads.append((local_file, relative_path))
+            except Exception as e:
+                print(f"Exception in task for {relative_path}: {str(e)}")
+                failed_uploads.append((local_file, relative_path))
 
-    return failed_uploads
+        if not failed_uploads:
+            # If there are no failed uploads, break the loop and return
+            return []
+
+        print(f"Retrying {len(failed_uploads)} failed uploads in the batch...")
+        # Retry the failed uploads in the next iteration of the loop
+        batch = failed_uploads
 
 
 async def retry_upload_with_new_connections(
@@ -741,16 +748,15 @@ async def upload_zarr_file(zarr_file: str) -> bool:
         
         try:
             # Read the current manifest
-            dataset = await artifact_manager.read(
-                artifact_id=ARTIFACT_ALIAS,
-                silent=True
-            )
-            
+            dataset_manifest = {
+            "name": "image-map-20250410-treatment",
+            "description": "The Image Map of U2OS FUCCI Drug Treatment",
+            }
             # Put the dataset in staging mode
             print(f"Putting dataset {ARTIFACT_ALIAS} in staging mode...")
             await artifact_manager.edit(
                 artifact_id=ARTIFACT_ALIAS,
-                manifest=dataset,  # Preserve the same manifest
+                manifest=dataset_manifest,  # Preserve the same manifest
                 version="stage"    # Put in staging mode
             )
             print("Dataset is now in staging mode")
@@ -808,7 +814,7 @@ async def upload_zarr_file(zarr_file: str) -> bool:
     api, artifact_manager = await get_artifact_manager()
     
     # 2) First attempt to upload files in parallel, but in smaller batches
-    BATCH_SIZE = 20  # Process files in smaller batches to limit potential timeouts
+    BATCH_SIZE = 10  # Process files in smaller batches to limit potential timeouts
     semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
     batches = [to_upload[i:i + BATCH_SIZE] for i in range(0, len(to_upload), BATCH_SIZE)]
     failed_uploads = []
