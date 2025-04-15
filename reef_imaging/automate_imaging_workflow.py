@@ -8,6 +8,7 @@ from datetime import datetime
 import glob
 import threading
 import shutil
+import concurrent.futures
 from typing import List, Optional, Dict, Set
 from queue import Queue
 
@@ -36,12 +37,17 @@ EXPERIMENT_ID = "20250410-fucci-time-lapse-scan"
 FOLDER_PATTERN = f"{EXPERIMENT_ID}_*"
 CHECK_INTERVAL = 300  # Check for new folders every 5 minutes
 
-# Shared queues and state
+# Global state tracking
 raw_upload_queue = Queue()
 stitch_upload_queue = Queue()
 uploaded_raw_folders = set()
 processed_stitch_folders = set()
 lock = threading.Lock()
+stop_threads = False  # Flag to signal threads to stop
+
+# Force parallel processing by making the stitching thread immediately 
+# pick up folders for processing, without waiting for the raw upload to complete
+parallel_processing = True  # Set to True to enable true parallel processing
 
 def get_experiment_folders() -> List[str]:
     """Get all folders matching the experiment ID pattern."""
@@ -101,7 +107,7 @@ def mark_folder_as_processed(folder_path: str, process_type: str):
 async def process_raw_upload(folder_path: str):
     """Process raw imaging data upload for a single folder."""
     folder_name = os.path.basename(folder_path)
-    print(f"\n{'='*80}\nUploading raw data for: {folder_name}\n{'='*80}")
+    print(f"\n{'='*80}\n[RAW UPLOAD] Processing folder: {folder_name}\n{'='*80}")
     
     try:
         # 0) First, put the dataset in staging mode before uploading
@@ -148,10 +154,14 @@ async def process_raw_upload(folder_path: str):
         # 4) Mark folder as processed for raw upload
         mark_folder_as_processed(folder_path, "raw_upload")
         
-        # 5) Add to the stitch queue
-        stitch_upload_queue.put(folder_path)
+        if not parallel_processing:
+            # 5) Add to the stitch queue if not using parallel processing
+            # When using parallel processing, the stitch thread checks for completed
+            # raw uploads independently
+            with lock:
+                stitch_upload_queue.put(folder_path)
         
-        print(f"\nRaw data upload completed for {folder_name}!")
+        print(f"\n[RAW UPLOAD] Completed for {folder_name}!")
         return True
     except Exception as e:
         print(f"Error uploading raw data for {folder_name}: {str(e)}")
@@ -160,7 +170,7 @@ async def process_raw_upload(folder_path: str):
 async def process_stitch_upload(folder_path: str):
     """Process stitching and zarr upload for a single folder."""
     folder_name = os.path.basename(folder_path)
-    print(f"\n{'='*80}\nStitching and uploading zarr for: {folder_name}\n{'='*80}")
+    print(f"\n{'='*80}\n[STITCH WORKER] Processing folder: {folder_name}\n{'='*80}")
     
     try:
         # Step 1: Stitch the tiles using stitch_zarr
@@ -227,7 +237,7 @@ async def process_stitch_upload(folder_path: str):
         # Mark folder as processed for stitching
         mark_folder_as_processed(folder_path, "stitch_process")
         
-        print(f"\nStitching and zarr upload completed for {folder_name}!")
+        print(f"\n[STITCH WORKER] Completed for {folder_name}!")
         return True
     except Exception as e:
         print(f"Error in stitching/zarr upload for {folder_name}: {str(e)}")
@@ -318,84 +328,204 @@ def stitch_zarr_single_folder(folder_path):
                              selected_channel=selected_channel, pyramid_levels=pyramid_levels)
     print(f"Stitching completed for {folder_path}")
 
-async def raw_upload_worker():
-    """Worker thread for processing raw upload queue."""
+# Thread function for raw data uploads
+def raw_upload_thread_func():
+    """Thread function for processing raw upload queue."""
     print("Starting raw upload worker thread")
-    while True:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    while not stop_threads:
         if raw_upload_queue.empty():
-            await asyncio.sleep(10)
+            time.sleep(5)  # Shorter wait time to be more responsive
             continue
         
         folder_path = raw_upload_queue.get()
-        await process_raw_upload(folder_path)
-        raw_upload_queue.task_done()
+        try:
+            # Run the async function in this thread's event loop
+            print(f"[RAW UPLOAD] Starting processing of {os.path.basename(folder_path)}")
+            loop.run_until_complete(process_raw_upload(folder_path))
+            
+            # If parallel processing is enabled, the stitching thread will pick up
+            # folders independently. Otherwise, we add to the stitch queue here.
+            if not parallel_processing:
+                with lock:
+                    if folder_path not in processed_stitch_folders:
+                        print(f"Adding {os.path.basename(folder_path)} to stitch queue")
+                        stitch_upload_queue.put(folder_path)
+                        
+        except Exception as e:
+            print(f"Error in raw upload thread: {str(e)}")
+        finally:
+            raw_upload_queue.task_done()
+    
+    loop.close()
+    print("Raw upload thread stopped")
 
-async def stitch_upload_worker():
-    """Worker thread for processing stitch and upload queue."""
+# Thread function for stitching and zarr uploads
+def stitch_upload_thread_func():
+    """Thread function for processing stitch and zarr upload queue."""
     print("Starting stitch and zarr upload worker thread")
-    while True:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    # When using parallel processing, we check for already processed raw folders
+    # and add them to our queue immediately, rather than waiting for the raw thread
+    if parallel_processing:
+        processed_data = loop.run_until_complete(get_processed_folders_async())
+        with lock:
+            for folder_path in processed_data["raw_uploaded"]:
+                if folder_path not in processed_stitch_folders and folder_path not in list(stitch_upload_queue.queue):
+                    print(f"[STITCH WORKER] Adding {os.path.basename(folder_path)} to stitch queue from previous raw uploads")
+                    stitch_upload_queue.put(folder_path)
+    
+    while not stop_threads:
+        # In parallel mode, we also directly check for newly completed raw uploads
+        if parallel_processing and stitch_upload_queue.empty():
+            try:
+                processed_data = loop.run_until_complete(get_processed_folders_async())
+                with lock:
+                    for folder_path in processed_data["raw_uploaded"]:
+                        if folder_path not in processed_stitch_folders and folder_path not in list(stitch_upload_queue.queue):
+                            print(f"[STITCH WORKER] Adding {os.path.basename(folder_path)} to stitch queue from raw uploads")
+                            stitch_upload_queue.put(folder_path)
+            except Exception as e:
+                print(f"Error checking for new raw uploads: {str(e)}")
+                
         if stitch_upload_queue.empty():
-            await asyncio.sleep(10)
+            time.sleep(5)  # Shorter wait time
             continue
         
         folder_path = stitch_upload_queue.get()
-        await process_stitch_upload(folder_path)
-        stitch_upload_queue.task_done()
-
-async def monitor_folders():
-    """Monitor for new folders and add them to the processing queues."""
-    processed_data = get_processed_folders()
-    uploaded_raw_folders.update(processed_data["raw_uploaded"])
-    processed_stitch_folders.update(processed_data["stitch_processed"])
+        try:
+            # Run the async function in this thread's event loop
+            print(f"[STITCH WORKER] Starting processing of {os.path.basename(folder_path)}")
+            loop.run_until_complete(process_stitch_upload(folder_path))
+        except Exception as e:
+            print(f"Error in stitch upload thread: {str(e)}")
+        finally:
+            stitch_upload_queue.task_done()
     
-    while True:
-        # Get all current folders for the experiment
-        all_folders = get_experiment_folders()
-        
-        if not all_folders:
-            print(f"No folders found matching pattern {FOLDER_PATTERN}")
-            await asyncio.sleep(CHECK_INTERVAL)
-            continue
-        
-        # Skip the latest folder which may still be acquiring data
-        folders_to_process = all_folders[:-1]
-        
-        # Filter out already processed folders for raw upload
+    loop.close()
+    print("Stitch upload thread stopped")
+
+# Monitor thread function
+def monitor_thread_func():
+    """Thread function for monitoring for new folders."""
+    print("Starting folder monitor thread")
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    # Initialize processed folder records
+    processed_data = loop.run_until_complete(get_processed_folders_async())
+    with lock:
+        uploaded_raw_folders.update(processed_data["raw_uploaded"])
+        processed_stitch_folders.update(processed_data["stitch_processed"])
+    
+    while not stop_threads:
+        try:
+            loop.run_until_complete(monitor_folders_once())
+            time.sleep(CHECK_INTERVAL)
+        except Exception as e:
+            print(f"Error in monitor thread: {str(e)}")
+            time.sleep(60)  # Shorter wait on error
+    
+    loop.close()
+    print("Monitor thread stopped")
+
+async def get_processed_folders_async() -> Dict[str, Set[str]]:
+    """Async version of get_processed_folders."""
+    result = {
+        "raw_uploaded": set(),
+        "stitch_processed": set()
+    }
+    
+    # Raw upload record
+    raw_upload_file = "raw_upload_record.txt"
+    if os.path.exists(raw_upload_file):
+        with open(raw_upload_file, "r") as f:
+            result["raw_uploaded"] = set(line.strip() for line in f if line.strip())
+    
+    # Stitch process record
+    stitch_process_file = "stitch_process_record.txt"
+    if os.path.exists(stitch_process_file):
+        with open(stitch_process_file, "r") as f:
+            result["stitch_processed"] = set(line.strip() for line in f if line.strip())
+    
+    return result
+
+async def monitor_folders_once():
+    """Monitor for new folders and add them to the processing queues (single iteration)."""
+    # Get all current folders for the experiment
+    all_folders = get_experiment_folders()
+    
+    if not all_folders:
+        print(f"No folders found matching pattern {FOLDER_PATTERN}")
+        return
+    
+    # Skip the latest folder which may still be acquiring data
+    folders_to_process = all_folders[:-1]
+    
+    # Filter out already processed folders for raw upload
+    with lock:
         raw_unprocessed = [f for f in folders_to_process if f not in uploaded_raw_folders]
-        
-        if raw_unprocessed:
-            print(f"Found {len(raw_unprocessed)} folder(s) for raw upload")
-            for folder_path in raw_unprocessed:
+    
+    if raw_unprocessed:
+        print(f"Found {len(raw_unprocessed)} folder(s) for raw upload")
+        for folder_path in raw_unprocessed:
+            with lock:
                 if folder_path not in uploaded_raw_folders:
                     print(f"Adding {os.path.basename(folder_path)} to raw upload queue")
                     raw_upload_queue.put(folder_path)
                     uploaded_raw_folders.add(folder_path)
-        
-        # For completed raw uploads that haven't been stitched yet
-        for folder_path in processed_data["raw_uploaded"]:
-            if folder_path not in processed_stitch_folders and folder_path not in stitch_upload_queue.queue:
+    
+    # For completed raw uploads that haven't been stitched yet
+    processed_data = await get_processed_folders_async()
+    for folder_path in processed_data["raw_uploaded"]:
+        with lock:
+            if folder_path not in processed_stitch_folders and folder_path not in list(stitch_upload_queue.queue):
                 print(f"Adding {os.path.basename(folder_path)} to stitch queue from previous raw uploads")
                 stitch_upload_queue.put(folder_path)
-        
-        print(f"Queues: Raw upload ({raw_upload_queue.qsize()}), Stitch upload ({stitch_upload_queue.qsize()})")
-        print(f"Next check in {CHECK_INTERVAL//60} minutes...")
-        await asyncio.sleep(CHECK_INTERVAL)
-
-async def run_workers():
-    """Start worker tasks for each processing thread."""
-    # Create the tasks
-    raw_worker = asyncio.create_task(raw_upload_worker())
-    stitch_worker = asyncio.create_task(stitch_upload_worker())
-    monitor = asyncio.create_task(monitor_folders())
     
-    # Wait for all tasks to complete (they run indefinitely)
-    await asyncio.gather(raw_worker, stitch_worker, monitor)
+    # Report queue status
+    print(f"Queues: Raw upload ({raw_upload_queue.qsize()}), Stitch upload ({stitch_upload_queue.qsize()})")
+    print(f"Next check in {CHECK_INTERVAL//60} minutes...")
+
+def start_worker_threads():
+    """Start the worker threads for parallel processing."""
+    global stop_threads
+    stop_threads = False
+    
+    # Create threads
+    raw_thread = threading.Thread(target=raw_upload_thread_func, daemon=True)
+    stitch_thread = threading.Thread(target=stitch_upload_thread_func, daemon=True)
+    monitor_thread = threading.Thread(target=monitor_thread_func, daemon=True)
+    
+    # Start threads
+    raw_thread.start()
+    stitch_thread.start()
+    monitor_thread.start()
+    
+    return [raw_thread, stitch_thread, monitor_thread]
+
+def stop_worker_threads(threads):
+    """Stop the worker threads."""
+    global stop_threads
+    stop_threads = True
+    
+    # Wait for threads to finish
+    for thread in threads:
+        if thread.is_alive():
+            thread.join(timeout=5)
+    
+    print("All worker threads stopped")
 
 async def main():
     """Main entry point for the script."""
     print(f"Automated Imaging Workflow")
     print(f"Experiment ID: {EXPERIMENT_ID}")
     print(f"Data root: {DATA_ROOT}")
+    print(f"Parallel processing: {'Enabled' if parallel_processing else 'Disabled'}")
     
     # Get all experiment folders
     all_folders = get_experiment_folders()
@@ -433,20 +563,42 @@ async def main():
     start_index = all_folders.index(selected_folder)
     
     # Process the selected folder and any subsequent folders (except the latest one)
-    processed_data = get_processed_folders()
+    processed_data = await get_processed_folders_async()
     
     # Initialize queues for folders to process
     for folder_path in all_folders[start_index:-1]:
         if folder_path not in processed_data["raw_uploaded"]:
             print(f"Adding {os.path.basename(folder_path)} to raw upload queue")
             raw_upload_queue.put(folder_path)
-        elif folder_path not in processed_data["stitch_processed"]:
-            print(f"Adding {os.path.basename(folder_path)} to stitch upload queue")
+            
+        # In parallel mode, we also add to stitch queue if raw is already done
+        if parallel_processing and folder_path in processed_data["raw_uploaded"] and folder_path not in processed_data["stitch_processed"]:
+            print(f"Adding {os.path.basename(folder_path)} to stitch upload queue (parallel mode)")
             stitch_upload_queue.put(folder_path)
     
-    # Start processing threads
-    print("\nStarting processing threads and monitoring for new folders...\n")
-    await run_workers()
+    # Start worker threads for parallel processing
+    print("\nStarting worker threads for true parallel processing...\n")
+    threads = start_worker_threads()
+    
+    try:
+        # Keep the main thread running to handle user input
+        while True:
+            # Check if all threads are still alive
+            if not all(thread.is_alive() for thread in threads):
+                print("One of the worker threads stopped unexpectedly, restarting...")
+                stop_worker_threads(threads)
+                threads = start_worker_threads()
+            
+            # Status report
+            print(f"\nStatus: Raw upload queue: {raw_upload_queue.qsize()}, Stitch queue: {stitch_upload_queue.qsize()}")
+            print(f"Raw processed: {len(processed_data['raw_uploaded'])}, Stitch processed: {len(processed_data['stitch_processed'])}")
+            
+            # Sleep for a bit to avoid busy waiting
+            await asyncio.sleep(60)
+    except KeyboardInterrupt:
+        print("\nReceived keyboard interrupt, stopping worker threads...")
+        stop_worker_threads(threads)
+        print("Exiting.")
 
 if __name__ == "__main__":
     asyncio.run(main()) 
