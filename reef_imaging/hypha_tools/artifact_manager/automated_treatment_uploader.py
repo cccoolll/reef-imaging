@@ -303,6 +303,10 @@ async def process_folder(folder_path):
     # Load upload record
     upload_record = load_upload_record()
     
+    # Initialize per-folder tracking
+    folder_total_files = 0
+    folder_completed_files = 0
+    
     # 0) Put the dataset in staging mode
     try:
         api, artifact_manager = await get_artifact_manager()
@@ -359,10 +363,14 @@ async def process_folder(folder_path):
             relative_path = os.path.join(folder_name, rel_path)
             
             to_upload.append((local_file, relative_path))
+            folder_total_files += 1
 
-    # Update total files count
-    upload_record["total_files"] = len(to_upload)
+    # Update total files count while preserving existing completed files
+    upload_record["total_files"] = len(to_upload) + upload_record.get("total_files", 0)
     save_upload_record(upload_record)
+    
+    print(f"\nStarting upload for folder: {folder_name}")
+    print(f"Files to upload in this folder: {folder_total_files}")
     
     # Connect to Artifact Manager
     api, artifact_manager = await get_artifact_manager()
@@ -455,7 +463,8 @@ async def process_folder(folder_path):
         return False
         
     print(
-        f"Total files uploaded: {upload_record['completed_files']}/{upload_record['total_files']}"
+        f"Folder upload complete: {folder_completed_files}/{folder_total_files} files uploaded in {folder_name}\n"
+        f"Total files uploaded across all folders: {upload_record['completed_files']}/{upload_record['total_files']}"
     )
     return True
 
