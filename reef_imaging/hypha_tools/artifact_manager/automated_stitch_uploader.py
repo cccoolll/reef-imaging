@@ -565,47 +565,57 @@ async def upload_single_file(
         print(f"Skipping already uploaded file: {relative_path}")
         return True
 
-    try:
-        async with semaphore:
-            # 1) Get the presigned URL with timeout
-            try:
-                put_url = await asyncio.wait_for(
-                    artifact_manager.put_file(artifact_alias, file_path=relative_path),
-                    timeout=CONNECTION_TIMEOUT
+    retry_count = 0
+    retry_delay = INITIAL_RETRY_DELAY
+
+    while retry_count < MAX_RETRIES:
+        try:
+            async with semaphore:
+                # 1) Get the presigned URL with timeout
+                try:
+                    put_url = await asyncio.wait_for(
+                        artifact_manager.put_file(artifact_alias, file_path=relative_path),
+                        timeout=CONNECTION_TIMEOUT
+                    )
+                except asyncio.TimeoutError:
+                    print(f"Timeout getting presigned URL for {relative_path}")
+                    retry_count += 1
+                    await asyncio.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 2, MAX_RETRY_DELAY)
+                    continue
+
+                # 2) Use aiohttp session to PUT the data with timeout
+                try:
+                    with open(local_file, "rb") as file_data:
+                        async with asyncio.timeout(UPLOAD_TIMEOUT):
+                            async with session.put(put_url, data=file_data) as resp:
+                                if resp.status != 200:
+                                    raise RuntimeError(
+                                        f"File upload failed for {local_file}, status={resp.status}"
+                                    )
+                except asyncio.TimeoutError:
+                    print(f"Upload timed out after {UPLOAD_TIMEOUT} seconds for {relative_path}")
+                    return False
+
+                # 3) Record successful upload
+                upload_record["uploaded_files"].add(relative_path)
+                upload_record["completed_files"] += 1
+
+                # 4) Save progress periodically (every 10 files)
+                if upload_record["completed_files"] % 10 == 0:
+                    save_upload_record(upload_record)
+
+                print(
+                    f"Uploaded file: {relative_path} ({upload_record['completed_files']}/{upload_record['total_files']})"
                 )
-            except asyncio.TimeoutError:
-                print(f"Timeout getting presigned URL for {relative_path}")
-                return False
+                return True
 
-            # 2) Use aiohttp session to PUT the data with timeout
-            try:
-                with open(local_file, "rb") as file_data:
-                    async with asyncio.timeout(UPLOAD_TIMEOUT):
-                        async with session.put(put_url, data=file_data) as resp:
-                            if resp.status != 200:
-                                raise RuntimeError(
-                                    f"File upload failed for {local_file}, status={resp.status}"
-                                )
-            except asyncio.TimeoutError:
-                print(f"Upload timed out after {UPLOAD_TIMEOUT} seconds for {relative_path}")
-                return False
+        except Exception as e:
+            print(f"Error uploading {relative_path}: {str(e)}")
+            return False
 
-            # 3) Record successful upload
-            upload_record["uploaded_files"].add(relative_path)
-            upload_record["completed_files"] += 1
-
-            # 4) Save progress periodically (every 10 files)
-            if upload_record["completed_files"] % 10 == 0:
-                save_upload_record(upload_record)
-
-            print(
-                f"Uploaded file: {relative_path} ({upload_record['completed_files']}/{upload_record['total_files']})"
-            )
-            return True
-
-    except Exception as e:
-        print(f"Error uploading {relative_path}: {str(e)}")
-        return False
+    print(f"Failed to upload {relative_path} after {MAX_RETRIES} attempts")
+    return False
 
 
 async def retry_upload_with_new_connections(
@@ -894,21 +904,32 @@ async def process_folder(folder_name: str) -> bool:
     """Process a single folder through stitching, uploading, and cleanup."""
     folder_path = os.path.join(BASE_DIR, folder_name)
     
-    # Step 1: Stitch the folder
-    print(f"\nStarting stitching process for folder: {folder_name}")
-    stitch_success = stitch_folder(folder_path)
-    if not stitch_success:
-        print(f"Failed to stitch folder: {folder_name}")
-        return False
+    # Step 1: Check for .done file
+    folder_datetime = extract_datetime_from_folder(folder_name)
+    zarr_filename = f"{folder_datetime}.zarr" if folder_datetime else f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.zarr"
+    done_file_path = os.path.join(STITCHED_DIR, f"{zarr_filename}.done")
     
-    # Step 2: Get the stitched zarr file
+    if os.path.exists(done_file_path):
+        print(f".done file exists for {zarr_filename}, skipping stitching.")
+    else:
+        # Step 2: Stitch the folder
+        print(f"\nStarting stitching process for folder: {folder_name}")
+        stitch_success = stitch_folder(folder_path)
+        if not stitch_success:
+            print(f"Failed to stitch folder: {folder_name}")
+            return False
+        
+        # Create .done file after successful stitching
+        with open(done_file_path, 'w') as f:
+            f.write("Stitching completed.")
+    
+    # Step 3: Get the stitched zarr file
     zarr_files = get_zarr_files()
     if not zarr_files:
         print(f"No zarr files were created from stitching folder: {folder_name}")
         return False
     
     # Find the matching zarr file for this folder
-    folder_datetime = extract_datetime_from_folder(folder_name)
     matching_zarr = None
     
     if folder_datetime:
@@ -929,14 +950,14 @@ async def process_folder(folder_name: str) -> bool:
     zarr_file = matching_zarr[0]
     print(f"Found matching zarr file: {zarr_file}")
     
-    # Step 3: Upload the zarr file
+    # Step 4: Upload the zarr file
     print(f"Starting upload process for zarr file: {zarr_file}")
     upload_success = await upload_zarr_file(zarr_file)
     if not upload_success:
         print(f"Failed to upload zarr file: {zarr_file}")
         return False
     
-    # Step 4: Clean up the zarr file
+    # Step 5: Clean up the zarr file
     print(f"Cleaning up zarr file: {zarr_file}")
     cleanup_zarr_file(zarr_file)
     

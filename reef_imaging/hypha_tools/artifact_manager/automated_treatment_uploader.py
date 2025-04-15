@@ -151,47 +151,57 @@ async def upload_single_file(
     if relative_path in upload_record["uploaded_files"]:
         return True
 
-    try:
-        async with semaphore:
-            # 1) Get the presigned URL with timeout
-            try:
-                put_url = await asyncio.wait_for(
-                    artifact_manager.put_file(artifact_alias, file_path=relative_path),
-                    timeout=CONNECTION_TIMEOUT
+    retry_count = 0
+    retry_delay = INITIAL_RETRY_DELAY
+
+    while retry_count < MAX_RETRIES:
+        try:
+            async with semaphore:
+                # 1) Get the presigned URL with timeout
+                try:
+                    put_url = await asyncio.wait_for(
+                        artifact_manager.put_file(artifact_alias, file_path=relative_path),
+                        timeout=CONNECTION_TIMEOUT
+                    )
+                except asyncio.TimeoutError:
+                    print(f"Timeout getting presigned URL for {relative_path}")
+                    retry_count += 1
+                    await asyncio.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 2, MAX_RETRY_DELAY)
+                    continue
+
+                # 2) Use aiohttp session to PUT the data with timeout
+                try:
+                    with open(local_file, "rb") as file_data:
+                        async with asyncio.timeout(UPLOAD_TIMEOUT):
+                            async with session.put(put_url, data=file_data) as resp:
+                                if resp.status != 200:
+                                    raise RuntimeError(
+                                        f"File upload failed for {local_file}, status={resp.status}"
+                                    )
+                except asyncio.TimeoutError:
+                    print(f"Upload timed out after {UPLOAD_TIMEOUT} seconds for {relative_path}")
+                    return False
+
+                # 3) Record successful upload
+                upload_record["uploaded_files"].add(relative_path)
+                upload_record["completed_files"] += 1
+
+                # 4) Save progress periodically (every 10 files)
+                if upload_record["completed_files"] % 10 == 0:
+                    save_upload_record(upload_record)
+
+                print(
+                    f"Uploaded file: {relative_path} ({upload_record['completed_files']}/{upload_record['total_files']})"
                 )
-            except asyncio.TimeoutError:
-                print(f"Timeout getting presigned URL for {relative_path}")
-                return False
+                return True
 
-            # 2) Use aiohttp session to PUT the data with timeout
-            try:
-                with open(local_file, "rb") as file_data:
-                    async with asyncio.timeout(UPLOAD_TIMEOUT):
-                        async with session.put(put_url, data=file_data) as resp:
-                            if resp.status != 200:
-                                raise RuntimeError(
-                                    f"File upload failed for {local_file}, status={resp.status}"
-                                )
-            except asyncio.TimeoutError:
-                print(f"Upload timed out after {UPLOAD_TIMEOUT} seconds for {relative_path}")
-                return False
+        except Exception as e:
+            print(f"Error uploading {relative_path}: {str(e)}")
+            return False
 
-            # 3) Record successful upload
-            upload_record["uploaded_files"].add(relative_path)
-            upload_record["completed_files"] += 1
-
-            # 4) Save progress periodically (every 10 files)
-            if upload_record["completed_files"] % 10 == 0:
-                save_upload_record(upload_record)
-
-            print(
-                f"Uploaded file: {relative_path} ({upload_record['completed_files']}/{upload_record['total_files']})"
-            )
-            return True
-
-    except Exception as e:
-        print(f"Error uploading {relative_path}: {str(e)}")
-        return False
+    print(f"Failed to upload {relative_path} after {MAX_RETRIES} attempts")
+    return False
 
 
 async def retry_upload_with_new_connections(
