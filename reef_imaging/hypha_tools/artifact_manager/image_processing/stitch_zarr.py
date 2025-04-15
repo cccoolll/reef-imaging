@@ -412,7 +412,8 @@ def main():
         # Calculate appropriate number of pyramid levels
         max_dimension = max(canvas_width, canvas_height)
         max_levels = int(np.floor(np.log2(max_dimension)) // 2)  # Divide by 2 since we use 4^level
-        pyramid_levels = min(max_levels, 9)  # Limit to 9 levels or less
+        print(f"max_levels: {max_levels}")
+        pyramid_levels = 6
         print(f"Using {pyramid_levels} pyramid levels for {canvas_width}x{canvas_height} canvas")
         
         # Parse image filenames and get unique channels
