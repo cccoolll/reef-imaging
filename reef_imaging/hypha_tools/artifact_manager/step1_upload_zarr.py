@@ -366,4 +366,4 @@ if __name__ == "__main__":
     asyncio.run(main())
 
 # Created/Modified files during execution:
-print(["step1_upload_zarr.py", "upload_record.json"])
+print(["step1_upload_zarr.py", "zarr_upload_record.json"])
