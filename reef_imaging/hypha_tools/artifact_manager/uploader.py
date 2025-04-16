@@ -184,7 +184,7 @@ class ArtifactUploader:
                         local_file,
                         relative_path,
                         session,
-                        max_retries=1  # Only try once with this connection
+                        max_retries=10 
                     )
                     
                     if success:
@@ -247,125 +247,34 @@ class ArtifactUploader:
         
         return failed_uploads
     
-    async def upload_zarr_files(self, zarr_paths: List[str]) -> bool:
-        """Upload zarr files to the artifact manager"""
-        # 1) Prepare a list of (local_file, relative_path) to upload
+    async def upload_zarr_files(self, file_paths: List[str]) -> bool:
+        """Upload files to the artifact manager"""
+        # Prepare a list of (local_file, relative_path) to upload
         to_upload = []
-        
-        for zarr_path in zarr_paths:
-            # Extract the folder name without .zarr extension to use as the top-level directory
-            folder_name = os.path.basename(zarr_path).replace('.zarr', '')
-            
-            # Walk through the zarr directory
-            for root_dir, _, files in os.walk(zarr_path):
-                # Skip metadata files at the root level, we only want channel directories
-                rel_dir = os.path.relpath(root_dir, zarr_path)
-                if rel_dir == '.':
-                    continue
-                    
-                # Collect files
-                for filename in files:
-                    local_file = os.path.join(root_dir, filename)
-                    
-                    # Create a new relative path with folder_name as the top directory
-                    # and maintaining the internal structure (channel/scale/chunks)
-                    internal_path = os.path.relpath(root_dir, zarr_path)
-                    relative_path = os.path.join(folder_name, internal_path, filename)
-                    
-                    to_upload.append((local_file, relative_path))
+
+        for file_path in file_paths:
+            # Use the file path directly
+            local_file = file_path
+            relative_path = os.path.basename(file_path)  # Adjust as needed
+
+            to_upload.append((local_file, relative_path))
 
         # Update total files count
         self.upload_record.set_total_files(len(to_upload))
-        
-        # 2) First attempt to upload files in parallel batches
-        BATCH_SIZE = 20  # Process files in smaller batches to limit potential timeouts
-        batches = [to_upload[i:i + BATCH_SIZE] for i in range(0, len(to_upload), BATCH_SIZE)]
-        all_failed_uploads = []
-        
-        print(f"Starting upload of {len(to_upload)} files in {len(batches)} batches")
-        
-        # Process each batch with a fresh session
-        for i, batch in enumerate(batches):
-            # Ensure connection before each batch
-            connection_good = await self.ensure_connected()
-            if not connection_good:
-                print(f"Failed to establish connection for batch {i+1}, retrying...")
-                await asyncio.sleep(5)
-                await self.connection.disconnect()
-                connection_good = await self.ensure_connected()
-                if not connection_good:
-                    print(f"Still couldn't connect for batch {i+1}, adding files to retry list")
-                    all_failed_uploads.extend(batch)
-                    continue
-                
-            print(f"Processing batch {i+1}/{len(batches)} ({len(batch)} files)")
-            try:
-                # Use a fresh session for each batch
-                async with aiohttp.ClientSession() as session:
-                    batch_failures = await self.process_batch(batch, session, file_retries=3)
-                    all_failed_uploads.extend(batch_failures)
-                    
-                # Save progress after each batch
-                self.upload_record.save()
-                
-            except Exception as e:
-                print(f"Error processing batch {i+1}: {str(e)}")
-                traceback.print_exc()
-                # If a batch fails entirely, retry each file individually later
-                all_failed_uploads.extend(batch)
-                
-                # Try to reset the connection
-                try:
-                    await self.connection.disconnect()
-                    await asyncio.sleep(5)  # Brief pause before reconnecting
-                    await self.connection.connect()
-                except:
-                    pass
-        
-        # 3) Deep retry for failed uploads, one by one with fresh connections
-        if all_failed_uploads:
-            print(f"First pass completed. Deep retrying {len(all_failed_uploads)} failed uploads...")
-            
-            # Process retries in smaller groups to avoid overloading
-            retry_batch_size = 5
-            for i in range(0, len(all_failed_uploads), retry_batch_size):
-                retry_batch = all_failed_uploads[i:i + retry_batch_size]
-                print(f"Deep retry batch {i//retry_batch_size + 1}/{(len(all_failed_uploads)-1)//retry_batch_size + 1}")
-                
-                # Process each file with its own dedicated connection
-                retry_tasks = []
-                
-                for local_file, relative_path in retry_batch:
-                    task = asyncio.create_task(
-                        self.retry_upload_with_new_connection(
-                            local_file, 
-                            relative_path
-                        )
-                    )
-                    retry_tasks.append(task)
-                
-                # Wait for this batch of retries to complete
-                await asyncio.gather(*retry_tasks)
-                
-                # Save progress after each retry batch
-                self.upload_record.save()
-        
-        # 4) Save final record
+
+        # Use a fresh session for uploading files
+        async with aiohttp.ClientSession() as session:
+            for local_file, relative_path in to_upload:
+                success = await self.upload_single_file(local_file, relative_path, session, max_retries=10)
+                if not success:
+                    print(f"Failed to upload file: {local_file}")
+                    return False
+
+        # Save final record
         self.upload_record.save()
-        
-        # Count remaining failures
-        remaining = len(to_upload) - self.upload_record.completed_files
-        success_rate = (self.upload_record.completed_files / len(to_upload)) * 100 if len(to_upload) > 0 else 0
-        
-        print(
-            f"Upload complete: {self.upload_record.completed_files}/{len(to_upload)} files uploaded ({success_rate:.1f}%)"
-        )
-        
-        if remaining > 0:
-            print(f"Warning: {remaining} files could not be uploaded after all retries")
-            
-        # Consider success if we uploaded at least 99,9% of files
-        return success_rate >= 99.9
+
+        # Consider success if all files were uploaded
+        return True
     
     async def upload_treatment_data(self, source_dirs: List[str]) -> bool:
         """Upload treatment data files to the artifact manager"""
@@ -380,7 +289,9 @@ class ArtifactUploader:
             
             # Walk through the directory structure
             for root, _, files in os.walk(source_dir):
+                print(f"Walking through: {root}")  # Debugging output
                 for file in files:
+                    print(f"Found file: {file}")  # Debugging output
                     local_file = os.path.join(root, file)
                     
                     # Calculate the relative path within the source directory
@@ -399,95 +310,19 @@ class ArtifactUploader:
         # Update total files count
         self.upload_record.set_total_files(len(to_upload))
         
-        # Process files in smaller batches to limit potential timeouts
-        BATCH_SIZE = 20
-        batches = [to_upload[i:i + BATCH_SIZE] for i in range(0, len(to_upload), BATCH_SIZE)]
-        all_failed_uploads = []
-        
-        print(f"Starting upload of {len(to_upload)} files in {len(batches)} batches")
-        
-        # Process each batch with a fresh session
-        for i, batch in enumerate(batches):
-            # Ensure connection before each batch
-            connection_good = await self.ensure_connected()
-            if not connection_good:
-                print(f"Failed to establish connection for batch {i+1}, retrying...")
-                await asyncio.sleep(5)
-                await self.connection.disconnect()
-                connection_good = await self.ensure_connected()
-                if not connection_good:
-                    print(f"Still couldn't connect for batch {i+1}, adding files to retry list")
-                    all_failed_uploads.extend(batch)
-                    continue
-                
-            print(f"Processing batch {i+1}/{len(batches)} ({len(batch)} files)")
-            try:
-                # Use a fresh session for each batch
-                async with aiohttp.ClientSession() as session:
-                    batch_failures = await self.process_batch(batch, session, file_retries=3)
-                    all_failed_uploads.extend(batch_failures)
-                    
-                # Save progress after each batch
-                self.upload_record.save()
-                
-            except Exception as e:
-                print(f"Error processing batch {i+1}: {str(e)}")
-                traceback.print_exc()
-                # If a batch fails entirely, retry each file individually later
-                all_failed_uploads.extend(batch)
-                
-                # Try to reset the connection
-                try:
-                    await self.connection.disconnect()
-                    await asyncio.sleep(5)  # Brief pause before reconnecting
-                    await self.connection.connect()
-                except:
-                    pass
-        
-        # Deep retry for failed uploads, one by one with fresh connections
-        if all_failed_uploads:
-            print(f"First pass completed. Deep retrying {len(all_failed_uploads)} failed uploads...")
-            
-            # Process retries in smaller groups to avoid overloading
-            retry_batch_size = 5
-            for i in range(0, len(all_failed_uploads), retry_batch_size):
-                retry_batch = all_failed_uploads[i:i + retry_batch_size]
-                print(f"Deep retry batch {i//retry_batch_size + 1}/{(len(all_failed_uploads)-1)//retry_batch_size + 1}")
-                
-                # Process each file with its own dedicated connection
-                retry_tasks = []
-                
-                for local_file, relative_path in retry_batch:
-                    task = asyncio.create_task(
-                        self.retry_upload_with_new_connection(
-                            local_file, 
-                            relative_path
-                        )
-                    )
-                    retry_tasks.append(task)
-                
-                # Wait for this batch of retries to complete
-                await asyncio.gather(*retry_tasks)
-                
-                # Save progress after each retry batch
-                self.upload_record.save()
+        # Use a fresh session for uploading files
+        async with aiohttp.ClientSession() as session:
+            for local_file, relative_path in to_upload:
+                success = await self.upload_single_file(local_file, relative_path, session)
+                if not success:
+                    print(f"Failed to upload file: {local_file}")
+                    return False
         
         # Save final record
         self.upload_record.save()
         
-        # Count remaining failures
-        remaining = len(to_upload) - self.upload_record.completed_files
-        success_rate = (self.upload_record.completed_files / len(to_upload)) * 100 if len(to_upload) > 0 else 0
-        
-        print(
-            f"Upload complete: {self.upload_record.completed_files}/{len(to_upload)} files uploaded ({success_rate:.1f}%)"
-        )
-        
-        if remaining > 0:
-            print(f"Warning: {remaining} files could not be uploaded after all retries")
-            
-        # Consider success if we uploaded at least 99,9% of files
-        return success_rate >= 99.9
+        # Consider success if all files were uploaded
+        return True
 
 async def upload_zarr_example() -> None:
     """Example of uploading zarr files"""
