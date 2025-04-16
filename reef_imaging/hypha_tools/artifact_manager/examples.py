@@ -38,7 +38,7 @@ async def create_gallery_example() -> None:
             parent_id="reef-imaging/image-map-of-u2os-fucci-drug-treatment"
         )
     finally:
-        await gallery_manager.connection.close()
+        await gallery_manager.connection.disconnect()
 
 
 async def upload_zarr_example() -> None:
@@ -60,7 +60,7 @@ async def upload_zarr_example() -> None:
         # Commit the dataset if all files were uploaded successfully
         gallery_manager = GalleryManager()
         await gallery_manager.commit_dataset("image-map-20250410-treatment")
-        await gallery_manager.connection.close()
+        await gallery_manager.connection.disconnect()
 
 
 async def upload_treatment_example() -> None:
@@ -82,7 +82,7 @@ async def upload_treatment_example() -> None:
         # Commit the dataset if all files were uploaded successfully
         gallery_manager = GalleryManager()
         await gallery_manager.commit_dataset("20250410-treatment")
-        await gallery_manager.connection.close()
+        await gallery_manager.connection.disconnect()
 
 
 def stitch_images_example() -> None:

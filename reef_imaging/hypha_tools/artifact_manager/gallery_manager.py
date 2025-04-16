@@ -110,7 +110,7 @@ async def create_gallery_example() -> None:
             parent_id="reef-imaging/image-map-of-u2os-fucci-drug-treatment"
         )
     finally:
-        await gallery_manager.connection.close()
+        await gallery_manager.connection.disconnect()
 
 if __name__ == "__main__":
     asyncio.run(create_gallery_example()) 

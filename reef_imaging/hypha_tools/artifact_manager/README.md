@@ -41,7 +41,7 @@ async def create_gallery():
             parent_id="my-gallery"
         )
     finally:
-        await gallery_manager.connection.close()
+        await gallery_manager.connection.disconnect()
 
 # Run the async function
 asyncio.run(create_gallery())

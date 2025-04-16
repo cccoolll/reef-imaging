@@ -101,20 +101,20 @@ class HyphaConnection:
             print(f"Connection timed out after {timeout} seconds")
             raise
     
-    async def close(self, timeout: int = 5) -> None:
-        """Close the connection to the Hypha server"""
+    async def disconnect(self, timeout: int = 5) -> None:
+        """disconnect the connection to the Hypha server"""
         if self.api:
             try:
-                await asyncio.wait_for(self.api.close(), timeout=timeout)
+                await asyncio.wait_for(self.api.disconnect(), timeout=timeout)
             except Exception as e:
-                print(f"Failed to cleanly close API connection: {e}")
+                print(f"Failed to cleanly disconnect API connection: {e}")
             finally:
                 self.api = None
                 self.artifact_manager = None
     
     async def reconnect(self, timeout: int = Config.CONNECTION_TIMEOUT) -> None:
         """Reconnect to the Hypha server"""
-        await self.close()
+        await self.disconnect()
         await self.connect(timeout=timeout)
 
 async def get_artifact_manager() -> Tuple[Any, Any]:

@@ -182,7 +182,7 @@ async def retry_upload_with_new_connections(
         # Cleanup connection before retrying
         if api:
             try:
-                await asyncio.wait_for(api.close(), timeout=5)
+                await asyncio.wait_for(api.disconnect(), timeout=5)
             except:
                 print(f"Failed to cleanly close API connection for {relative_path}")
             
@@ -298,7 +298,7 @@ async def main():
 
     # Close the initial connection
     try:
-        await asyncio.wait_for(api.close(), timeout=10)
+        await asyncio.wait_for(api.disconnect(), timeout=10)
     except:
         print("Failed to cleanly close API connection")
     
@@ -350,7 +350,7 @@ async def main():
         finally:
             if api:
                 try:
-                    await asyncio.wait_for(api.close(), timeout=5)
+                    await asyncio.wait_for(api.disconnect(), timeout=5)
                 except:
                     pass
     

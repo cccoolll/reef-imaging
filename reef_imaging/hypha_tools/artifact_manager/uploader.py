@@ -155,7 +155,7 @@ class ArtifactUploader:
             
             # Cleanup connection before retrying
             try:
-                await conn.close()
+                await conn.disconnect()
             except:
                 pass
                 
@@ -260,7 +260,7 @@ class ArtifactUploader:
 
         # Close the initial connection
         try:
-            await self.connection.close()
+            await self.connection.disconnect()
         except:
             print("Failed to cleanly close API connection")
         
@@ -351,7 +351,7 @@ class ArtifactUploader:
         
         # Close the initial connection
         try:
-            await self.connection.close()
+            await self.connection.disconnect()
         except:
             print("Failed to cleanly close API connection")
         
@@ -409,7 +409,7 @@ async def upload_zarr_example() -> None:
         from .gallery_manager import GalleryManager
         gallery_manager = GalleryManager()
         await gallery_manager.commit_dataset("image-map-20250410-treatment")
-        await gallery_manager.connection.close()
+        await gallery_manager.connection.disconnect()
 
 async def upload_treatment_example() -> None:
     """Example of uploading treatment data"""
@@ -431,7 +431,7 @@ async def upload_treatment_example() -> None:
         from .gallery_manager import GalleryManager
         gallery_manager = GalleryManager()
         await gallery_manager.commit_dataset("20250410-treatment")
-        await gallery_manager.connection.close()
+        await gallery_manager.connection.disconnect()
 
 if __name__ == "__main__":
     # Choose which example to run
