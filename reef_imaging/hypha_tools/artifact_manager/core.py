@@ -19,7 +19,7 @@ class Config:
     INITIAL_RETRY_DELAY = 5  # Initial retry delay in seconds
     MAX_RETRY_DELAY = 60  # Maximum retry delay in seconds
     CONNECTION_TIMEOUT = 30  # Timeout for API connections in seconds
-    UPLOAD_TIMEOUT = 120  # Timeout for file uploads in seconds
+    UPLOAD_TIMEOUT = 20  # Timeout for file uploads in seconds
 
 class UploadRecord:
     """Manages the record of uploaded files"""
@@ -85,6 +85,11 @@ class HyphaConnection:
     async def connect(self, timeout: int = Config.CONNECTION_TIMEOUT) -> None:
         """Connect to the Hypha server"""
         try:
+            # First make sure we disconnect any existing connection
+            if self.api:
+                await self.disconnect()
+                
+            print(f"Connecting to {self.server_url}")
             self.api = await asyncio.wait_for(
                 connect_to_server({
                     "name": "reef-client", 
@@ -97,20 +102,37 @@ class HyphaConnection:
                 self.api.get_service("public/artifact-manager"),
                 timeout=timeout
             )
+            print("Connected successfully")
         except asyncio.TimeoutError:
             print(f"Connection timed out after {timeout} seconds")
+            # Clean up any partial connection
+            await self.disconnect()
+            raise
+        except Exception as e:
+            print(f"Connection error: {e}")
+            await self.disconnect()
             raise
     
     async def disconnect(self, timeout: int = 5) -> None:
         """disconnect the connection to the Hypha server"""
         if self.api:
+            print("Disconnecting from Hypha server")
             try:
-                await asyncio.wait_for(self.api.disconnect(), timeout=timeout)
-            except Exception as e:
-                print(f"Failed to cleanly disconnect API connection: {e}")
+                # Try to close properly first
+                try:
+                    await asyncio.wait_for(self.api.disconnect(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    print("Disconnect timed out, forcing disconnection")
+                except Exception as e:
+                    print(f"Error during disconnection: {e}")
             finally:
+                # Even on error, clean up the references
                 self.api = None
                 self.artifact_manager = None
+        else:
+            # Already disconnected
+            self.api = None
+            self.artifact_manager = None
     
     async def reconnect(self, timeout: int = Config.CONNECTION_TIMEOUT) -> None:
         """Reconnect to the Hypha server"""
