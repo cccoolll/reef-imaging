@@ -184,6 +184,12 @@ def stitch_folder(folder_path: str) -> bool:
         )
         
         print(f"Stitching successfully completed, zarr file created: {zarr_filename}")
+        
+        # Create a .done file to indicate successful stitching
+        done_file_path = os.path.join(STITCHED_DIR, f"{zarr_filename}.done")
+        with open(done_file_path, "w") as done_file:
+            done_file.write("Stitching completed successfully.")
+        print(f"Created done file: {done_file_path}")
         return True
     except Exception as e:
         print(f"Error during stitching: {e}")
@@ -293,17 +299,23 @@ async def upload_zarr_file(zarr_file: str) -> bool:
 
 
 async def process_folder(folder_name: str) -> bool:
-    """Process a single folder through stitching, uploading, and cleanup."""
     folder_path = os.path.join(BASE_DIR, folder_name)
     
-    # Step 1: Stitch the folder
-    print(f"\nStarting stitching process for folder: {folder_name}")
-    stitch_success = stitch_folder(folder_path)
-    if not stitch_success:
-        print(f"Failed to stitch folder: {folder_name}")
-        return False
+    # Step 1: Check for .done file
+    folder_datetime = extract_datetime_from_folder(folder_name)
+    zarr_filename = f"{folder_datetime}.zarr" if folder_datetime else f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.zarr"
+    done_file_path = os.path.join(STITCHED_DIR, f"{zarr_filename}.done")
+    if os.path.exists(done_file_path):
+        print(f".done file found for {folder_name}, skipping stitching.")
+    else:
+        # Step 2: Stitch the folder
+        print(f"\nStarting stitching process for folder: {folder_name}")
+        stitch_success = stitch_folder(folder_path)
+        if not stitch_success:
+            print(f"Failed to stitch folder: {folder_name}")
+            return False
     
-    # Step 2: Get the stitched zarr file
+    # Step 3: Get the stitched zarr file
     zarr_files = get_zarr_files()
     if not zarr_files:
         print(f"No zarr files were created from stitching folder: {folder_name}")
@@ -331,14 +343,14 @@ async def process_folder(folder_name: str) -> bool:
     zarr_file = matching_zarr[0]
     print(f"Found matching zarr file: {zarr_file}")
     
-    # Step 3: Upload the zarr file
+    # Step 4: Upload the zarr file
     print(f"Starting upload process for zarr file: {zarr_file}")
     upload_success = await upload_zarr_file(zarr_file)
     if not upload_success:
         print(f"Failed to upload zarr file: {zarr_file}")
         return False
     
-    # Step 4: Clean up the zarr file
+    # Step 5: Clean up the zarr file
     print(f"Cleaning up zarr file: {zarr_file}")
     cleanup_zarr_file(zarr_file)
     
