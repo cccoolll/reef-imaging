@@ -256,30 +256,49 @@ class ArtifactUploader:
         for item in to_upload:
             await queue.put(item)
 
-        async def worker():
-            while not queue.empty():
-                local_file, relative_path = await queue.get()
-                async with aiohttp.ClientSession() as session:
+        async def worker(session: aiohttp.ClientSession):
+            while True:
+                try:
+                    local_file, relative_path = await asyncio.wait_for(queue.get(), timeout=1.0) # Wait briefly for an item
+                except asyncio.TimeoutError:
+                    # Queue might be empty or temporarily starved, check if we should exit
+                    if queue.empty() and all(t.done() or t.cancelled() for t in tasks if t is not asyncio.current_task()):
+                        break # Exit if queue is empty and other workers are finishing/done
+                    continue # Otherwise, continue waiting
+                
+                try:
+                    # Use the session passed to the worker
                     success = await self.upload_single_file(local_file, relative_path, session)
                     if not success:
-                        print(f"Failed to upload file: {local_file}, re-queuing for retry.")
+                        print(f"Failed to upload file: {local_file}, re-queuing for retry after delay.")
+                        # Add a small delay before re-queuing
+                        await asyncio.sleep(2) 
                         await queue.put((local_file, relative_path))
-                queue.task_done()
+                except Exception as e:
+                    print(f"Error in worker for {local_file}: {e}. Re-queuing.")
+                    # Also re-queue on unexpected errors within the worker task
+                    await asyncio.sleep(2) 
+                    await queue.put((local_file, relative_path))
+                finally:
+                    queue.task_done()
 
-        # Create a fixed number of worker tasks
-        tasks = [asyncio.create_task(worker()) for _ in range(batch_size)]
+        # Create a fixed number of worker tasks, each with its own session
+        tasks = []
+        async with aiohttp.ClientSession() as shared_session: # Create one session shared by workers
+            for _ in range(min(batch_size, self.concurrency_limit)): # Limit workers by concurrency_limit too
+                tasks.append(asyncio.create_task(worker(shared_session)))
 
-        # Wait for the queue to be fully processed
-        await queue.join()
+            # Wait for the queue to be fully processed
+            await queue.join()
 
-        # Cancel all worker tasks
-        for task in tasks:
-            task.cancel()
+            # Cancel all worker tasks
+            for task in tasks:
+                task.cancel()
 
-        # Check if there are any remaining items in the queue
-        if not queue.empty():
-            print("Some files failed to upload after multiple attempts.")
-            return False
+            # Check if there are any remaining items in the queue
+            if not queue.empty():
+                print("Some files failed to upload after multiple attempts.")
+                return False
 
         return True
 
