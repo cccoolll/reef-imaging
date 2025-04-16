@@ -107,13 +107,7 @@ def extract_datetime_from_folder(folder_name: str) -> Optional[str]:
 
 
 def stitch_folder(folder_path: str) -> bool:
-    """Implement stitching functionality using the StitchManager class."""
-    # Clean up existing zarr files first
-    print(f"Cleaning up any existing zarr files in {STITCHED_DIR}")
-    existing_zarr_files = get_zarr_files()
-    for zarr_file in existing_zarr_files:
-        cleanup_zarr_file(zarr_file)
-        
+    """Implement stitching functionality using the StitchManager class."""        
     try:
         # Extract folder name and create zarr filename
         folder_name = os.path.basename(folder_path)
