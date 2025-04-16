@@ -83,13 +83,12 @@ class HyphaConnection:
         self.artifact_manager = None
     
     async def connect(self, timeout: int = Config.CONNECTION_TIMEOUT, client_id: str = "reef-client") -> None:
-        """Connect to the Hypha server"""
+        """Connect to the Hypha server with robust error handling"""
+        # Always attempt to disconnect first to clear any lingering state
+        await self.disconnect()
+        
         try:
-            # First make sure we disconnect any existing connection
-            if self.api:
-                await self.disconnect()
-                
-            print(f"Connecting to {self.server_url}")
+            print(f"Attempting connection to {self.server_url} with client_id: {client_id}")
             self.api = await asyncio.wait_for(
                 connect_to_server({
                     "client_id": client_id, 
@@ -98,46 +97,53 @@ class HyphaConnection:
                 }),
                 timeout=timeout
             )
+            print("Connection established, getting artifact manager...")
             self.artifact_manager = await asyncio.wait_for(
                 self.api.get_service("public/artifact-manager"),
                 timeout=timeout
             )
-            print("Connected successfully")
+            print("Connected successfully to Hypha and artifact manager")
         except asyncio.TimeoutError:
-            print(f"Connection timed out after {timeout} seconds")
-            # Clean up any partial connection
-            await self.disconnect()
+            print(f"Connection attempt timed out after {timeout} seconds")
+            # Ensure cleanup even on timeout during connection or service retrieval
+            await self.disconnect() 
             raise
         except Exception as e:
-            print(f"Connection error: {e}")
-            await self.disconnect()
-            raise
+            # Catch specific errors if possible, e.g., check 'Client already exists'
+            error_msg = str(e)
+            print(f"Connection error: {error_msg}")
+            if "Client already exists" in error_msg:
+                 print("Client ID conflict detected. Ensure only one instance is running or use unique client IDs.")
+            # Ensure cleanup on any connection error
+            await self.disconnect() 
+            raise # Re-raise the exception after cleanup
     
     async def disconnect(self, timeout: int = 5) -> None:
-        """disconnect the connection to the Hypha server"""
-        if self.api:
-            print("Disconnecting from Hypha server")
+        """Disconnect the connection to the Hypha server gracefully."""
+        if self.api is not None:
+            print("Disconnecting from Hypha server...")
             try:
-                # Try to close properly first
-                try:
-                    await asyncio.wait_for(self.api.disconnect(), timeout=timeout)
-                except asyncio.TimeoutError:
-                    print("Disconnect timed out, forcing disconnection")
-                except Exception as e:
-                    print(f"Error during disconnection: {e}")
+                await asyncio.wait_for(self.api.disconnect(), timeout=timeout)
+                print("Hypha API disconnected successfully.")
+            except asyncio.TimeoutError:
+                print(f"Hypha disconnect timed out after {timeout} seconds.")
+            except Exception as e:
+                print(f"Error during Hypha API disconnection: {e}")
             finally:
-                # Even on error, clean up the references
+                # Always reset state variables after attempting disconnect
                 self.api = None
                 self.artifact_manager = None
         else:
-            # Already disconnected
+            # Ensure state is clean even if api was already None
             self.api = None
             self.artifact_manager = None
-    
-    async def reconnect(self, timeout: int = Config.CONNECTION_TIMEOUT) -> None:
+            # print("Already disconnected or connection not established.") # Optional: uncomment for more verbose logging
+
+    async def reconnect(self, timeout: int = Config.CONNECTION_TIMEOUT, client_id: str = "reef-client") -> None:
         """Reconnect to the Hypha server"""
-        await self.disconnect()
-        await self.connect(timeout=timeout)
+        print("Attempting to reconnect...")
+        await self.disconnect() # Ensure clean state before reconnecting
+        await self.connect(timeout=timeout, client_id=client_id)
 
 async def get_artifact_manager() -> Tuple[Any, Any]:
     """Get a new connection to the artifact manager"""
