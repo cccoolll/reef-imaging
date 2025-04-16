@@ -253,11 +253,20 @@ class ArtifactUploader:
         to_upload = []
 
         for file_path in file_paths:
-            # Use the file path directly
-            local_file = file_path
-            relative_path = os.path.basename(file_path)  # Adjust as needed
-
-            to_upload.append((local_file, relative_path))
+            if os.path.isdir(file_path):
+                # If the path is a directory, walk through it
+                for root, _, files in os.walk(file_path):
+                    for file in files:
+                        local_file = os.path.join(root, file)
+                        # Calculate the relative path within the .zarr directory
+                        rel_path = os.path.relpath(local_file, file_path)
+                        relative_path = os.path.join(os.path.basename(file_path), rel_path)
+                        to_upload.append((local_file, relative_path))
+            else:
+                # If it's a file, add it directly
+                local_file = file_path
+                relative_path = os.path.basename(file_path)
+                to_upload.append((local_file, relative_path))
 
         # Update total files count
         self.upload_record.set_total_files(len(to_upload))

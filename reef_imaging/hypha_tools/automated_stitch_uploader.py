@@ -437,11 +437,6 @@ async def main():
     # Ensure stitched directory exists
     os.makedirs(STITCHED_DIR, exist_ok=True)
     
-    # Clean up any existing zarr files before starting
-    print("Cleaning up any existing zarr files before starting")
-    existing_zarr_files = get_zarr_files()
-    for zarr_file in existing_zarr_files:
-        cleanup_zarr_file(zarr_file)
     
     # Process the specified range of folders
     current_idx = start_idx
