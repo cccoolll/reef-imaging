@@ -25,7 +25,7 @@ STITCHED_DIR = "/media/reef/harddisk/test_stitch_zarr"
 STITCH_RECORD_FILE = "stitch_upload_progress.txt"
 UPLOAD_RECORD_FILE = "zarr_upload_record.json"
 CHECK_INTERVAL = 60  # Check for new folders every 60 seconds
-
+client_id = "reef-client-stitch-uploader"
 # Load environment variables
 load_dotenv()
 ARTIFACT_ALIAS = "image-map-20250410-treatment-full"
@@ -217,7 +217,7 @@ async def upload_zarr_file(zarr_file: str) -> bool:
     
     try:
         # Connect to Hypha
-        connection_task = asyncio.create_task(connection.connect())
+        connection_task = asyncio.create_task(connection.connect(client_id=client_id))
         await connection_task
         
         # Assign connection to uploader
@@ -263,7 +263,7 @@ async def upload_zarr_file(zarr_file: str) -> bool:
                 try:
                     # Refresh connection before commit
                     await connection.disconnect()
-                    connection_task = asyncio.create_task(connection.connect())
+                    connection_task = asyncio.create_task(connection.connect(client_id=client_id))
                     await connection_task
                     
                     # Commit the dataset
@@ -279,7 +279,7 @@ async def upload_zarr_file(zarr_file: str) -> bool:
                     if connection_task:
                         connection_task.cancel()
                     await connection.disconnect()
-                    connection_task = asyncio.create_task(connection.connect())
+                    connection_task = asyncio.create_task(connection.connect(client_id=client_id))
                     await connection_task
             
             if not commit_success:

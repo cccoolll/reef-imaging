@@ -82,7 +82,7 @@ class HyphaConnection:
         self.api = None
         self.artifact_manager = None
     
-    async def connect(self, timeout: int = Config.CONNECTION_TIMEOUT) -> None:
+    async def connect(self, timeout: int = Config.CONNECTION_TIMEOUT, client_id: str = "reef-client") -> None:
         """Connect to the Hypha server"""
         try:
             # First make sure we disconnect any existing connection
@@ -92,7 +92,7 @@ class HyphaConnection:
             print(f"Connecting to {self.server_url}")
             self.api = await asyncio.wait_for(
                 connect_to_server({
-                    "name": "reef-client", 
+                    "client_id": client_id, 
                     "server_url": self.server_url, 
                     "token": self.token
                 }),

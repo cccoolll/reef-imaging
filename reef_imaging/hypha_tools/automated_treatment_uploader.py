@@ -17,7 +17,7 @@ EXPERIMENT_ID = "20250410-fucci-time-lapse-scan"
 UPLOAD_RECORD_FILE = "treatment_upload_progress.txt"
 UPLOAD_TRACKER_FILE = "treatment_upload_record.json"
 CHECK_INTERVAL = 60  # Check for new folders every 60 seconds
-
+client_id="reef-client-treatment-uploader"
 # Load environment variables
 load_dotenv()
 DATASET_ALIAS = "20250410-treatment-full"
@@ -84,7 +84,7 @@ async def process_folder(folder_path):
     
     try:
         # Connect to Hypha
-        connection_task = asyncio.create_task(connection.connect())
+        connection_task = asyncio.create_task(connection.connect(client_id=client_id))
         await connection_task
         
         # Assign connection to uploader
@@ -132,7 +132,7 @@ async def process_folder(folder_path):
                 try:
                     # Refresh connection before commit
                     await connection.disconnect()
-                    connection_task = asyncio.create_task(connection.connect())
+                    connection_task = asyncio.create_task(connection.connect(client_id=client_id))
                     await connection_task
                     
                     # Commit the dataset
@@ -148,7 +148,7 @@ async def process_folder(folder_path):
                     if connection_task:
                         connection_task.cancel()
                     await connection.disconnect()
-                    connection_task = asyncio.create_task(connection.connect())
+                    connection_task = asyncio.create_task(connection.connect(client_id=client_id))
                     await connection_task
             
             if not commit_success:
