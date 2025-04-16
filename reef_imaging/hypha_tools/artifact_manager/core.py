@@ -14,7 +14,7 @@ class Config:
     """Configuration settings for the artifact manager"""
     SERVER_URL = "https://hypha.aicell.io"
     WORKSPACE_TOKEN = os.getenv("REEF_WORKSPACE_TOKEN")
-    CONCURRENCY_LIMIT = 5  # Max number of concurrent uploads
+    CONCURRENCY_LIMIT = 3  # Max number of concurrent uploads
     MAX_RETRIES = 300  # Maximum number of retry attempts
     INITIAL_RETRY_DELAY = 5  # Initial retry delay in seconds
     MAX_RETRY_DELAY = 60  # Maximum retry delay in seconds
