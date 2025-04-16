@@ -16,19 +16,21 @@ class ArtifactUploader:
                  artifact_alias: str, 
                  record_file: str,
                  connection: Optional[HyphaConnection] = None,
-                 concurrency_limit: int = Config.CONCURRENCY_LIMIT):
+                 concurrency_limit: int = Config.CONCURRENCY_LIMIT,
+                 client_id: str = "reef-client"):
         """Initialize the uploader with the artifact alias and record file"""
         self.artifact_alias = artifact_alias
         self.upload_record = UploadRecord(record_file)
         self.connection = connection or HyphaConnection()
         self.concurrency_limit = concurrency_limit
         self.semaphore = asyncio.Semaphore(concurrency_limit)
+        self.client_id = client_id
     
     async def ensure_connected(self) -> bool:
         """Ensure we have a connection to the artifact manager. Return True if connection is successful."""
         try:
             if not self.connection.artifact_manager:
-                await self.connection.connect()
+                await self.connection.connect(client_id=self.client_id)
             return True
         except Exception as e:
             print(f"Connection failed: {e}")
@@ -167,7 +169,7 @@ class ArtifactUploader:
             try:
                 # Connect with a timeout
                 await asyncio.wait_for(
-                    temp_connection.connect(),
+                    temp_connection.connect(client_id=self.client_id),
                     timeout=Config.CONNECTION_TIMEOUT
                 )
                 

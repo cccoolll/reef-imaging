@@ -75,7 +75,8 @@ async def process_folder(folder_path):
     # Create uploader instance
     uploader = ArtifactUploader(
         artifact_alias=DATASET_ALIAS,
-        record_file=UPLOAD_TRACKER_FILE
+        record_file=UPLOAD_TRACKER_FILE,
+        client_id=client_id
     )
     
     # Create a fresh connection

@@ -19,7 +19,7 @@ class Config:
     INITIAL_RETRY_DELAY = 5  # Initial retry delay in seconds
     MAX_RETRY_DELAY = 60  # Maximum retry delay in seconds
     CONNECTION_TIMEOUT = 30  # Timeout for API connections in seconds
-    UPLOAD_TIMEOUT = 40  # Timeout for file uploads in seconds
+    UPLOAD_TIMEOUT = 60  # Timeout for file uploads in seconds
 
 class UploadRecord:
     """Manages the record of uploaded files"""

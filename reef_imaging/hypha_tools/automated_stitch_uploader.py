@@ -208,7 +208,8 @@ async def upload_zarr_file(zarr_file: str) -> bool:
     # Create uploader instance
     uploader = ArtifactUploader(
         artifact_alias=ARTIFACT_ALIAS,
-        record_file=UPLOAD_RECORD_FILE
+        record_file=UPLOAD_RECORD_FILE,
+        client_id=client_id
     )
     
     # Create a fresh connection
