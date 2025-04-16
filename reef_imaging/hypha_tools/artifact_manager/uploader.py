@@ -5,6 +5,7 @@ from typing import List, Tuple, Dict, Any, Optional, Callable, Set
 import time
 from datetime import datetime
 import traceback
+from asyncio import Queue
 
 from .core import HyphaConnection, UploadRecord, Config
 
@@ -247,91 +248,86 @@ class ArtifactUploader:
         
         return failed_uploads
     
-    async def upload_zarr_files(self, file_paths: List[str]) -> bool:
-        """Upload files to the artifact manager"""
-        # Prepare a list of (local_file, relative_path) to upload
-        to_upload = []
+    async def upload_files_in_batches(self, to_upload: List[Tuple[str, str]], batch_size: int = 5) -> bool:
+        """Upload files in batches using a queue for better concurrency."""
+        queue = Queue()
+        for item in to_upload:
+            await queue.put(item)
 
+        async def worker():
+            while not queue.empty():
+                local_file, relative_path = await queue.get()
+                async with aiohttp.ClientSession() as session:
+                    success = await self.upload_single_file(local_file, relative_path, session)
+                    if not success:
+                        print(f"Failed to upload file: {local_file}, re-queuing for retry.")
+                        await queue.put((local_file, relative_path))
+                queue.task_done()
+
+        # Create a fixed number of worker tasks
+        tasks = [asyncio.create_task(worker()) for _ in range(batch_size)]
+
+        # Wait for the queue to be fully processed
+        await queue.join()
+
+        # Cancel all worker tasks
+        for task in tasks:
+            task.cancel()
+
+        # Check if there are any remaining items in the queue
+        if not queue.empty():
+            print("Some files failed to upload after multiple attempts.")
+            return False
+
+        return True
+
+    async def upload_zarr_files(self, file_paths: List[str]) -> bool:
+        """Upload files to the artifact manager using batch processing."""
+        to_upload = []
         for file_path in file_paths:
             if os.path.isdir(file_path):
-                # If the path is a directory, walk through it
                 for root, _, files in os.walk(file_path):
                     for file in files:
                         local_file = os.path.join(root, file)
-                        # Calculate the relative path within the .zarr directory
                         rel_path = os.path.relpath(local_file, file_path)
                         relative_path = os.path.join(os.path.basename(file_path), rel_path)
                         to_upload.append((local_file, relative_path))
             else:
-                # If it's a file, add it directly
                 local_file = file_path
                 relative_path = os.path.basename(file_path)
                 to_upload.append((local_file, relative_path))
 
-        # Update total files count
         self.upload_record.set_total_files(len(to_upload))
 
-        # Use a fresh session for uploading files
-        async with aiohttp.ClientSession() as session:
-            for local_file, relative_path in to_upload:
-                success = await self.upload_single_file(local_file, relative_path, session, max_retries=10)
-                if not success:
-                    print(f"Failed to upload file: {local_file}")
-                    return False
+        # Use batch processing for uploads
+        success = await self.upload_files_in_batches(to_upload)
 
-        # Save final record
-        self.upload_record.save()
+        if success:
+            self.upload_record.save()
 
-        # Consider success if all files were uploaded
-        return True
-    
+        return success
+
     async def upload_treatment_data(self, source_dirs: List[str]) -> bool:
-        """Upload treatment data files to the artifact manager"""
-        # Prepare a list of (local_file, relative_path) to upload
+        """Upload treatment data files to the artifact manager using batch processing."""
         to_upload = []
-        
-        # Process each source directory
         for source_dir in source_dirs:
-            # Extract date time string to use as folder name
             folder_name = self.extract_date_time_from_path(source_dir)
-            print(f"Processing directory: {source_dir} -> {folder_name}")
-            
-            # Walk through the directory structure
             for root, _, files in os.walk(source_dir):
-                print(f"Walking through: {root}")  # Debugging output
                 for file in files:
-                    print(f"Found file: {file}")  # Debugging output
                     local_file = os.path.join(root, file)
-                    
-                    # Calculate the relative path within the source directory
                     rel_path = os.path.relpath(local_file, source_dir)
-                    
-                    # Create the new path with the folder name
                     relative_path = os.path.join(folder_name, rel_path)
-                    
                     to_upload.append((local_file, relative_path))
 
-        # Debugging output to verify to_upload list
-        print(f"Total files to upload: {len(to_upload)}")
-        for local_file, relative_path in to_upload:
-            print(f"Prepared for upload: {local_file} -> {relative_path}")
-        
-        # Update total files count
         self.upload_record.set_total_files(len(to_upload))
-        
-        # Use a fresh session for uploading files
-        async with aiohttp.ClientSession() as session:
-            for local_file, relative_path in to_upload:
-                success = await self.upload_single_file(local_file, relative_path, session)
-                if not success:
-                    print(f"Failed to upload file: {local_file}")
-                    return False
-        
-        # Save final record
-        self.upload_record.save()
-        
-        # Consider success if all files were uploaded
-        return True
+
+        # Use batch processing for uploads
+        success = await self.upload_files_in_batches(to_upload)
+
+        if success:
+            self.upload_record.save()
+
+        return success
 
 async def upload_zarr_example() -> None:
     """Example of uploading zarr files"""
