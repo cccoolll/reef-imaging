@@ -1,33 +1,146 @@
-# (Full Tutorial is not done yet)
+# REEF Imaging Control Systems
 
-# Orchestrator Simulation Tutorial
+This directory contains the hardware control modules for the REEF imaging system, providing interfaces for automated microscopy, robotic sample handling, and incubation control through Hypha services.
 
-This tutorial will guide you through running the `orchestrator_simulation.py` script in local mode.
+## System Architecture
 
-## Prerequisites
+The control system consists of four main components:
 
-- Ensure you have Python installed on your system.
-- Set up your environment variables:
-  - `REEF_LOCAL_TOKEN`: Use this token for local operations.
-  - `REEF_LOCAL_WORKSPACE`: Each token is associated with a single workspace. Make sure to set this in your `.env` file.
+1. **Microscope Control** - Manages the SQUID microscope for imaging
+2. **Robotic Arm Control** - Controls the Dorna robotic arm for sample handling
+3. **Incubator Control** - Manages the Cytomat incubator for sample storage
+4. **Mirror Services** - Proxies requests between cloud and local systems
 
+Each component exposes a standardized API through Hypha services, allowing orchestration by the main reef-imaging system.
 
-## Running the Script
+## Hardware Control Services
 
-1. Open a terminal and navigate to the directory containing `orchestrator_simulation.py`.
-2. Run the script in local mode using the following command:
+### Microscope Control (`squid-control/`)
+
+The SQUID microscope control service manages imaging, stage positioning, and illumination.
+
+- **Core Features:**
+  - Stage movement (X/Y/Z positioning)
+  - Multiple illumination channels (BF, 405nm, 488nm, 561nm, 638nm, 730nm)
+  - Auto-focus capabilities (contrast-based and reflection-based)
+  - Well plate scanning with specified parameters
+  - Image acquisition and storage
+
+- **Main File:** `start_hypha_service_squid_control.py`
+
+### Robotic Arm Control (`dorna-control/`)
+
+The Dorna robotic arm control service handles sample transfer between the microscope and incubator.
+
+- **Core Features:**
+  - Sample pickup and placement operations
+  - Preconfigured movement paths
+  - Transport operations between microscope and incubator
+  - Status monitoring and error recovery
+  - Safety controls
+
+- **Main Files:**
+  - `start_hypha_service_robotic_arm.py` - Hypha service interface
+  - `dorna_controller.py` - Direct controller interface
+  - `paths/` - Predefined robot movement paths
+
+### Incubator Control (`cytomat-control/`)
+
+The Cytomat incubator control service manages sample storage and environmental conditions.
+
+- **Core Features:**
+  - Sample loading/unloading from slots
+  - Temperature and CO2 level monitoring
+  - Sample status tracking
+  - Error handling and recovery
+
+- **Main Files:**
+  - `start_hypha_service_incubator.py` - Hypha service interface
+  - `samples.json` - Sample metadata and status tracking
+
+### Mirror Services (`mirror-services/`)
+
+These services act as proxies between the cloud Hypha server and local hardware control services, enabling remote operation.
+
+- **Core Features:**
+  - Secure remote control of local hardware
+  - Health monitoring and automatic reconnection
+  - Request forwarding with error handling
+  - Synchronized operation between cloud and local systems
+
+- **Main Files:**
+  - `mirror_squid_control.py` - Microscope mirror service
+  - `mirror_robotic_arm.py` - Robotic arm mirror service
+  - `mirror_incubator.py` - Incubator mirror service
+
+## Service Health Monitoring
+
+All services implement a health check mechanism that:
+- Monitors service connectivity
+- Automatically reconnects if disconnected
+- Logs errors and status information
+- Tracks task status for operations
+- Provides recovery mechanisms
+
+## Environment Setup
+
+### Prerequisites
+
+- Python 3.7+
+- Hypha server (local or cloud)
+- Device-specific dependencies:
+  - SQUID microscope drivers
+  - Dorna robot control libraries
+  - Cytomat incubator interface
+
+### Environment Variables
+
+The services require these environment variables:
 
 ```
-python orchestrator_simulation.py --local
+# For cloud operation
+REEF_WORKSPACE_TOKEN=your_cloud_token
+
+# For local operation
+REEF_LOCAL_TOKEN=your_local_token
+REEF_LOCAL_WORKSPACE=your_local_workspace
 ```
 
-This command will set the server URL to `http://reef.dyn.scilifelab.se:9527` and use the local token and workspace specified in your environment variables.
+### Starting Services
 
-## Notes
+To start services locally(with the local server in lab):
 
-- Ensure that your local server is running and accessible at the specified URL.
-- The script will connect to the local server using the provided token and workspace settings.
+```bash
+# Start incubator control
+cd cytomat-control
+python start_hypha_service_incubator.py --local
 
-for local token, use REEF_LOCAL_TOKEN
+# Start robotic arm control
+cd dorna-control  
+python start_hypha_service_robotic_arm.py --local
 
-each token has single workspace, notic it when you registering services, and write it as REEF_LOCAL_WORKSPACE in .env
+# Start microscope control
+cd squid-control
+python start_hypha_service_squid_control.py --local
+
+# Start mirror services (for remote operation)
+cd mirror-services
+python start_all_mirror_services.py
+```
+
+## Service Architecture
+
+Each service follows a similar pattern:
+1. Registration with the Hypha server
+2. Exposure of a standardized API
+3. Background health monitoring
+4. Task status tracking for operations
+5. Error handling and recovery
+
+This architecture allows for modular development and robust operation, with each component handling its specific hardware while maintaining a consistent interface for the orchestration layer.
+
+## Communication Flow
+
+![mirror services flow](mirror-services/docs/mirror_services_flow.png)
+
+The mirror services ensure that commands from the cloud platform are securely and reliably transmitted to the local hardware control services, enabling remote operation while maintaining local safety controls.
