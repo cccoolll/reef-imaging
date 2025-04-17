@@ -5,6 +5,7 @@ import asyncio
 import json
 import shutil
 import re
+import random  # Add this import
 from datetime import datetime
 from typing import List, Optional, Tuple
 from dotenv import load_dotenv
@@ -120,17 +121,7 @@ def stitch_folder(folder_path: str) -> bool:
         folder_name = os.path.basename(folder_path)
         folder_datetime = extract_datetime_from_folder(folder_name)
         zarr_filename = f"{folder_datetime}.zarr" if folder_datetime else f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.zarr"
-        zarr_filepath = os.path.join(STITCHED_DIR, zarr_filename)
         print(f"Will create zarr file: {zarr_filename} for folder: {folder_name}")
-        
-        # Check if zarr file already exists and remove it if it does
-        if os.path.exists(zarr_filepath):
-            print(f"Zarr file {zarr_filepath} already exists. Removing it before proceeding.")
-            if os.path.isdir(zarr_filepath):
-                shutil.rmtree(zarr_filepath)
-            else:
-                os.remove(zarr_filepath)
-            print(f"Removed existing zarr file: {zarr_filepath}")
         
         # Paths to input data
         image_folder = os.path.join(folder_path, "0")
@@ -218,29 +209,66 @@ def stitch_folder(folder_path: str) -> bool:
 async def connect_with_timeout(connection, client_id, timeout=CONNECTION_TIMEOUT, max_retries=MAX_RETRIES):
     """Connect to Hypha with timeout and retry logic."""
     retry_count = 0
+    client_conflict_count = 0
+    
     while retry_count < max_retries:
         try:
+            # Always ensure disconnection before attempting to connect
+            await connection.disconnect()
+            
+            # Add longer delay if we've seen client conflicts
+            if client_conflict_count > 0:
+                conflict_delay = min(60, 10 * client_conflict_count) + random.uniform(1, 5)
+                print(f"Waiting {conflict_delay:.1f}s before reconnection due to client conflict")
+                await asyncio.sleep(conflict_delay)
+            
             # Create task with timeout
+            print(f"Attempting connection to Hypha with client_id: {client_id}")
             connect_task = asyncio.create_task(connection.connect(client_id=client_id))
             await asyncio.wait_for(connect_task, timeout=timeout)
             print("Connection established successfully")
             return True
+            
         except asyncio.TimeoutError:
             retry_count += 1
             print(f"Connection attempt timed out after {timeout}s (attempt {retry_count}/{max_retries})")
             # Clean up the task and connection
-            if not connect_task.done():
+            if 'connect_task' in locals() and not connect_task.done():
                 connect_task.cancel()
             await connection.disconnect()
             if retry_count < max_retries:
                 # Wait before retrying
                 await asyncio.sleep(5)
+                
         except Exception as e:
             retry_count += 1
-            print(f"Connection error: {e} (attempt {retry_count}/{max_retries})")
-            await connection.disconnect()
-            if retry_count < max_retries:
-                await asyncio.sleep(5)
+            err_msg = str(e)
+            print(f"Connection error: {err_msg} (attempt {retry_count}/{max_retries})")
+            
+            # Handle "Client already exists" error specifically
+            if "Client already exists" in err_msg:
+                client_conflict_count += 1
+                print("Client ID conflict detected. Ensure only one instance is running or use unique client IDs.")
+                
+                # Clean up connection more aggressively
+                if 'connect_task' in locals() and not connect_task.done():
+                    connect_task.cancel()
+                
+                try:
+                    await connection.disconnect()
+                except:
+                    pass
+                
+                # Add a longer delay for client conflicts to allow server to clean up
+                # Increase delay with each conflict
+                conflict_delay = min(60, 10 * client_conflict_count) + random.uniform(1, 5)
+                print(f"Waiting {conflict_delay:.1f}s for server-side client cleanup")
+                await asyncio.sleep(conflict_delay)
+            else:
+                # For other errors, perform normal cleanup
+                await connection.disconnect()
+                if retry_count < max_retries:
+                    await asyncio.sleep(5)
     
     print("Failed to connect after multiple attempts")
     return False
