@@ -78,6 +78,9 @@ async def connect_with_timeout(connection, client_id, timeout=CONNECTION_TIMEOUT
     retry_count = 0
     while retry_count < max_retries:
         try:
+            # Ensure we're starting with a clean connection state
+            await connection.disconnect()
+            
             # Create task with timeout
             connect_task = asyncio.create_task(connection.connect(client_id=client_id))
             await asyncio.wait_for(connect_task, timeout=timeout)
@@ -95,10 +98,26 @@ async def connect_with_timeout(connection, client_id, timeout=CONNECTION_TIMEOUT
                 await asyncio.sleep(5)
         except Exception as e:
             retry_count += 1
-            print(f"Connection error: {e} (attempt {retry_count}/{max_retries})")
-            await connection.disconnect()
-            if retry_count < max_retries:
-                await asyncio.sleep(5)
+            err_msg = str(e)
+            print(f"Connection error: {err_msg} (attempt {retry_count}/{max_retries})")
+            
+            # Handle "Client already exists" error specifically
+            if "Client already exists" in err_msg:
+                print("Client ID conflict detected. Forcefully cleaning up connection...")
+                # Cancel the task if it's still running
+                if 'connect_task' in locals() and not connect_task.done():
+                    connect_task.cancel()
+                
+                # Make sure connection is properly closed
+                await connection.disconnect()
+                
+                # Wait longer for client cleanup on the server side
+                await asyncio.sleep(10)
+            else:
+                # For other errors, perform normal cleanup
+                await connection.disconnect()
+                if retry_count < max_retries:
+                    await asyncio.sleep(5)
     
     print("Failed to connect after multiple attempts")
     return False
