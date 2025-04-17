@@ -91,7 +91,6 @@ class HyphaConnection:
             print(f"Attempting connection to {self.server_url} with client_id: {client_id}")
             self.api = await asyncio.wait_for(
                 connect_to_server({
-                    "name": "test-client",
                     "client_id": client_id, 
                     "server_url": self.server_url, 
                     "token": self.token,
