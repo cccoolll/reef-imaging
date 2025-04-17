@@ -61,6 +61,10 @@ class ArtifactUploader:
         retries = 0
         current_delay = retry_delay
         connection_reset = False
+        file_size = os.path.getsize(local_file)
+        
+        # Get optimal timeout based on file size (larger files need more time)
+        upload_timeout = min(Config.UPLOAD_TIMEOUT, max(60, file_size // (500 * 1024)))  # 500KB/s minimum rate
         
         while retries < max_retries:
             try:
@@ -93,17 +97,46 @@ class ArtifactUploader:
                         current_delay = min(current_delay * 2, 60)
                         continue
 
-                    # 2) Use aiohttp session to PUT the data with timeout
+                    # 2) Use aiohttp session to PUT the data with timeout and optimized settings
                     try:
-                        with open(local_file, "rb") as file_data:
-                            async with asyncio.timeout(Config.UPLOAD_TIMEOUT):
-                                async with session.put(put_url, data=file_data) as resp:
-                                    if resp.status != 200:
-                                        raise RuntimeError(
-                                            f"File upload failed for {local_file}, status={resp.status}"
-                                        )
+                        headers = {
+                            'Content-Type': 'application/octet-stream',
+                            'Content-Length': str(file_size)
+                        }
+                        
+                        # Use different strategies based on file size
+                        if file_size > 10 * 1024 * 1024:  # For files > 10MB
+                            # Stream large files in chunks
+                            with open(local_file, "rb") as file_data:
+                                async with asyncio.timeout(upload_timeout):
+                                    async with session.put(
+                                        put_url, 
+                                        data=file_data,
+                                        headers=headers,
+                                        chunked=True,
+                                        timeout=aiohttp.ClientTimeout(total=upload_timeout)
+                                    ) as resp:
+                                        if resp.status != 200:
+                                            raise RuntimeError(
+                                                f"File upload failed for {local_file}, status={resp.status}"
+                                            )
+                        else:
+                            # Load smaller files into memory for faster upload
+                            with open(local_file, "rb") as file_data:
+                                data = file_data.read()
+                                async with asyncio.timeout(upload_timeout):
+                                    async with session.put(
+                                        put_url, 
+                                        data=data,
+                                        headers=headers,
+                                        timeout=aiohttp.ClientTimeout(total=upload_timeout)
+                                    ) as resp:
+                                        if resp.status != 200:
+                                            raise RuntimeError(
+                                                f"File upload failed for {local_file}, status={resp.status}"
+                                            )
                     except asyncio.TimeoutError:
-                        print(f"Upload timed out after {Config.UPLOAD_TIMEOUT} seconds for {relative_path}")
+                        print(f"Upload timed out after {upload_timeout} seconds for {relative_path}")
                         retries += 1
                         await asyncio.sleep(current_delay)
                         current_delay = min(current_delay * 2, 60)
@@ -249,56 +282,228 @@ class ArtifactUploader:
         
         return failed_uploads
     
-    async def upload_files_in_batches(self, to_upload: List[Tuple[str, str]], batch_size: int = 5) -> bool:
-        """Upload files in batches using a queue for better concurrency."""
-        queue = Queue()
+    async def upload_files_in_batches(self, to_upload: List[Tuple[str, str]], batch_size: int = 20) -> bool:
+        """
+        Upload files in batches using a queue for better concurrency.
+        Optimized with:
+        1. TCP connection pooling
+        2. Separate queue for presigned URLs
+        3. More efficient worker management
+        4. Dynamic batch size adjustment
+        """
+        # Create queues for files and presigned URLs
+        file_queue = Queue()
+        url_queue = Queue()
+        
+        # Add all files to the queue
         for item in to_upload:
-            await queue.put(item)
+            await file_queue.put(item)
+        
+        # Track files being processed
+        in_progress = set()
+        failed_files = set()
+        
+        # Create TCP connector with optimized settings
+        connector = aiohttp.TCPConnector(
+            limit=Config.CONNECTION_POOL_SIZE,
+            force_close=False,
+            enable_cleanup_closed=True,
+            keepalive_timeout=60
+        )
+        
+        # Create semaphore for limiting concurrent operations
+        url_semaphore = asyncio.Semaphore(Config.CONCURRENCY_LIMIT)
 
-        async def worker(session: aiohttp.ClientSession):
+        async def url_worker():
+            """Worker to get presigned URLs in batches"""
             while True:
                 try:
-                    local_file, relative_path = await asyncio.wait_for(queue.get(), timeout=1.0) # Wait briefly for an item
-                except asyncio.TimeoutError:
-                    # Queue might be empty or temporarily starved, check if we should exit
-                    if queue.empty() and all(t.done() or t.cancelled() for t in tasks if t is not asyncio.current_task()):
-                        break # Exit if queue is empty and other workers are finishing/done
-                    continue # Otherwise, continue waiting
-                
-                try:
-                    # Use the session passed to the worker
-                    success = await self.upload_single_file(local_file, relative_path, session)
-                    if not success:
-                        print(f"Failed to upload file: {local_file}, re-queuing for retry after delay.")
-                        # Add a small delay before re-queuing
-                        await asyncio.sleep(2) 
-                        await queue.put((local_file, relative_path))
+                    # Get a batch of files to process
+                    batch = []
+                    batch_size = min(Config.URL_BATCH_SIZE, file_queue.qsize())
+                    if batch_size == 0:
+                        if file_queue.empty() and not in_progress:
+                            break
+                        await asyncio.sleep(0.1)
+                        continue
+                    
+                    # Fill the batch
+                    for _ in range(batch_size):
+                        try:
+                            item = file_queue.get_nowait()
+                            batch.append(item)
+                            in_progress.add(item)
+                        except asyncio.QueueEmpty:
+                            break
+                            
+                    if not batch:
+                        await asyncio.sleep(0.1)
+                        continue
+                        
+                    # Ensure connection before getting URLs
+                    async with url_semaphore:
+                        connected = await self.ensure_connected()
+                        if not connected:
+                            # Put items back in queue if connection fails
+                            for item in batch:
+                                await file_queue.put(item)
+                                in_progress.remove(item)
+                            await asyncio.sleep(1)
+                            continue
+                            
+                        # Process each file in the batch to get URL
+                        for local_file, relative_path in batch:
+                            # Skip if already uploaded
+                            if self.upload_record.is_uploaded(relative_path):
+                                in_progress.remove((local_file, relative_path))
+                                file_queue.task_done()
+                                continue
+                                
+                            try:
+                                # Get presigned URL with timeout
+                                put_url = await asyncio.wait_for(
+                                    self.connection.artifact_manager.put_file(
+                                        self.artifact_alias, 
+                                        file_path=relative_path
+                                    ),
+                                    timeout=Config.CONNECTION_TIMEOUT
+                                )
+                                
+                                # Put URL in queue for upload workers
+                                await url_queue.put((local_file, relative_path, put_url))
+                                
+                            except Exception as e:
+                                print(f"Error getting URL for {relative_path}: {str(e)}")
+                                # Re-queue the file for retry with backoff
+                                file_queue.task_done()
+                                in_progress.remove((local_file, relative_path))
+                                
+                                # Add to failed files to retry later with exponential backoff
+                                failed_files.add((local_file, relative_path))
+                                
                 except Exception as e:
-                    print(f"Error in worker for {local_file}: {e}. Re-queuing.")
-                    # Also re-queue on unexpected errors within the worker task
-                    await asyncio.sleep(2) 
-                    await queue.put((local_file, relative_path))
-                finally:
-                    queue.task_done()
-
-        # Create a fixed number of worker tasks, each with its own session
-        tasks = []
-        async with aiohttp.ClientSession() as shared_session: # Create one session shared by workers
-            for _ in range(min(batch_size, self.concurrency_limit)): # Limit workers by concurrency_limit too
-                tasks.append(asyncio.create_task(worker(shared_session)))
-
-            # Wait for the queue to be fully processed
-            await queue.join()
-
-            # Cancel all worker tasks
-            for task in tasks:
+                    print(f"Error in URL worker: {str(e)}")
+                    await asyncio.sleep(1)
+        
+        async def upload_worker(session: aiohttp.ClientSession):
+            """Worker to upload files using presigned URLs"""
+            while True:
+                try:
+                    # Get a file and its presigned URL
+                    try:
+                        local_file, relative_path, put_url = await asyncio.wait_for(
+                            url_queue.get(), 
+                            timeout=0.5
+                        )
+                    except asyncio.TimeoutError:
+                        # Check if we should exit
+                        if url_queue.empty() and file_queue.empty() and not in_progress:
+                            break
+                        continue
+                    
+                    # Attempt upload with optimized settings
+                    success = False
+                    retries = 0
+                    
+                    while retries < 3 and not success:  # Limit retries per worker
+                        try:
+                            file_size = os.path.getsize(local_file)
+                            buffer_size = min(file_size, 1024 * 1024)  # 1MB buffer for large files
+                            
+                            with open(local_file, "rb") as file_data:
+                                headers = {
+                                    'Content-Type': 'application/octet-stream',
+                                    'Content-Length': str(file_size)
+                                }
+                                
+                                async with asyncio.timeout(Config.UPLOAD_TIMEOUT):
+                                    if file_size > 10 * 1024 * 1024:  # For files > 10MB
+                                        # Stream file in chunks for large files
+                                        async with session.put(
+                                            put_url, 
+                                            data=file_data, 
+                                            headers=headers,
+                                            chunked=True,
+                                            timeout=aiohttp.ClientTimeout(total=Config.UPLOAD_TIMEOUT)
+                                        ) as resp:
+                                            if resp.status == 200:
+                                                success = True
+                                            else:
+                                                print(f"Upload failed with status {resp.status} for {relative_path}")
+                                    else:
+                                        # Small file upload
+                                        data = file_data.read()
+                                        async with session.put(
+                                            put_url, 
+                                            data=data,
+                                            headers=headers,
+                                            timeout=aiohttp.ClientTimeout(total=Config.UPLOAD_TIMEOUT)
+                                        ) as resp:
+                                            if resp.status == 200:
+                                                success = True
+                                            else:
+                                                print(f"Upload failed with status {resp.status} for {relative_path}")
+                                
+                                if success:
+                                    # Record successful upload
+                                    self.upload_record.mark_uploaded(relative_path)
+                                    print(f"Uploaded file: {relative_path} ({self.upload_record.completed_files}/{self.upload_record.total_files})")
+                                    
+                        except Exception as e:
+                            retries += 1
+                            print(f"Upload error for {relative_path}: {str(e)} (retry {retries}/3)")
+                            await asyncio.sleep(1)
+                    
+                    if not success:
+                        # If still failed after retries, add to failed files
+                        failed_files.add((local_file, relative_path))
+                    
+                    # Mark as done in URL queue and remove from in_progress
+                    url_queue.task_done()
+                    file_queue.task_done()
+                    in_progress.remove((local_file, relative_path))
+                    
+                except Exception as e:
+                    print(f"Error in upload worker: {str(e)}")
+                    await asyncio.sleep(1)
+        
+        # Start worker tasks with optimized session
+        async with aiohttp.ClientSession(connector=connector) as session:
+            # Calculate number of workers based on system resources
+            num_url_workers = min(3, batch_size)  # Fewer URL workers to avoid overwhelming the API
+            num_upload_workers = min(Config.MAX_WORKERS, batch_size)
+            
+            # Create worker tasks
+            url_workers = [asyncio.create_task(url_worker()) for _ in range(num_url_workers)]
+            upload_workers = [asyncio.create_task(upload_worker(session)) for _ in range(num_upload_workers)]
+            
+            # Wait for queues to be processed
+            try:
+                await file_queue.join()
+                await url_queue.join()
+            except Exception as e:
+                print(f"Error waiting for queues: {str(e)}")
+            
+            # Cancel worker tasks
+            for task in url_workers + upload_workers:
                 task.cancel()
-
-            # Check if there are any remaining items in the queue
-            if not queue.empty():
-                print("Some files failed to upload after multiple attempts.")
-                return False
-
+            
+            # Handle any failed files with deep retry
+            if failed_files:
+                print(f"{len(failed_files)} files failed during normal upload, attempting deep retry...")
+                retry_success = 0
+                
+                # Try deep retry for each failed file
+                for local_file, relative_path in failed_files:
+                    if await self.retry_upload_with_new_connection(local_file, relative_path):
+                        retry_success += 1
+                
+                print(f"Deep retry recovered {retry_success}/{len(failed_files)} files")
+                
+                # Return failure if any files still failed
+                if retry_success < len(failed_files):
+                    return False
+        
         return True
 
     async def upload_zarr_files(self, file_paths: List[str]) -> bool:

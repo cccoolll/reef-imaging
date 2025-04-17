@@ -25,6 +25,9 @@ DATASET_ALIAS = "20250410-treatment-full"
 CONNECTION_TIMEOUT = 60  # Timeout for connection operations in seconds
 OPERATION_TIMEOUT = 120  # Timeout for Hypha operations in seconds
 MAX_RETRIES = 300  # Maximum retries for operations
+# Optimized concurrency settings
+BATCH_SIZE = 30  # Batch size for file uploads (increased from default)
+CONCURRENCY_LIMIT = 25  # Concurrent upload limit
 
 
 def get_timelapse_folders() -> List[str]:
@@ -107,14 +110,15 @@ async def process_folder(folder_path):
         print(f"Folder {folder_path} does not exist")
         return False
     
-    # Create uploader instance
+    # Create uploader instance with optimized concurrency
     uploader = ArtifactUploader(
         artifact_alias=DATASET_ALIAS,
         record_file=UPLOAD_TRACKER_FILE,
-        client_id=client_id
+        client_id=client_id,
+        concurrency_limit=CONCURRENCY_LIMIT
     )
     
-    # Create a fresh connection
+    # Create a fresh connection with TCP optimizations
     connection = HyphaConnection()
     
     try:
@@ -194,8 +198,21 @@ async def process_folder(folder_path):
         extracted_name = uploader.extract_date_time_from_path(folder_path)
         print(f"Processing directory: {folder_path} -> {extracted_name}")
         
-        # Upload the folder contents
-        success = await uploader.upload_treatment_data([folder_path])
+        # Upload the folder contents with optimized batch size
+        # Modified to use the optimized batch size parameter
+        to_upload = []
+        for root, _, files in os.walk(folder_path):
+            for file in files:
+                local_file = os.path.join(root, file)
+                rel_path = os.path.relpath(local_file, folder_path)
+                relative_path = os.path.join(extracted_name, rel_path)
+                to_upload.append((local_file, relative_path))
+        
+        print(f"Found {len(to_upload)} files to upload")
+        uploader.upload_record.set_total_files(len(to_upload))
+        
+        # Use the optimized upload_files_in_batches with higher batch size
+        success = await uploader.upload_files_in_batches(to_upload, batch_size=BATCH_SIZE)
         
         # Commit the dataset
         if success:
