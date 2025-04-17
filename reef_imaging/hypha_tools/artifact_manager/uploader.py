@@ -311,11 +311,18 @@ class ArtifactUploader:
                     for file in files:
                         local_file = os.path.join(root, file)
                         rel_path = os.path.relpath(local_file, file_path)
-                        relative_path = os.path.join(os.path.basename(file_path), rel_path)
+                        # Get basename without .zarr extension
+                        base_name = os.path.basename(file_path)
+                        if base_name.endswith('.zarr'):
+                            base_name = base_name[:-5]  # Remove the .zarr extension
+                        relative_path = os.path.join(base_name, rel_path)
                         to_upload.append((local_file, relative_path))
             else:
                 local_file = file_path
+                # Get basename without .zarr extension for individual files too
                 relative_path = os.path.basename(file_path)
+                if relative_path.endswith('.zarr'):
+                    relative_path = relative_path[:-5]  # Remove the .zarr extension
                 to_upload.append((local_file, relative_path))
 
         self.upload_record.set_total_files(len(to_upload))

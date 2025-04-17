@@ -413,7 +413,8 @@ async def process_folder(folder_name: str) -> bool:
     matching_zarr = None
     
     if folder_datetime:
-        matching_zarr = [f for f in zarr_files if folder_datetime in f]
+        # Match by datetime, ignore .zarr extension when comparing
+        matching_zarr = [f for f in zarr_files if folder_datetime in f.replace('.zarr', '')]
         if not matching_zarr:
             # If no exact match, use the most recently created zarr file
             print(f"No matching zarr file found for datetime {folder_datetime}, using the first available.")
