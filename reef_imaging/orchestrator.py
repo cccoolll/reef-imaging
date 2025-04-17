@@ -86,8 +86,6 @@ class OrchestrationSystem:
             try:
                 # Get all task statuses
                 task_statuses = await service.get_all_task_status()
-                logger.info(f"{service_name} task statuses: {task_statuses}")
-
                 # Check if any task has failed
                 if any(status == "failed" for status in task_statuses.values()):
                     logger.error(f"{service_name} service has failed tasks: {task_statuses}")
@@ -100,7 +98,6 @@ class OrchestrationSystem:
                     logger.error(f"{service_name} service hello_world check failed: {hello_world_result}")
                     raise Exception("Service not healthy")
                 
-                logger.info(f"{service_name} service is healthy")
             except Exception as e:
                 logger.error(f"{service_name} service health check failed: {e}")
                 logger.info(f"Attempting to reset only the {service_type} service...")

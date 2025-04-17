@@ -3,7 +3,7 @@
 This directory contains mirror services that proxy requests from the cloud server (https://hypha.aicell.io) to the local REEF imaging services. These services allow remote control of the microscope, robotic arm, and incubator while maintaining local control and safety measures.
 
 ## Services Overview
-
+![mirror sercies flow](docs/mirror_services_flow.png)
 1. **Mirror Microscope Control Service** (`mirror_squid_control.py`)
    - Mirrors the local microscope control service
    - Handles imaging, stage movement, and microscope settings
