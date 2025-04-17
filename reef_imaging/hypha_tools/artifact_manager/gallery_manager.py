@@ -26,7 +26,7 @@ class GalleryManager:
         
         # Default permissions if none provided
         if permissions is None:
-            permissions = {"*": "r+", "@": "r+"}
+            permissions = {"*": "r+", "@": "*", "misty-teeth-42051243": "*","google-oauth2|103047988474094226050": "*"}
         
         gallery_manifest = {
             "name": name,
@@ -47,7 +47,8 @@ class GalleryManager:
                            description: str, 
                            alias: str,
                            parent_id: str,
-                           version: str = "stage") -> None:
+                           version: str = "stage",
+                           permissions: Dict[str, str] = None) -> None:
         """Create a new dataset within a gallery"""
         await self.ensure_connected()
         
@@ -60,6 +61,7 @@ class GalleryManager:
             parent_id=parent_id,
             alias=alias,
             manifest=dataset_manifest,
+            config={"permissions": permissions},
             version=version,
             overwrite=True,
         )
@@ -107,16 +109,26 @@ async def create_gallery_example() -> None:
             description="A collection for organizing imaging datasets acquired by microscopes",
             alias="reef-imaging/image-map-of-u2os-fucci-drug-treatment"
         )
-        
+    finally:
+        await gallery_manager.connection.disconnect()
+
+async def create_dataset_example() -> None:
+    """Example of creating a dataset"""
+    gallery_manager = GalleryManager()
+    try:
         # Create a dataset in the gallery
         await gallery_manager.create_dataset(
-            name="image-map-20250410-treatment",
+            name="image-map-20250410-treatment-full",
             description="The Image Map of U2OS FUCCI Drug Treatment",
-            alias="image-map-20250410-treatment",
-            parent_id="reef-imaging/image-map-of-u2os-fucci-drug-treatment"
+            alias="image-map-20250410-treatment-full",
+            parent_id="reef-imaging/image-map-of-u2os-fucci-drug-treatment",
+            version="stage",
+            permissions = {"*": "r", "@": "*", "misty-teeth-42051243": "*","google-oauth2|103047988474094226050": "*"}
         )
     finally:
         await gallery_manager.connection.disconnect()
+
+    
 
 async def delete_dataset_example() -> None:
     """Example of deleting a dataset"""
@@ -127,4 +139,4 @@ async def delete_dataset_example() -> None:
     await gallery_manager.connection.disconnect()
 
 if __name__ == "__main__":
-    asyncio.run(delete_dataset_example()) 
+    asyncio.run(create_gallery_example()) 
