@@ -2,7 +2,7 @@ import os
 import asyncio
 from typing import Dict, Any, Optional
 
-from .core import HyphaConnection, Config
+from core import HyphaConnection, Config
 
 class GalleryManager:
     """Manages galleries and datasets in Hypha"""
@@ -121,8 +121,10 @@ async def create_gallery_example() -> None:
 async def delete_dataset_example() -> None:
     """Example of deleting a dataset"""
     gallery_manager = GalleryManager()
-    await gallery_manager.delete(artifact_id="image-map-20250410-treatment-full", delete_files=True, recursive=True)
+    await gallery_manager.connection.connect(client_id=None)
+    await gallery_manager.delete(artifact_id="reef-imaging/image-map-20250410-treatment-full", delete_files=True, recursive=True)
+    print("Dataset deleted.")
     await gallery_manager.connection.disconnect()
 
 if __name__ == "__main__":
-    asyncio.run(create_gallery_example()) 
+    asyncio.run(delete_dataset_example()) 
