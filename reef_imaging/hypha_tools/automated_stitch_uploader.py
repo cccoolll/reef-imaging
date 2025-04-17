@@ -29,6 +29,10 @@ client_id = "reef-client-stitch-uploader"
 # Load environment variables
 load_dotenv()
 ARTIFACT_ALIAS = "image-map-20250410-treatment-full"
+# Timeout and retry settings
+CONNECTION_TIMEOUT = 60  # Timeout for connection operations in seconds
+OPERATION_TIMEOUT = 60  # Timeout for Hypha operations in seconds
+MAX_RETRIES = 300  # Maximum retries for operations
 
 
 def get_timelapse_folders() -> List[str]:
@@ -198,6 +202,37 @@ def stitch_folder(folder_path: str) -> bool:
         return False
 
 
+async def connect_with_timeout(connection, client_id, timeout=CONNECTION_TIMEOUT, max_retries=MAX_RETRIES):
+    """Connect to Hypha with timeout and retry logic."""
+    retry_count = 0
+    while retry_count < max_retries:
+        try:
+            # Create task with timeout
+            connect_task = asyncio.create_task(connection.connect(client_id=client_id))
+            await asyncio.wait_for(connect_task, timeout=timeout)
+            print("Connection established successfully")
+            return True
+        except asyncio.TimeoutError:
+            retry_count += 1
+            print(f"Connection attempt timed out after {timeout}s (attempt {retry_count}/{max_retries})")
+            # Clean up the task and connection
+            if not connect_task.done():
+                connect_task.cancel()
+            await connection.disconnect()
+            if retry_count < max_retries:
+                # Wait before retrying
+                await asyncio.sleep(5)
+        except Exception as e:
+            retry_count += 1
+            print(f"Connection error: {e} (attempt {retry_count}/{max_retries})")
+            await connection.disconnect()
+            if retry_count < max_retries:
+                await asyncio.sleep(5)
+    
+    print("Failed to connect after multiple attempts")
+    return False
+
+
 async def upload_zarr_file(zarr_file: str) -> bool:
     """Upload a zarr file to the artifact manager."""
     zarr_path = os.path.join(STITCHED_DIR, zarr_file)
@@ -214,40 +249,78 @@ async def upload_zarr_file(zarr_file: str) -> bool:
     
     # Create a fresh connection
     connection = HyphaConnection()
-    connection_task = None
     
     try:
-        # Connect to Hypha
-        connection_task = asyncio.create_task(connection.connect(client_id=client_id))
-        await connection_task
+        # Connect to Hypha with timeout and retry
+        connect_success = await connect_with_timeout(connection, client_id)
+        if not connect_success:
+            print("Failed to establish connection to Hypha")
+            return False
         
         # Assign connection to uploader
         uploader.connection = connection
         
         # Put dataset in staging mode
-        try:
-            print(f"Putting dataset {ARTIFACT_ALIAS} in staging mode...")
-            artifact_manager = connection.artifact_manager
+        staging_success = False
+        retry_count = 0
+        
+        while not staging_success and retry_count < MAX_RETRIES:
+            try:
+                print(f"Putting dataset {ARTIFACT_ALIAS} in staging mode...")
+                artifact_manager = connection.artifact_manager
+                
+                # Read the current manifest with timeout
+                dataset = await asyncio.wait_for(
+                    artifact_manager.read(artifact_id=ARTIFACT_ALIAS, silent=True),
+                    timeout=OPERATION_TIMEOUT
+                )
+                
+                # Put the dataset in staging mode with timeout
+                await asyncio.wait_for(
+                    artifact_manager.edit(
+                        artifact_id=ARTIFACT_ALIAS,
+                        manifest=dataset,  # Preserve the same manifest
+                        version="stage"    # Put in staging mode
+                    ),
+                    timeout=OPERATION_TIMEOUT
+                )
+                
+                print("Dataset is now in staging mode")
+                staging_success = True
+                
+            except asyncio.TimeoutError:
+                retry_count += 1
+                print(f"Staging operation timed out (attempt {retry_count}/{MAX_RETRIES})")
+                
+                # Reset connection on timeout
+                await connection.disconnect()
+                if retry_count < MAX_RETRIES:
+                    connect_success = await connect_with_timeout(connection, client_id)
+                    if not connect_success:
+                        return False
+                    uploader.connection = connection
+                    await asyncio.sleep(5)
             
-            # Read the current manifest
-            dataset = await artifact_manager.read(
-                artifact_id=ARTIFACT_ALIAS,
-                silent=True
-            )
-            
-            # Put the dataset in staging mode
-            await artifact_manager.edit(
-                artifact_id=ARTIFACT_ALIAS,
-                manifest=dataset,  # Preserve the same manifest
-                version="stage"    # Put in staging mode
-            )
-            print("Dataset is now in staging mode")
-            
-        except Exception as e:
-            print(f"Error putting dataset in staging mode: {e}")
-            if "not found" in str(e).lower():
-                print("Dataset not found. It may need to be created first.")
-                return False
+            except Exception as e:
+                retry_count += 1
+                print(f"Error putting dataset in staging mode: {e} (attempt {retry_count}/{MAX_RETRIES})")
+                
+                if "not found" in str(e).lower():
+                    print("Dataset not found. It may need to be created first.")
+                    return False
+                
+                # Reset connection on error
+                await connection.disconnect()
+                if retry_count < MAX_RETRIES:
+                    connect_success = await connect_with_timeout(connection, client_id)
+                    if not connect_success:
+                        return False
+                    uploader.connection = connection
+                    await asyncio.sleep(5)
+        
+        if not staging_success:
+            print("Failed to put dataset in staging mode after multiple attempts")
+            return False
         
         # Add zarr path to the list of zarr files to upload
         zarr_paths = [zarr_path]
@@ -264,24 +337,39 @@ async def upload_zarr_file(zarr_file: str) -> bool:
                 try:
                     # Refresh connection before commit
                     await connection.disconnect()
-                    connection_task = asyncio.create_task(connection.connect(client_id=client_id))
-                    await connection_task
+                    connect_success = await connect_with_timeout(connection, client_id)
+                    if not connect_success:
+                        print("Failed to reconnect before commit")
+                        if commit_attempts < 4:  # Try again if we have attempts left
+                            commit_attempts += 1
+                            await asyncio.sleep(5)
+                            continue
+                        else:
+                            return False
                     
-                    # Commit the dataset
-                    await connection.artifact_manager.commit(ARTIFACT_ALIAS)
+                    # Update uploader connection
+                    uploader.connection = connection
+                    
+                    # Commit the dataset with timeout
+                    print(f"Committing dataset (attempt {commit_attempts + 1}/5)...")
+                    await asyncio.wait_for(
+                        connection.artifact_manager.commit(ARTIFACT_ALIAS),
+                        timeout=OPERATION_TIMEOUT
+                    )
                     print("Dataset committed successfully.")
                     commit_success = True
+                    
+                except asyncio.TimeoutError:
+                    commit_attempts += 1
+                    print(f"Commit operation timed out (attempt {commit_attempts}/5)")
+                    await connection.disconnect()
+                    await asyncio.sleep(5)
+                    
                 except Exception as e:
                     commit_attempts += 1
                     print(f"Error committing dataset (attempt {commit_attempts}/5): {str(e)}")
-                    await asyncio.sleep(5)
-                    
-                    # Reset connection
-                    if connection_task:
-                        connection_task.cancel()
                     await connection.disconnect()
-                    connection_task = asyncio.create_task(connection.connect(client_id=client_id))
-                    await connection_task
+                    await asyncio.sleep(5)
             
             if not commit_success:
                 print("WARNING: Failed to commit the dataset after multiple attempts.")
@@ -294,8 +382,6 @@ async def upload_zarr_file(zarr_file: str) -> bool:
         return False
     finally:
         # Clean up connection
-        if connection_task and not connection_task.done():
-            connection_task.cancel()
         await connection.disconnect()
 
 
