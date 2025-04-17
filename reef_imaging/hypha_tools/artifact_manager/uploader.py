@@ -232,7 +232,7 @@ class ArtifactUploader:
         print(f"Failed to upload {relative_path} after {max_retries} attempts")
         return False
     
-    async def retry_upload_with_new_connection(
+    async def deep_retry_upload(
         self,
         local_file: str, 
         relative_path: str,
@@ -240,8 +240,8 @@ class ArtifactUploader:
         initial_delay: int = Config.INITIAL_RETRY_DELAY
     ) -> bool:
         """
-        Retry uploading a file with a completely new connection.
-        This is a more aggressive retry strategy for consistently failing files.
+        Deep retry for uploading a file that failed during batch process.
+        Uses existing connection with incremental backoff strategy.
         """
         retry_count = 0
         retry_delay = initial_delay
@@ -252,50 +252,31 @@ class ArtifactUploader:
                 await asyncio.sleep(retry_delay)
                 retry_delay = min(retry_delay * 2, Config.MAX_RETRY_DELAY)
             
-            # Create a fresh connection for this specific retry
-            temp_connection = HyphaConnection()
-            temp_uploader = None
-            
             try:
-                # Connect with a timeout
-                await asyncio.wait_for(
-                    temp_connection.connect(client_id=self.client_id),
-                    timeout=Config.CONNECTION_TIMEOUT
-                )
+                # Ensure existing connection is valid
+                if not self.connection.artifact_manager:
+                    connected = await self.connect_with_retry(self.client_id)
+                    if not connected:
+                        print(f"Failed to establish connection during deep retry {retry_count}")
+                        retry_count += 1
+                        continue
                 
-                # Create a temporary uploader with this connection
-                temp_uploader = ArtifactUploader(
-                    self.artifact_alias,
-                    self.upload_record.record_file,
-                    connection=temp_connection,
-                    concurrency_limit=1  # Use 1 for individual retries
-                )
-                
-                # Try the upload with a fresh session
+                # Try the upload with a new session
                 async with aiohttp.ClientSession() as session:
-                    success = await temp_uploader.upload_single_file(
+                    success = await self.upload_single_file(
                         local_file,
                         relative_path,
                         session,
-                        max_retries=10 
+                        max_retries=5
                     )
                     
                     if success:
-                        # Refresh our record from disk
+                        # Update record from disk
                         self.upload_record.load()
                         return True
-                
-            except asyncio.TimeoutError:
-                print(f"Connection timed out during deep retry {retry_count} for {relative_path}")
+            
             except Exception as e:
                 print(f"Error during deep retry {retry_count} for {relative_path}: {str(e)}")
-            finally:
-                # Clean up the temporary connection
-                if temp_connection:
-                    try:
-                        await temp_connection.disconnect()
-                    except:
-                        pass
             
             retry_count += 1
         
@@ -551,10 +532,17 @@ class ArtifactUploader:
                 print(f"{len(failed_files)} files failed during normal upload, attempting deep retry...")
                 retry_success = 0
                 
-                # Try deep retry for each failed file
-                for local_file, relative_path in failed_files:
-                    if await self.retry_upload_with_new_connection(local_file, relative_path):
-                        retry_success += 1
+                # Ensure we have a working connection before starting deep retries
+                await self.connection.disconnect()
+                await asyncio.sleep(5)  # Wait for server to clean up
+                
+                # Reconnect with our main connection
+                connect_success = await self.connect_with_retry(max_retries=10)
+                if connect_success:
+                    # Try deep retry for each failed file using the existing connection
+                    for local_file, relative_path in failed_files:
+                        if await self.deep_retry_upload(local_file, relative_path):
+                            retry_success += 1
                 
                 print(f"Deep retry recovered {retry_success}/{len(failed_files)} files")
                 
