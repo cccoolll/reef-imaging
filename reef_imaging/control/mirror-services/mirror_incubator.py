@@ -122,7 +122,7 @@ class MirrorIncubatorService:
                     self.local_service = None
 
                 retry_count = 0
-                while retry_count < 300:
+                while retry_count < 30:
                     try:
                         # Rerun the setup method
                         self.setup_task = asyncio.create_task(self.setup())

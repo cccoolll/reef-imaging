@@ -100,7 +100,7 @@ class MirrorMicroscopeService:
     async def check_service_health(self):
         """Check if the service is healthy and rerun setup if needed"""
         retry_count = 0
-        while retry_count < 300:
+        while retry_count < 30:
             try:
                 # Try to get the service status
                 if self.cloud_service_id:
