@@ -10,6 +10,13 @@ REEF Imaging provides a comprehensive system for automated microscopy workflows 
 - Data management and storage through Hypha platform
 - Analysis tools for biological experiments
 
+## Lab Setup
+
+![Lab Overview](docs/lab_overview.jpg)
+
+Check out our system demonstration video:
+[REEF Imaging System Demo Video](https://drive.google.com/file/d/1nQLgzMsSR3JCzMfe99mdpwYSvpYZAS7q/view?usp=sharing)
+
 ## Project Structure
 
 - **reef_imaging/** - Main package
