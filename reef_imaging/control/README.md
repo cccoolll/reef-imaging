@@ -123,11 +123,6 @@ python start_hypha_service_robotic_arm.py --local
 cd squid-control
 python start_hypha_service_squid_control.py --local
 
-# Start mirror services (for remote operation)
-cd mirror-services
-python start_all_mirror_services.py
-```
-
 ## Service Architecture
 
 Each service follows a similar pattern:
