@@ -60,6 +60,7 @@ class ArtifactUploader:
 
         retries = 0
         current_delay = retry_delay
+        connection_reset = False
         
         while retries < max_retries:
             try:
@@ -70,8 +71,6 @@ class ArtifactUploader:
                         print(f"Failed to ensure connection for {relative_path}")
                         retries += 1
                         await asyncio.sleep(current_delay)
-                        # Reset connection for the next attempt
-                        await self.connection.disconnect()
                         current_delay = min(current_delay * 2, 60)  # Exponential backoff up to 60s
                         continue
 
@@ -83,15 +82,12 @@ class ArtifactUploader:
                         )
                     except asyncio.TimeoutError:
                         print(f"Timeout getting presigned URL for {relative_path}")
-                        # Reset connection and retry
-                        await self.connection.disconnect()
                         retries += 1
                         await asyncio.sleep(current_delay)
                         current_delay = min(current_delay * 2, 60)
                         continue
                     except Exception as e:
                         print(f"Error getting presigned URL for {relative_path}: {str(e)}")
-                        await self.connection.disconnect()
                         retries += 1
                         await asyncio.sleep(current_delay)
                         current_delay = min(current_delay * 2, 60)
@@ -133,9 +129,12 @@ class ArtifactUploader:
                 retries += 1
                 await asyncio.sleep(current_delay)
                 current_delay = min(current_delay * 2, 60)
-                # Try to reset connection on any error
+
+            # Reset connection only after 5 failed attempts
+            if retries >= 5 and not connection_reset:
                 try:
                     await self.connection.disconnect()
+                    connection_reset = True
                 except:
                     pass
 
