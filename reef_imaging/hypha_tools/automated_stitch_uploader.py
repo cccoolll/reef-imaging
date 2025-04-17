@@ -120,7 +120,17 @@ def stitch_folder(folder_path: str) -> bool:
         folder_name = os.path.basename(folder_path)
         folder_datetime = extract_datetime_from_folder(folder_name)
         zarr_filename = f"{folder_datetime}.zarr" if folder_datetime else f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.zarr"
+        zarr_filepath = os.path.join(STITCHED_DIR, zarr_filename)
         print(f"Will create zarr file: {zarr_filename} for folder: {folder_name}")
+        
+        # Check if zarr file already exists and remove it if it does
+        if os.path.exists(zarr_filepath):
+            print(f"Zarr file {zarr_filepath} already exists. Removing it before proceeding.")
+            if os.path.isdir(zarr_filepath):
+                shutil.rmtree(zarr_filepath)
+            else:
+                os.remove(zarr_filepath)
+            print(f"Removed existing zarr file: {zarr_filepath}")
         
         # Paths to input data
         image_folder = os.path.join(folder_path, "0")
