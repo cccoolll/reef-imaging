@@ -181,13 +181,9 @@ package.json
 reef_imaging/control/dorna-control/dorna.log.1
 traefik/acme/acme.json
 reef_imaging/control/cytomat-control/samples.json
-reef_imaging/logs/experiment_client.txt
-reef_imaging/logs/experiment_server.txt
 *record.json
 reef_imaging/demo-async.ipynb
 reef_imaging/demo-async-local.ipynb
 reef_imaging/imaging_workflow_status.json
-reef_imaging/hypha_tools/artifact_manager/treatment_upload_progress.txt
-reef_imaging/hypha_tools/artifact_manager/stitch_upload_progress.txt
 reef_imaging/hypha_tools/treatment_upload_progress.txt
 reef_imaging/hypha_tools/stitch_upload_progress.txt

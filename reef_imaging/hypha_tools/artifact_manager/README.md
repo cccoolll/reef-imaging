@@ -7,6 +7,7 @@ This package provides a set of classes and utilities for working with the Hypha 
 - **Gallery Management**: Create and manage galleries and datasets
 - **File Uploading**: Upload files to the Hypha Artifact Manager with robust error handling and retries
 - **Image Processing**: Stitch microscopy images and create multi-resolution pyramids
+- **Treatment Data Handling**: Upload and manage scientific treatment data
 
 ## Installation
 
@@ -73,6 +74,35 @@ async def upload_files():
 
 # Run the async function
 asyncio.run(upload_files())
+```
+
+### Upload Treatment Data
+
+```python
+import asyncio
+from reef_imaging.hypha_tools.artifact_manager import ArtifactUploader
+
+async def upload_treatment_data():
+    # List of source directories to upload
+    source_dirs = [
+        "/path/to/experiment1",
+        "/path/to/experiment2"
+    ]
+    
+    uploader = ArtifactUploader(
+        artifact_alias="treatment-dataset",
+        record_file="treatment_upload_record.json"
+    )
+    
+    success = await uploader.upload_treatment_data(source_dirs)
+    
+    if success:
+        print("Treatment data uploaded successfully!")
+    else:
+        print("Some treatment data failed to upload")
+
+# Run the async function
+asyncio.run(upload_treatment_data())
 ```
 
 ### Stitch Images
@@ -178,6 +208,25 @@ The package is organized into the following modules:
 - `gallery_manager.py`: Gallery and dataset management
 - `uploader.py`: File uploading with robust error handling
 - `stitch_manager.py`: Image stitching and processing utilities
+- `image_processing/`: Additional image processing utilities
+  - `experiment_image_stiticing.py`: Specialized stitching for experiment images
+  - `experiment_preview_tile.py`: Generate preview tiles for experiments
+
+## Available Classes
+
+The package exports the following classes:
+
+- `Config`: Configuration management using environment variables
+- `HyphaConnection`: Connection to the Hypha server
+- `UploadRecord`: Track and resume file uploads
+- `GalleryManager`: Create and manage galleries and datasets
+- `ArtifactUploader`: Upload files with robust error handling
+- `StitchManager`: Stitch microscopy images into zarr files
+- `ImageFileParser`: Parse image filenames to extract metadata
+- `ImagingParameters`: Process microscopy imaging parameters
+- `ImageProcessor`: Process individual images
+- `StitchCanvas`: Create a canvas for stitching images
+- `ZarrWriter`: Write data to zarr files
 
 ## Contributing
 
