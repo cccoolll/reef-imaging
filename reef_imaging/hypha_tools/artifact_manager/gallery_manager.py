@@ -2,7 +2,7 @@ import os
 import asyncio
 from typing import Dict, Any, Optional
 
-from core import HyphaConnection, Config
+from .core import HyphaConnection, Config
 
 class GalleryManager:
     """Manages galleries and datasets in Hypha"""
