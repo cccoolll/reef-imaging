@@ -47,7 +47,7 @@ class ArtifactUploader:
                     print(f"Waiting {delay:.1f}s before reconnect attempt (client conflict detected)")
                     await asyncio.sleep(delay)
                 
-                print(f"Attempting connection to {self.connection.api_url} with client_id: {self.client_id}")
+                print(f"Attempting connection to {self.connection.server_url} with client_id: {self.client_id}")
                 await self.connection.connect(client_id=self.client_id)
                 print("Connection established successfully")
                 return True
