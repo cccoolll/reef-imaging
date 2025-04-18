@@ -8,6 +8,33 @@ This package provides a set of classes and utilities for working with the Hypha 
 - **File Uploading**: Upload files to the Hypha Artifact Manager with robust error handling and retries
 - **Treatment Data Handling**: Upload and manage scientific treatment data
 
+## Workflow Overview
+
+The package includes two main upload workflows:
+
+1. **Treatment Upload**: Uploads raw experiment data directly to Hypha
+2. **Stitch Upload**: Stitches microscopy images into zarr files before uploading
+
+Both workflows use optimized connection handling with retry logic, concurrent batch uploads, and progress tracking.
+
+![Reef Imaging Upload Process Architecture](upload_process_diagram.png)
+
+To generate the workflow diagram from the included DOT file:
+
+```bash
+# Install Graphviz if needed
+# Ubuntu/Debian
+sudo apt-get install graphviz
+
+# macOS
+brew install graphviz
+
+# Generate PNG image from DOT file
+dot -Tpng upload_process.dot -o upload_process_diagram.png
+```
+
+The diagram visualizes how both uploaders share common connection management while handling different types of scientific data processing.
+
 ## Installation
 
 The package is designed to be used within the Reef Imaging codebase. No additional installation is required.
