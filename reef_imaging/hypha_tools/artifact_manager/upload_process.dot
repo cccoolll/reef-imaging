@@ -125,10 +125,13 @@ digraph ReefImagingUploadProcess {
     treatment_next -> treatment_start [label="More folders", constraint=false, style=dashed];
     stitch_next -> stitch_start [label="More folders", constraint=false, style=dashed];
     
-    // Exit point
-    exit [label="End Process", shape=oval, fillcolor=salmon];
-    treatment_next -> exit [label="No more folders"];
-    stitch_next -> exit [label="No more folders"];
+    // Exit points for each process
+    exit_stitch [label="End Process", shape=oval, fillcolor=salmon];
+    exit_treatment [label="End Process", shape=oval, fillcolor=salmon];
+    
+    // Connect exit points to respective processes
+    stitch_next -> exit_stitch [label="No more folders"];
+    treatment_next -> exit_treatment [label="No more folders"];
     
     // Files and data stores
     node [shape=cylinder, fillcolor=lightgrey];
