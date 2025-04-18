@@ -1,0 +1,208 @@
+digraph ReefImagingUploadProcess {
+    // Graph settings
+    rankdir=TB;
+    compound=true;
+    fontname="Arial";
+    fontsize=14;
+    node [fontname="Arial", fontsize=12, shape=box, style="rounded,filled", fillcolor=lightblue];
+    edge [fontname="Arial", fontsize=10];
+    
+    // Title
+    title [label="Reef Imaging Upload Process Architecture", shape=none, fillcolor=white, fontsize=20, fontcolor=darkblue];
+    
+    // Subgraph for common initialization
+    subgraph cluster_init {
+        label="Initialization";
+        style="rounded,filled";
+        fillcolor=lightyellow;
+        
+        start [label="Start", shape=oval];
+        get_folders [label="Get timelapse folders\nmatching experiment ID"];
+        get_processed [label="Check already\nprocessed folders"];
+        user_input [label="Ask user for\nstart/end folders"];
+        
+        start -> get_folders -> get_processed -> user_input;
+    }
+    
+    // OME-Zarr Stitch Upload Process
+    subgraph cluster_stitch {
+        label="OME-Zarr Stitch Upload Process";
+        style="rounded,filled";
+        fillcolor=lightpink;
+        
+        stitch_start [label="Stitch Upload\nProcess", shape=oval];
+        check_done [label="Check for .done file"];
+        done_exists [label=".done file exists?", shape=diamond];
+        stitch_folder [label="Stitch folder\n(create zarr file)"];
+        stitch_success [label="Stitching success?", shape=diamond];
+        find_zarr [label="Find matching zarr file"];
+        upload_zarr [label="Upload zarr file"];
+        staging_zarr [label="Put artifact in\nstaging mode"];
+        batch_upload [label="Upload zarr files\nin batches"];
+        commit_zarr [label="Commit dataset"];
+        cleanup_zarr [label="Clean up zarr file"];
+        stitch_record [label="Save record of\nprocessed folder"];
+        stitch_next [label="Move to next folder", shape=oval];
+        
+        stitch_start -> check_done -> done_exists;
+        done_exists -> find_zarr [label="Yes"];
+        done_exists -> stitch_folder [label="No"];
+        stitch_folder -> stitch_success;
+        stitch_success -> find_zarr [label="Yes"];
+        stitch_success -> stitch_next [label="No", style=dashed, color=red];
+        find_zarr -> upload_zarr;
+        upload_zarr -> staging_zarr -> batch_upload -> commit_zarr -> cleanup_zarr -> stitch_record -> stitch_next;
+    }
+    
+    // Hypha Connection Management
+    subgraph cluster_connection {
+        label="Hypha Connection Management";
+        style="rounded,filled";
+        fillcolor=lightgreen;
+        
+        connect [label="Attempt connection\nto Hypha"];
+        timeout [label="Connection\ntimeout?", shape=diamond];
+        error [label="Connection\nerror?", shape=diamond];
+        client_conflict [label="Client ID\nconflict?", shape=diamond];
+        retry_connect [label="Retry with\nexponential backoff"];
+        connected [label="Connection\nestablished"];
+        
+        connect -> timeout;
+        timeout -> retry_connect [label="Yes"];
+        timeout -> connected [label="No"];
+        
+        connect -> error;
+        error -> client_conflict [label="Yes"];
+        error -> connected [label="No"];
+        
+        client_conflict -> retry_connect [label="Yes\n(longer delay)"];
+        retry_connect -> connect;
+    }
+    
+    // Original Treatment Data Upload Process
+    subgraph cluster_treatment {
+        label="Original Treatment Data Upload Process";
+        style="rounded,filled";
+        fillcolor=lightcyan;
+        
+        treatment_start [label="Treatment Upload\nProcess", shape=oval];
+        treatment_staging [label="Put dataset in\nstaging mode"];
+        treatment_upload [label="Upload folder contents\nin batches"];
+        treatment_commit [label="Commit dataset"];
+        treatment_record [label="Save record of\nprocessed folder"];
+        treatment_next [label="Move to next folder", shape=oval];
+        
+        treatment_start -> treatment_staging -> treatment_upload -> treatment_commit -> treatment_record -> treatment_next;
+    }
+    
+    // Uploader process
+    subgraph cluster_uploader {
+        label="Uploader Process";
+        style="rounded,filled";
+        fillcolor=lightcoral;
+        
+        uploader_start [label="Start Uploading", shape=oval];
+        create_queue [label="Create File Queue"];
+        create_url_queue [label="Create URL Queue"];
+        get_presigned_urls [label="Get Presigned URLs"];
+        upload_files [label="Upload Files in Batches"];
+        retry_failed [label="Retry Failed Uploads"];
+        commit_dataset [label="Commit Dataset"];
+        uploader_end [label="End Uploading", shape=oval];
+        
+        uploader_start -> create_queue -> create_url_queue -> get_presigned_urls -> upload_files -> retry_failed -> commit_dataset -> uploader_end;
+    }
+    
+    // Connect the subgraphs
+    user_input -> treatment_start [lhead=cluster_treatment];
+    user_input -> stitch_start [lhead=cluster_stitch];
+    
+    // Connection is used by both processes
+    treatment_start -> connect [ltail=cluster_treatment, lhead=cluster_connection, style=dashed];
+    stitch_start -> connect [ltail=cluster_stitch, lhead=cluster_connection, style=dashed];
+    
+    // Demonstrate folder loop
+    treatment_next -> treatment_start [label="More folders", constraint=false, style=dashed];
+    stitch_next -> stitch_start [label="More folders", constraint=false, style=dashed];
+    
+    // Exit point
+    exit [label="End Process", shape=oval, fillcolor=salmon];
+    treatment_next -> exit [label="No more folders"];
+    stitch_next -> exit [label="No more folders"];
+    
+    // Files and data stores
+    node [shape=cylinder, fillcolor=lightgrey];
+    
+    stitch_upload_progress [label="stitch_upload_progress.txt"];
+    zarr_upload_record [label="zarr_upload_record.json"];
+    treatment_progress [label="treatment_upload_progress.txt"];
+    treatment_record [label="treatment_upload_record.json"];
+    
+    stitch_record -> stitch_upload_progress [style=dashed];
+    batch_upload -> zarr_upload_record [style=dashed];
+    treatment_record -> treatment_progress [style=dashed];
+    treatment_upload -> treatment_record [style=dashed];
+    
+    // Subgraph for shared concepts between processes
+    subgraph cluster_shared {
+        label="Shared Components";
+        style="rounded,filled";
+        fillcolor=lavender;
+        
+        artifact_manager [label="Artifact Manager"];
+        hypha_connection [label="Hypha Connection"];
+        concurrency [label="Optimized\nConcurrency\nSettings"];
+        error_handling [label="Error Handling\nwith Retries"];
+        
+        artifact_manager -> hypha_connection [style=dotted];
+        hypha_connection -> concurrency [style=dotted];
+        hypha_connection -> error_handling [style=dotted];
+    }
+    
+    // Legend
+    subgraph cluster_legend {
+        label="Legend";
+        style="rounded,filled";
+        fillcolor=white;
+        
+        node [shape=box, width=0.5, height=0.3, style="filled", fontsize=10];
+        process [label="Process", fillcolor=lightblue];
+        decision [label="Decision", shape=diamond, fillcolor=lightblue];
+        data [label="Data Store", shape=cylinder, fillcolor=lightgrey];
+        
+        start_stop [label="Start/Stop", shape=oval, fillcolor=lightblue];
+        
+        process -> decision [style=invis];
+        decision -> data [style=invis];
+        data -> start_stop [style=invis];
+    }
+    
+    // Connect uploader process to existing processes
+    treatment_upload -> uploader_start [lhead=cluster_uploader, style=dashed];
+    upload_zarr -> uploader_start [lhead=cluster_uploader, style=dashed];
+    
+    // Detailed queue management
+    subgraph cluster_queue {
+        label="Queue Management";
+        style="rounded,filled";
+        fillcolor=lightgoldenrodyellow;
+        
+        file_queue [label="File Queue", shape=cylinder];
+        url_queue [label="URL Queue", shape=cylinder];
+        
+        create_queue -> file_queue;
+        create_url_queue -> url_queue;
+        get_presigned_urls -> url_queue;
+        upload_files -> file_queue;
+        upload_files -> url_queue;
+        retry_failed -> file_queue [style=dashed];
+    }
+    
+    // Connect queue management to uploader process
+    create_queue -> file_queue [lhead=cluster_queue, style=dotted];
+    create_url_queue -> url_queue [lhead=cluster_queue, style=dotted];
+    get_presigned_urls -> url_queue [lhead=cluster_queue, style=dotted];
+    upload_files -> file_queue [lhead=cluster_queue, style=dotted];
+    upload_files -> url_queue [lhead=cluster_queue, style=dotted];
+    retry_failed -> file_queue [lhead=cluster_queue, style=dotted];
+} 
