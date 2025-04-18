@@ -198,4 +198,7 @@ digraph ReefImagingUploadProcess {
         file_queue [label="File Queue", shape=parallelogram];
         url_queue [label="URL Queue", shape=parallelogram];
     }
+    
+    // Demonstrate connection reset after upload failures
+    retry_failed -> connect [style=dashed, color=red, label="Reset Connection after failures"];
 } 
