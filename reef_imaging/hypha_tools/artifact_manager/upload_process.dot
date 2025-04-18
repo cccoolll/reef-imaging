@@ -193,5 +193,9 @@ digraph ReefImagingUploadProcess {
         url_queue -> file_queue;
         upload_files -> file_queue;
         retry_failed -> file_queue [style=dashed];
+        
+        // Represent queues with a shape that suggests a series of items
+        file_queue [label="File Queue", shape=parallelogram];
+        url_queue [label="URL Queue", shape=parallelogram];
     }
 } 
