@@ -196,11 +196,9 @@ stitch_images()
 
 ## Examples
 
-The package includes an `examples.py` module with complete examples of common workflows. You can run these examples from the command line:
+You can run these examples from the command line:
 
 ```bash
-# Run the full pipeline
-python -m reef_imaging.hypha_tools.artifact_manager.examples
 
 # Run specific examples
 python -m reef_imaging.hypha_tools.artifact_manager.examples gallery
