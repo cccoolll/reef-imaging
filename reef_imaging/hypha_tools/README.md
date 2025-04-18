@@ -19,6 +19,19 @@ A collection of utilities for working with the [Artifact manager](https://docs.a
     - Image stitching
     - Gallery management
 
+## Workflow Diagram
+
+The following diagram illustrates the workflow of the automated uploaders and artifact management:
+
+![Upload Process Workflow](artifact_manager/upload_process_diagram.png)
+
+To generate this diagram, use the provided script:
+
+```bash
+cd artifact_manager
+./generate_diagram.sh
+```
+
 ## Data Files
 
 - `treatment_upload_record.json` - Tracks uploaded treatment data
