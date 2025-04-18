@@ -192,14 +192,39 @@ digraph ReefImagingUploadProcess {
         
         create_url_queue -> url_queue [style=dotted];
         get_presigned_urls -> url_queue;
-        create_queue -> file_queue [style=dotted];
-        url_queue -> file_queue;
-        upload_files -> file_queue;
-        retry_failed -> file_queue [style=dashed];
+        create_queue -> upload_queue [style=dotted];
+        url_queue -> upload_queue;
+        upload_files -> upload_queue;
+        retry_failed -> upload_queue [style=dashed];
         
         // Represent queues with a shape that suggests a series of items
-        file_queue [label="File Queue", shape=parallelogram];
+        upload_queue [label="Upload Queue", shape=parallelogram];
         url_queue [label="URL Queue", shape=parallelogram];
+        
+        // Add parallel workers inside the queue management cluster
+        subgraph cluster_url_workers {
+            label="URL Queue Workers";
+            style="dotted";
+            fillcolor=lightyellow;
+            rank=same;
+            worker1 [label="URL Worker 1", shape=ellipse, style=filled, fillcolor=lightgrey];
+            worker2 [label="URL Worker 2", shape=ellipse, style=filled, fillcolor=lightgrey];
+            worker3 [label="URL Worker 3", shape=ellipse, style=filled, fillcolor=lightgrey];
+        }
+        
+        subgraph cluster_upload_workers {
+            label="Upload Queue Workers";
+            style="dotted";
+            fillcolor=lightyellow;
+            rank=same;
+            upload_worker1 [label="Upload Worker 1", shape=ellipse, style=filled, fillcolor=lightgrey];
+            upload_worker2 [label="Upload Worker 2", shape=ellipse, style=filled, fillcolor=lightgrey];
+            upload_worker3 [label="Upload Worker 3", shape=ellipse, style=filled, fillcolor=lightgrey];
+        }
+        
+        // Connect workers to queues with cleaner layout
+        url_queue -> {worker1 worker2 worker3} [constraint=false];
+        upload_queue -> {upload_worker1 upload_worker2 upload_worker3} [constraint=false];
     }
     
     // Demonstrate connection reset after upload failures
