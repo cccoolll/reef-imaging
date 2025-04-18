@@ -6,7 +6,6 @@ This package provides a set of classes and utilities for working with the Hypha 
 
 - **Gallery Management**: Create and manage galleries and datasets
 - **File Uploading**: Upload files to the Hypha Artifact Manager with robust error handling and retries
-- **Image Processing**: Stitch microscopy images and create multi-resolution pyramids
 - **Treatment Data Handling**: Upload and manage scientific treatment data
 
 ## Installation
@@ -208,9 +207,6 @@ The package is organized into the following modules:
 - `gallery_manager.py`: Gallery and dataset management
 - `uploader.py`: File uploading with robust error handling
 - `stitch_manager.py`: Image stitching and processing utilities
-- `image_processing/`: Additional image processing utilities
-  - `experiment_image_stiticing.py`: Specialized stitching for experiment images
-  - `experiment_preview_tile.py`: Generate preview tiles for experiments
 
 ## Available Classes
 
