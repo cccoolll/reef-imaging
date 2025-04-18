@@ -24,50 +24,9 @@ digraph ReefImagingUploadProcess {
         start -> get_folders -> get_processed -> user_input;
     }
     
-    // Common retry connection mechanism
-    subgraph cluster_connection {
-        label="Hypha Connection Management";
-        style="rounded,filled";
-        fillcolor=lightgreen;
-        
-        connect [label="Attempt connection\nto Hypha"];
-        timeout [label="Connection\ntimeout?", shape=diamond];
-        error [label="Connection\nerror?", shape=diamond];
-        client_conflict [label="Client ID\nconflict?", shape=diamond];
-        retry_connect [label="Retry with\nexponential backoff"];
-        connected [label="Connection\nestablished"];
-        
-        connect -> timeout;
-        timeout -> retry_connect [label="Yes"];
-        timeout -> connected [label="No"];
-        
-        connect -> error;
-        error -> client_conflict [label="Yes"];
-        error -> connected [label="No"];
-        
-        client_conflict -> retry_connect [label="Yes\n(longer delay)"];
-        retry_connect -> connect;
-    }
-    
-    // Treatment uploader process
-    subgraph cluster_treatment {
-        label="Treatment Upload Process";
-        style="rounded,filled";
-        fillcolor=lightcyan;
-        
-        treatment_start [label="Treatment Upload\nProcess", shape=oval];
-        treatment_staging [label="Put dataset in\nstaging mode"];
-        treatment_upload [label="Upload folder contents\nin batches"];
-        treatment_commit [label="Commit dataset"];
-        treatment_record [label="Save record of\nprocessed folder"];
-        treatment_next [label="Move to next folder", shape=oval];
-        
-        treatment_start -> treatment_staging -> treatment_upload -> treatment_commit -> treatment_record -> treatment_next;
-    }
-    
-    // Stitch uploader process
+    // OME-Zarr Stitch Upload Process
     subgraph cluster_stitch {
-        label="Stitch Upload Process";
+        label="OME-Zarr Stitch Upload Process";
         style="rounded,filled";
         fillcolor=lightpink;
         
@@ -93,6 +52,47 @@ digraph ReefImagingUploadProcess {
         stitch_success -> stitch_next [label="No", style=dashed, color=red];
         find_zarr -> upload_zarr;
         upload_zarr -> staging_zarr -> batch_upload -> commit_zarr -> cleanup_zarr -> stitch_record -> stitch_next;
+    }
+    
+    // Hypha Connection Management
+    subgraph cluster_connection {
+        label="Hypha Connection Management";
+        style="rounded,filled";
+        fillcolor=lightgreen;
+        
+        connect [label="Attempt connection\nto Hypha"];
+        timeout [label="Connection\ntimeout?", shape=diamond];
+        error [label="Connection\nerror?", shape=diamond];
+        client_conflict [label="Client ID\nconflict?", shape=diamond];
+        retry_connect [label="Retry with\nexponential backoff"];
+        connected [label="Connection\nestablished"];
+        
+        connect -> timeout;
+        timeout -> retry_connect [label="Yes"];
+        timeout -> connected [label="No"];
+        
+        connect -> error;
+        error -> client_conflict [label="Yes"];
+        error -> connected [label="No"];
+        
+        client_conflict -> retry_connect [label="Yes\n(longer delay)"];
+        retry_connect -> connect;
+    }
+    
+    // Original Treatment Data Upload Process
+    subgraph cluster_treatment {
+        label="Original Treatment Data Upload Process";
+        style="rounded,filled";
+        fillcolor=lightcyan;
+        
+        treatment_start [label="Treatment Upload\nProcess", shape=oval];
+        treatment_staging [label="Put dataset in\nstaging mode"];
+        treatment_upload [label="Upload folder contents\nin batches"];
+        treatment_commit [label="Commit dataset"];
+        treatment_record [label="Save record of\nprocessed folder"];
+        treatment_next [label="Move to next folder", shape=oval];
+        
+        treatment_start -> treatment_staging -> treatment_upload -> treatment_commit -> treatment_record -> treatment_next;
     }
     
     // Uploader process
