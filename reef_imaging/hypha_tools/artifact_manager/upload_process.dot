@@ -125,10 +125,13 @@ digraph ReefImagingUploadProcess {
     treatment_next -> treatment_start [label="More folders", constraint=false, style=dashed];
     stitch_next -> stitch_start [label="More folders", constraint=false, style=dashed];
     
-    // Exit point
-    exit [label="End Process", shape=oval, fillcolor=salmon];
-    treatment_next -> exit [label="No more folders"];
-    stitch_next -> exit [label="No more folders"];
+    // Exit points for each process
+    exit_stitch [label="End Process", shape=oval, fillcolor=salmon];
+    exit_treatment [label="End Process", shape=oval, fillcolor=salmon];
+    
+    // Connect exit points to respective processes
+    stitch_next -> exit_stitch [label="No more folders"];
+    treatment_next -> exit_treatment [label="No more folders"];
     
     // Files and data stores
     node [shape=cylinder, fillcolor=lightgrey];
@@ -193,5 +196,12 @@ digraph ReefImagingUploadProcess {
         url_queue -> file_queue;
         upload_files -> file_queue;
         retry_failed -> file_queue [style=dashed];
+        
+        // Represent queues with a shape that suggests a series of items
+        file_queue [label="File Queue", shape=parallelogram];
+        url_queue [label="URL Queue", shape=parallelogram];
     }
+    
+    // Demonstrate connection reset after upload failures
+    retry_failed -> connect [style=dashed, color=red, label="Reset Connection after failures"];
 } 
