@@ -17,7 +17,7 @@ The package includes two main upload workflows:
 
 Both workflows use optimized connection handling with retry logic, concurrent batch uploads, and progress tracking.
 
-![Reef Imaging Upload Process Architecture](upload_process_diagram.png)
+![Reef Imaging Upload Process Architecture](docs/upload_process_diagram.png)
 
 To generate the workflow diagram from the included DOT file:
 
