@@ -181,28 +181,17 @@ digraph ReefImagingUploadProcess {
     treatment_upload -> uploader_start [lhead=cluster_uploader, style=dashed];
     upload_zarr -> uploader_start [lhead=cluster_uploader, style=dashed];
     
-    // Detailed queue management
+    // Queue Management
     subgraph cluster_queue {
         label="Queue Management";
         style="rounded,filled";
         fillcolor=lightgoldenrodyellow;
         
-        file_queue [label="File Queue", shape=cylinder];
-        url_queue [label="URL Queue", shape=cylinder];
-        
-        create_queue -> file_queue;
-        create_url_queue -> url_queue;
+        create_url_queue -> url_queue [style=dotted];
         get_presigned_urls -> url_queue;
+        create_queue -> file_queue [style=dotted];
+        url_queue -> file_queue;
         upload_files -> file_queue;
-        upload_files -> url_queue;
         retry_failed -> file_queue [style=dashed];
     }
-    
-    // Connect queue management to uploader process
-    create_queue -> file_queue [lhead=cluster_queue, style=dotted];
-    create_url_queue -> url_queue [lhead=cluster_queue, style=dotted];
-    get_presigned_urls -> url_queue [lhead=cluster_queue, style=dotted];
-    upload_files -> file_queue [lhead=cluster_queue, style=dotted];
-    upload_files -> url_queue [lhead=cluster_queue, style=dotted];
-    retry_failed -> file_queue [lhead=cluster_queue, style=dotted];
 } 
