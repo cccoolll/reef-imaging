@@ -28,7 +28,7 @@ The following diagram illustrates the workflow of the automated uploaders and ar
 To generate this diagram, use the provided script:
 
 ```bash
-cd artifact_manager
+cd artifact_manager/docs
 ./generate_diagram.sh
 ```
 
