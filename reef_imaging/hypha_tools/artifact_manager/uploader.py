@@ -368,43 +368,6 @@ class ArtifactUploader:
         print(f"Failed to upload {relative_path} after {retries} deep retry attempts")
         return False
     
-    async def process_batch(
-        self,
-        batch: List[Tuple[str, str]],
-        session: aiohttp.ClientSession,
-        file_retries: int = 3
-    ) -> List[Tuple[str, str]]:
-        """Process a batch of files and return list of failures for deeper retry"""
-        tasks = []
-        for local_file, relative_path in batch:
-            if self.upload_record.is_uploaded(relative_path):
-                continue
-                
-            task = asyncio.create_task(
-                self.upload_single_file(
-                    local_file,
-                    relative_path,
-                    session,
-                    max_retries=file_retries
-                )
-            )
-            tasks.append((task, local_file, relative_path))
-        
-        # Wait for all tasks to complete, collect failures
-        failed_uploads = []
-        for task, local_file, relative_path in tasks:
-            try:
-                success = await task
-                if not success:
-                    failed_uploads.append((local_file, relative_path))
-            except Exception as e:
-                print(f"Unhandled exception for {relative_path}: {str(e)}")
-                # Cancel the task if it's still running
-                if not task.done():
-                    task.cancel()
-                failed_uploads.append((local_file, relative_path))
-        
-        return failed_uploads
     
     async def upload_files_in_batches(self, to_upload: List[Tuple[str, str]], batch_size: int = 20) -> bool:
         """
