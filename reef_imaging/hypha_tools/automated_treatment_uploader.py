@@ -179,8 +179,8 @@ async def process_folder(folder_path):
                 artifact_manager = connection.artifact_manager
                 
                 dataset_manifest = {
-                    "name": "Image map Dataset",
-                    "description": "The Image Map of U2OS FUCCI Drug Treatment",
+                    "name": "Full treatment dataset 20250410",
+                    "description": "The Full treatment dataset from 20250410",
                 }
                 
                 # Put the dataset in staging mode with timeout
@@ -406,6 +406,9 @@ async def main():
             save_processed_folder(folder_to_process)
             print(f"Successfully processed folder: {folder_to_process}")
             current_idx += 1
+            #delete treatment_upload_record.json file
+            if os.path.exists(UPLOAD_TRACKER_FILE):
+                os.remove(UPLOAD_TRACKER_FILE)
         else:
             # If failed, retry after a delay
             print(f"Failed to process {folder_to_process}. Retrying in {CHECK_INTERVAL} seconds...")

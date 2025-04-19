@@ -22,6 +22,7 @@ class Config:
     UPLOAD_TIMEOUT = 120  # Timeout for file uploads in seconds (increased from 60)
     URL_BATCH_SIZE = 30  # Number of presigned URLs to request at once
     MAX_WORKERS = 20  # Maximum number of worker tasks
+    MIN_URL_WORKERS = 6  # Minimum number of URL workers
     CONNECTION_POOL_SIZE = 100  # TCP connection pool size
 
 class UploadRecord:

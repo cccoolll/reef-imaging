@@ -594,7 +594,7 @@ class ArtifactUploader:
         # Start worker tasks with optimized session
         async with aiohttp.ClientSession(connector=connector) as session:
             # Calculate number of workers based on system resources
-            num_url_workers = min(6, batch_size)  # Fewer URL workers to avoid overwhelming the API
+            num_url_workers = min(Config.MIN_URL_WORKERS, batch_size)  # Fewer URL workers to avoid overwhelming the API
             num_upload_workers = min(Config.MAX_WORKERS, batch_size)
             
             # Create worker tasks

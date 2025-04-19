@@ -313,8 +313,8 @@ async def upload_zarr_file(zarr_file: str) -> bool:
                 
                 # Read the current manifest with timeout
                 dataset_manifest = {
-                    "name": "Image map of U2OS FUCCI Drug Treatment",
-                    "description": "The Image Map of U2OS FUCCI Drug Treatment",
+                    "name": "Full zarr dataset 20250410",
+                    "description": "The Full zarr dataset for U2OS FUCCI Drug Treatment from 20250410",
                 }
                 
                 # Put the dataset in staging mode with timeout
@@ -509,6 +509,9 @@ async def process_folder(folder_name: str) -> bool:
     print(f"Cleaning up zarr file: {zarr_file}")
     cleanup_zarr_file(zarr_file)
     
+    # step 6, delete UPLOAD_RECORD_FILE
+    if os.path.exists(UPLOAD_RECORD_FILE):
+        os.remove(UPLOAD_RECORD_FILE)
     return True
 
 
