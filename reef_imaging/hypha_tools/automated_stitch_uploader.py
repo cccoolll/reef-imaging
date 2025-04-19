@@ -312,16 +312,16 @@ async def upload_zarr_file(zarr_file: str) -> bool:
                 artifact_manager = connection.artifact_manager
                 
                 # Read the current manifest with timeout
-                dataset = await asyncio.wait_for(
-                    artifact_manager.read(artifact_id=ARTIFACT_ALIAS, silent=True),
-                    timeout=OPERATION_TIMEOUT
-                )
+                dataset_manifest = {
+                    "name": "Image map of U2OS FUCCI Drug Treatment",
+                    "description": "The Image Map of U2OS FUCCI Drug Treatment",
+                }
                 
                 # Put the dataset in staging mode with timeout
                 await asyncio.wait_for(
                     artifact_manager.edit(
                         artifact_id=ARTIFACT_ALIAS,
-                        manifest=dataset,  # Preserve the same manifest
+                        manifest=dataset_manifest,  # Preserve the same manifest
                         version="stage"    # Put in staging mode
                     ),
                     timeout=OPERATION_TIMEOUT
