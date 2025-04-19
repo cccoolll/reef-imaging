@@ -24,6 +24,7 @@ class Config:
     MAX_WORKERS = 20  # Maximum number of worker tasks
     MIN_URL_WORKERS = 6  # Minimum number of URL workers
     CONNECTION_POOL_SIZE = 100  # TCP connection pool size
+    MAX_FAILED_FILES = 10  # Maximum number of failed files before resetting connection
 
 class UploadRecord:
     """Manages the record of uploaded files"""

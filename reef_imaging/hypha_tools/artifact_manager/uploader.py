@@ -575,7 +575,7 @@ class ArtifactUploader:
                     in_progress.remove((local_file, relative_path))
                     
                     # Check if failed files exceed threshold and reset connection if needed
-                    if len(failed_files) >= 10:
+                    if len(failed_files) >= Config.MAX_FAILED_FILES:
                         print(f"More than 10 failed files detected ({len(failed_files)}), resetting connection...")
                         await reset_connection()
                         
