@@ -20,7 +20,7 @@ class Config:
     MAX_RETRY_DELAY = 60  # Maximum retry delay in seconds
     CONNECTION_TIMEOUT = 30  # Timeout for API connections in seconds
     UPLOAD_TIMEOUT = 120  # Timeout for file uploads in seconds (increased from 60)
-    URL_BATCH_SIZE = 20  # Number of presigned URLs to request at once
+    URL_BATCH_SIZE = 30  # Number of presigned URLs to request at once
     MAX_WORKERS = 20  # Maximum number of worker tasks
     CONNECTION_POOL_SIZE = 100  # TCP connection pool size
 
