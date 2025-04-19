@@ -576,7 +576,7 @@ class ArtifactUploader:
                     
                     # Check if failed files exceed threshold and reset connection if needed
                     if len(failed_files) >= Config.MAX_FAILED_FILES:
-                        print(f"More than 10 failed files detected ({len(failed_files)}), resetting connection...")
+                        print(f"More than {Config.MAX_FAILED_FILES} failed files detected ({len(failed_files)}), resetting connection...")
                         await reset_connection()
                         
                 except Exception as e:
