@@ -407,7 +407,7 @@ async def upload_zarr_file(zarr_file: str) -> bool:
                     connect_success = await connect_with_timeout(connection, client_id)
                     if not connect_success:
                         print("Failed to reconnect before commit")
-                        if commit_attempts < 4:  # Try again if we have attempts left
+                        if commit_attempts < Config.MAX_COMMIT_ATTEMPTS:  # Try again if we have attempts left
                             commit_attempts += 1
                             await asyncio.sleep(5)
                             continue
@@ -421,7 +421,7 @@ async def upload_zarr_file(zarr_file: str) -> bool:
                     print(f"Committing dataset (attempt {commit_attempts + 1}/5)...")
                     await asyncio.wait_for(
                         connection.artifact_manager.commit(ARTIFACT_ALIAS),
-                        timeout=OPERATION_TIMEOUT
+                        timeout=Config.MAX_COMMIT_DELAY
                     )
                     print("Dataset committed successfully.")
                     commit_success = True
