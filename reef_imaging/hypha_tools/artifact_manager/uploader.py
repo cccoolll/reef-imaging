@@ -512,6 +512,45 @@ class ArtifactUploader:
                     print("All files processed successfully!")
                     break
                 
+                # Handle remaining failed files if less than MAX_FAILED_FILES
+                if file_queue.empty() and url_queue.empty() and not in_progress and failed_files:
+                    if len(failed_files) < Config.MAX_FAILED_FILES:
+                        print(f"Processing remaining {len(failed_files)} failed files individually...")
+                        retry_success = True
+                        
+                        # Process each failed file individually with single file uploader
+                        async with aiohttp.ClientSession(connector=connector) as retry_session:
+                            for local_file, relative_path in list(failed_files):
+                                if not self.upload_record.is_uploaded(relative_path):
+                                    print(f"Retrying file: {relative_path} using single file uploader")
+                                    success = await self.upload_single_file(
+                                        local_file=local_file,
+                                        relative_path=relative_path,
+                                        session=retry_session,
+                                        max_retries=Config.MAX_RETRIES * 2,  # Use more retries for these last files
+                                        retry_delay=Config.INITIAL_RETRY_DELAY
+                                    )
+                                    
+                                    if success:
+                                        failed_files.remove((local_file, relative_path))
+                                        print(f"Successfully uploaded {relative_path} on individual retry")
+                                    else:
+                                        retry_success = False
+                                        print(f"Failed to upload {relative_path} even with individual retry")
+                        
+                        if not failed_files:
+                            print("All remaining files processed successfully!")
+                            break
+                        
+                        if not retry_success:
+                            print(f"Upload completed with {len(failed_files)} unrecoverable failed files")
+                            return False
+                        
+                    # Handle case where we have too many failed files
+                    else:
+                        # Continue with existing reset connection logic for many failed files
+                        pass
+                
                 # Check if we need to reset connection due to too many failures
                 if len(failed_files) >= Config.MAX_FAILED_FILES:
                     print(f"More than {Config.MAX_FAILED_FILES} failed files detected ({len(failed_files)}), resetting connection...")
