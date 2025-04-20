@@ -15,7 +15,7 @@ class Config:
     SERVER_URL = "https://hypha.aicell.io"
     WORKSPACE_TOKEN = os.getenv("REEF_WORKSPACE_TOKEN")
     CONCURRENCY_LIMIT = 25  # Max number of concurrent uploads (increased from 10)
-    MAX_RETRIES = 30  # Maximum number of retry attempts
+    MAX_RETRIES = 300  # Maximum number of retry attempts
     INITIAL_RETRY_DELAY = 5  # Initial retry delay in seconds
     MAX_RETRY_DELAY = 60  # Maximum retry delay in seconds
     CONNECTION_TIMEOUT = 30  # Timeout for API connections in seconds
@@ -122,6 +122,99 @@ class HyphaConnection:
             # Ensure cleanup on any connection error
             await self.disconnect() 
             raise # Re-raise the exception after cleanup
+
+        
+    async def connect_with_retry(self, client_id=None, max_retries=300, base_delay=5, max_delay=180):
+        """Connect to Hypha with exponential backoff and retry."""
+        if client_id:
+            self.client_id = client_id
+        
+        client_already_exists_count = 0
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                # Always ensure we're fully disconnected before attempting to connect
+                await self.disconnect()
+                
+                # Cancel any existing connection task
+                if self.connection_task and not self.connection_task.done():
+                    self.connection_task.cancel()
+                    # Wait a moment for cancellation to process
+                    try:
+                        await asyncio.wait_for(asyncio.shield(self.connection_task), timeout=1)
+                    except (asyncio.CancelledError, asyncio.TimeoutError):
+                        pass
+                    self.connection_task = None
+                
+                # Wait longer if we've seen "Client already exists" errors
+                if client_already_exists_count > 0:
+                    # Exponential backoff with jitter for client conflicts
+                    delay = min(max_delay, base_delay * (2 ** client_already_exists_count)) + random.uniform(1, 5)
+                    print(f"Waiting {delay:.1f}s before reconnect attempt (client conflict detected)")
+                    await asyncio.sleep(delay)
+                
+                # Create connection task with timeout
+                print(f"Attempting connection to {self.server_url} with client_id: {self.client_id}")
+                self.connection_task = asyncio.create_task(self.connect(client_id=self.client_id))
+                await asyncio.wait_for(self.connection_task, timeout=Config.CONNECTION_TIMEOUT)
+                print("Connection established successfully")
+                return True
+                
+            except asyncio.TimeoutError:
+                retry_count += 1
+                print(f"Connection attempt timed out after {Config.CONNECTION_TIMEOUT}s (attempt {retry_count}/{max_retries})")
+                # Clean up the task
+                if self.connection_task and not self.connection_task.done():
+                    self.connection_task.cancel()
+                    # Wait a moment for cancellation to process
+                    try:
+                        await asyncio.wait_for(asyncio.shield(self.connection_task), timeout=1)
+                    except (asyncio.CancelledError, asyncio.TimeoutError):
+                        pass
+                    self.connection_task = None
+                
+                # Use standard retry backoff
+                delay = min(max_delay, base_delay * (2 ** min(retry_count, 5)))
+                print(f"Will retry in {delay:.1f}s")
+                await asyncio.sleep(delay)
+                
+            except Exception as e:
+                retry_count += 1
+                err_msg = str(e)
+                print(f"Connection error: {err_msg}")
+                
+                # Clean up the task if it exists and is not done
+                if self.connection_task and not self.connection_task.done():
+                    self.connection_task.cancel()
+                    self.connection_task = None
+                
+                if "Client already exists" in err_msg:
+                    client_already_exists_count += 1
+                    print(f"Client ID conflict detected. Ensuring only one instance is running or use unique client IDs.")
+                    
+                    # More aggressive cleanup and longer wait for reconnection
+                    try:
+                        await self.disconnect()
+                    except:
+                        pass
+                    
+                    # Special handling for deep client conflicts
+                    if client_already_exists_count >= 3:
+                        print(f"Persistent client conflict. Waiting longer for server-side cleanup...")
+                        # Wait longer when we have persistent conflicts
+                        await asyncio.sleep(client_already_exists_count * 10)
+                else:
+                    # For other errors, use standard retry backoff
+                    delay = min(max_delay, base_delay * (2 ** min(retry_count, 5)))
+                    print(f"Will retry in {delay:.1f}s (attempt {retry_count}/{max_retries})")
+                    await asyncio.sleep(delay)
+                
+                if retry_count >= max_retries:
+                    print(f"Failed to connect after {max_retries} attempts")
+                    return False
+                
+        return False
     
     async def disconnect(self, timeout: int = 5) -> None:
         """Disconnect the connection to the Hypha server gracefully."""
@@ -149,9 +242,3 @@ class HyphaConnection:
         print("Attempting to reconnect...")
         await self.disconnect() # Ensure clean state before reconnecting
         await self.connect(timeout=timeout, client_id=client_id)
-
-async def get_artifact_manager() -> Tuple[Any, Any]:
-    """Get a new connection to the artifact manager"""
-    connection = HyphaConnection()
-    await connection.connect()
-    return connection.api, connection.artifact_manager 

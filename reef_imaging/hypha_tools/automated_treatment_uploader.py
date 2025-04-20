@@ -74,72 +74,6 @@ def save_processed_folder(folder_name: str):
         f.write(f"{timestamp} - {folder_name}\n")
 
 
-async def connect_with_timeout(connection, client_id, timeout=CONNECTION_TIMEOUT, max_retries=MAX_RETRIES):
-    """Connect to Hypha with timeout and retry logic."""
-    retry_count = 0
-    client_conflict_count = 0
-    
-    while retry_count < max_retries:
-        try:
-            # Always ensure disconnection before attempting to connect
-            await connection.disconnect()
-            
-            # Add longer delay if we've seen client conflicts
-            if client_conflict_count > 0:
-                conflict_delay = min(60, 10 * client_conflict_count) + random.uniform(1, 5)
-                print(f"Waiting {conflict_delay:.1f}s before reconnection due to client conflict")
-                await asyncio.sleep(conflict_delay)
-            
-            # Create task with timeout
-            print(f"Attempting connection to Hypha with client_id: {client_id}")
-            connect_task = asyncio.create_task(connection.connect(client_id=client_id))
-            await asyncio.wait_for(connect_task, timeout=timeout)
-            print("Connection established successfully")
-            return True
-            
-        except asyncio.TimeoutError:
-            retry_count += 1
-            print(f"Connection attempt timed out after {timeout}s (attempt {retry_count}/{max_retries})")
-            # Clean up the task and connection
-            if 'connect_task' in locals() and not connect_task.done():
-                connect_task.cancel()
-            await connection.disconnect()
-            if retry_count < max_retries:
-                # Wait before retrying
-                await asyncio.sleep(5)
-                
-        except Exception as e:
-            retry_count += 1
-            err_msg = str(e)
-            print(f"Connection error: {err_msg} (attempt {retry_count}/{max_retries})")
-            
-            # Handle "Client already exists" error specifically
-            if "Client already exists" in err_msg:
-                client_conflict_count += 1
-                print("Client ID conflict detected. Ensure only one instance is running or use unique client IDs.")
-                
-                # Clean up connection more aggressively
-                if 'connect_task' in locals() and not connect_task.done():
-                    connect_task.cancel()
-                
-                try:
-                    await connection.disconnect()
-                except:
-                    pass
-                
-                # Add a longer delay for client conflicts to allow server to clean up
-                # Increase delay with each conflict
-                conflict_delay = min(60, 10 * client_conflict_count) + random.uniform(1, 5)
-                print(f"Waiting {conflict_delay:.1f}s for server-side client cleanup")
-                await asyncio.sleep(conflict_delay)
-            else:
-                # For other errors, perform normal cleanup
-                await connection.disconnect()
-                if retry_count < max_retries:
-                    await asyncio.sleep(5)
-    
-    print("Failed to connect after multiple attempts")
-    return False
 
 
 async def process_folder(folder_path):
@@ -161,7 +95,7 @@ async def process_folder(folder_path):
     
     try:
         # Connect to Hypha with timeout and retry
-        connect_success = await connect_with_timeout(connection, client_id)
+        connect_success = await connection.connect_with_retry(client_id=client_id)
         if not connect_success:
             print("Failed to establish connection to Hypha")
             return False
@@ -203,7 +137,7 @@ async def process_folder(folder_path):
                 # Reset connection on timeout
                 await connection.disconnect()
                 if retry_count < MAX_RETRIES:
-                    connect_success = await connect_with_timeout(connection, client_id)
+                    connect_success = await connection.connect_with_retry(client_id=client_id)
                     if not connect_success:
                         return False
                     uploader.connection = connection
@@ -220,7 +154,7 @@ async def process_folder(folder_path):
                 # Reset connection on error
                 await connection.disconnect()
                 if retry_count < MAX_RETRIES:
-                    connect_success = await connect_with_timeout(connection, client_id)
+                    connect_success = await connection.connect_with_retry(client_id=client_id)
                     if not connect_success:
                         return False
                     uploader.connection = connection
@@ -260,7 +194,7 @@ async def process_folder(folder_path):
                 try:
                     # Refresh connection before commit
                     await connection.disconnect()
-                    connect_success = await connect_with_timeout(connection, client_id)
+                    connect_success = await connection.connect_with_retry(client_id=client_id)
                     if not connect_success:
                         print("Failed to reconnect before commit")
                         if commit_attempts < 4:  # Try again if we have attempts left
