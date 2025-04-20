@@ -32,7 +32,7 @@ load_dotenv()
 ARTIFACT_ALIAS = "image-map-20250410-treatment-full"
 # Timeout and retry settings
 CONNECTION_TIMEOUT = 60  # Timeout for connection operations in seconds
-OPERATION_TIMEOUT = 120  # Timeout for Hypha operations in seconds (increased from 60)
+OPERATION_TIMEOUT = 180  # Timeout for Hypha operations in seconds (increased from 60)
 MAX_RETRIES = 300  # Maximum retries for operations
 # Optimized concurrency settings
 BATCH_SIZE = 30  # Batch size for file uploads

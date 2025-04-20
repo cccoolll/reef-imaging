@@ -24,7 +24,7 @@ load_dotenv()
 DATASET_ALIAS = "20250410-treatment-full"
 # Timeout and retry settings
 CONNECTION_TIMEOUT = 60  # Timeout for connection operations in seconds
-OPERATION_TIMEOUT = 120  # Timeout for Hypha operations in seconds
+OPERATION_TIMEOUT = 180  # Timeout for Hypha operations in seconds
 MAX_RETRIES = 300  # Maximum retries for operations
 # Optimized concurrency settings
 BATCH_SIZE = 30  # Batch size for file uploads (increased from default)
