@@ -27,6 +27,98 @@ class ArtifactUploader:
         self.semaphore = asyncio.Semaphore(concurrency_limit)
         self.client_id = client_id
         self.connection_task = None  # Track connection task at class level
+
+    async def connect_with_retry(self, client_id=None, max_retries=300, base_delay=5, max_delay=180):
+        """Connect to Hypha with exponential backoff and retry."""
+        if client_id:
+            self.client_id = client_id
+        
+        client_already_exists_count = 0
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                # Always ensure we're fully disconnected before attempting to connect
+                await self.connection.disconnect()
+                
+                # Cancel any existing connection task
+                if self.connection_task and not self.connection_task.done():
+                    self.connection_task.cancel()
+                    # Wait a moment for cancellation to process
+                    try:
+                        await asyncio.wait_for(asyncio.shield(self.connection_task), timeout=1)
+                    except (asyncio.CancelledError, asyncio.TimeoutError):
+                        pass
+                    self.connection_task = None
+                
+                # Wait longer if we've seen "Client already exists" errors
+                if client_already_exists_count > 0:
+                    # Exponential backoff with jitter for client conflicts
+                    delay = min(max_delay, base_delay * (2 ** client_already_exists_count)) + random.uniform(1, 5)
+                    print(f"Waiting {delay:.1f}s before reconnect attempt (client conflict detected)")
+                    await asyncio.sleep(delay)
+                
+                # Create connection task with timeout
+                print(f"Attempting connection to {self.connection.server_url} with client_id: {self.client_id}")
+                self.connection_task = asyncio.create_task(self.connection.connect(client_id=self.client_id))
+                await asyncio.wait_for(self.connection_task, timeout=Config.CONNECTION_TIMEOUT)
+                print("Connection established successfully")
+                return True
+                
+            except asyncio.TimeoutError:
+                retry_count += 1
+                print(f"Connection attempt timed out after {Config.CONNECTION_TIMEOUT}s (attempt {retry_count}/{max_retries})")
+                # Clean up the task
+                if self.connection_task and not self.connection_task.done():
+                    self.connection_task.cancel()
+                    # Wait a moment for cancellation to process
+                    try:
+                        await asyncio.wait_for(asyncio.shield(self.connection_task), timeout=1)
+                    except (asyncio.CancelledError, asyncio.TimeoutError):
+                        pass
+                    self.connection_task = None
+                
+                # Use standard retry backoff
+                delay = min(max_delay, base_delay * (2 ** min(retry_count, 5)))
+                print(f"Will retry in {delay:.1f}s")
+                await asyncio.sleep(delay)
+                
+            except Exception as e:
+                retry_count += 1
+                err_msg = str(e)
+                print(f"Connection error: {err_msg}")
+                
+                # Clean up the task if it exists and is not done
+                if self.connection_task and not self.connection_task.done():
+                    self.connection_task.cancel()
+                    self.connection_task = None
+                
+                if "Client already exists" in err_msg:
+                    client_already_exists_count += 1
+                    print(f"Client ID conflict detected. Ensuring only one instance is running or use unique client IDs.")
+                    
+                    # More aggressive cleanup and longer wait for reconnection
+                    try:
+                        await self.connection.disconnect()
+                    except:
+                        pass
+                    
+                    # Special handling for deep client conflicts
+                    if client_already_exists_count >= 3:
+                        print(f"Persistent client conflict. Waiting longer for server-side cleanup...")
+                        # Wait longer when we have persistent conflicts
+                        await asyncio.sleep(client_already_exists_count * 10)
+                else:
+                    # For other errors, use standard retry backoff
+                    delay = min(max_delay, base_delay * (2 ** min(retry_count, 5)))
+                    print(f"Will retry in {delay:.1f}s (attempt {retry_count}/{max_retries})")
+                    await asyncio.sleep(delay)
+                
+                if retry_count >= max_retries:
+                    print(f"Failed to connect after {max_retries} attempts")
+                    return False
+                
+        return False
     
     async def ensure_connected(self) -> bool:
         """Ensure we have a connection to the artifact manager. Return True if connection is successful."""
