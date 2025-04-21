@@ -26,20 +26,30 @@ class ArtifactUploader:
         self.concurrency_limit = concurrency_limit
         self.semaphore = asyncio.Semaphore(concurrency_limit)
         self.client_id = client_id
-    
-    async def connect_with_retry(self, client_id=None, max_retries=300, base_delay=5, max_delay=60):
+        self.connection_task = None  # Track connection task at class level
+
+    async def connect_with_retry(self, client_id=None, max_retries=300, base_delay=5, max_delay=180):
         """Connect to Hypha with exponential backoff and retry."""
         if client_id:
             self.client_id = client_id
         
         client_already_exists_count = 0
         retry_count = 0
-        connect_task = None
         
         while retry_count < max_retries:
             try:
                 # Always ensure we're fully disconnected before attempting to connect
                 await self.connection.disconnect()
+                
+                # Cancel any existing connection task
+                if self.connection_task and not self.connection_task.done():
+                    self.connection_task.cancel()
+                    # Wait a moment for cancellation to process
+                    try:
+                        await asyncio.wait_for(asyncio.shield(self.connection_task), timeout=1)
+                    except (asyncio.CancelledError, asyncio.TimeoutError):
+                        pass
+                    self.connection_task = None
                 
                 # Wait longer if we've seen "Client already exists" errors
                 if client_already_exists_count > 0:
@@ -50,8 +60,8 @@ class ArtifactUploader:
                 
                 # Create connection task with timeout
                 print(f"Attempting connection to {self.connection.server_url} with client_id: {self.client_id}")
-                connect_task = asyncio.create_task(self.connection.connect(client_id=self.client_id))
-                await asyncio.wait_for(connect_task, timeout=Config.CONNECTION_TIMEOUT)
+                self.connection_task = asyncio.create_task(self.connection.connect(client_id=self.client_id))
+                await asyncio.wait_for(self.connection_task, timeout=Config.CONNECTION_TIMEOUT)
                 print("Connection established successfully")
                 return True
                 
@@ -59,13 +69,14 @@ class ArtifactUploader:
                 retry_count += 1
                 print(f"Connection attempt timed out after {Config.CONNECTION_TIMEOUT}s (attempt {retry_count}/{max_retries})")
                 # Clean up the task
-                if connect_task and not connect_task.done():
-                    connect_task.cancel()
+                if self.connection_task and not self.connection_task.done():
+                    self.connection_task.cancel()
                     # Wait a moment for cancellation to process
                     try:
-                        await asyncio.wait_for(asyncio.shield(connect_task), timeout=1)
+                        await asyncio.wait_for(asyncio.shield(self.connection_task), timeout=1)
                     except (asyncio.CancelledError, asyncio.TimeoutError):
                         pass
+                    self.connection_task = None
                 
                 # Use standard retry backoff
                 delay = min(max_delay, base_delay * (2 ** min(retry_count, 5)))
@@ -78,8 +89,9 @@ class ArtifactUploader:
                 print(f"Connection error: {err_msg}")
                 
                 # Clean up the task if it exists and is not done
-                if connect_task and not connect_task.done():
-                    connect_task.cancel()
+                if self.connection_task and not self.connection_task.done():
+                    self.connection_task.cancel()
+                    self.connection_task = None
                 
                 if "Client already exists" in err_msg:
                     client_already_exists_count += 1
@@ -112,21 +124,33 @@ class ArtifactUploader:
         """Ensure we have a connection to the artifact manager. Return True if connection is successful."""
         try:
             if not self.connection.artifact_manager:
+                # Cancel any existing connection task
+                if self.connection_task and not self.connection_task.done():
+                    self.connection_task.cancel()
+                    # Wait a moment for cancellation to process
+                    try:
+                        await asyncio.wait_for(asyncio.shield(self.connection_task), timeout=1)
+                    except (asyncio.CancelledError, asyncio.TimeoutError):
+                        pass
+                    self.connection_task = None
+                
                 # Create a task for the connection so we can cancel it if needed
-                connect_task = asyncio.create_task(self.connection.connect(client_id=self.client_id))
+                self.connection_task = asyncio.create_task(self.connection.connect(client_id=self.client_id))
                 try:
                     # Wait for the connection with a timeout
-                    await asyncio.wait_for(connect_task, timeout=Config.CONNECTION_TIMEOUT)
+                    await asyncio.wait_for(self.connection_task, timeout=Config.CONNECTION_TIMEOUT)
                 except asyncio.TimeoutError:
                     # Cancel the task on timeout
-                    if not connect_task.done():
-                        connect_task.cancel()
+                    if self.connection_task and not self.connection_task.done():
+                        self.connection_task.cancel()
+                        self.connection_task = None
                     print(f"Connection attempt timed out after {Config.CONNECTION_TIMEOUT} seconds")
                     return False
                 except Exception as e:
                     # Cancel the task on error
-                    if not connect_task.done():
-                        connect_task.cancel()
+                    if self.connection_task and not self.connection_task.done():
+                        self.connection_task.cancel()
+                        self.connection_task = None
                     print(f"Connection failed: {e}")
                     return False
             return True
@@ -285,127 +309,6 @@ class ArtifactUploader:
         print(f"Failed to upload {relative_path} after {max_retries} attempts")
         return False
     
-    async def deep_retry_upload(
-        self,
-        local_file: str, 
-        relative_path: str,
-        retries: int = Config.MAX_RETRIES,
-        initial_delay: int = Config.INITIAL_RETRY_DELAY
-    ) -> bool:
-        """
-        Deep retry for uploading a file that failed during batch process.
-        Uses existing connection with incremental backoff strategy.
-        """
-        retry_count = 0
-        retry_delay = initial_delay
-        connect_task = None
-        
-        while retry_count < retries:
-            if retry_count > 0:
-                print(f"Deep retry {retry_count}/{retries} for {relative_path}")
-                await asyncio.sleep(retry_delay)
-                retry_delay = min(retry_delay * 2, Config.MAX_RETRY_DELAY)
-            
-            try:
-                # Check if we need to reset connection after 5 failed attempts
-                if retry_count >= 5:
-                    print(f"File {relative_path} failed over {retry_count} times, resetting connection...")
-                    # Cancel any existing connection task first
-                    if connect_task and not connect_task.done():
-                        connect_task.cancel()
-                        # Wait a moment for cancellation to process
-                        try:
-                            await asyncio.wait_for(asyncio.shield(connect_task), timeout=1)
-                        except (asyncio.CancelledError, asyncio.TimeoutError):
-                            pass
-                    
-                    # Then disconnect
-                    await self.connection.disconnect()
-                    await asyncio.sleep(2)  # Brief pause to ensure clean disconnect
-                
-                # Ensure existing connection is valid
-                if not self.connection.artifact_manager:
-                    print(f"Connection not established, attempting to connect with client_id: {self.client_id}")
-                    
-                    try:
-                        # Create a proper connection task that we can cancel if needed
-                        connect_task = asyncio.create_task(self.connection.connect(client_id=self.client_id))
-                        await asyncio.wait_for(connect_task, timeout=Config.CONNECTION_TIMEOUT)
-                        print("Connection established successfully")
-                    except asyncio.TimeoutError:
-                        print(f"Connection attempt timed out during deep retry {retry_count}")
-                        if connect_task and not connect_task.done():
-                            connect_task.cancel()
-                        retry_count += 1
-                        continue
-                    except Exception as e:
-                        print(f"Connection error during deep retry {retry_count}: {str(e)}")
-                        if connect_task and not connect_task.done():
-                            connect_task.cancel()
-                        retry_count += 1
-                        continue
-                
-                # Try the upload with a new session
-                async with aiohttp.ClientSession() as session:
-                    success = await self.upload_single_file(
-                        local_file,
-                        relative_path,
-                        session,
-                        max_retries=5
-                    )
-                    
-                    if success:
-                        # Update record from disk
-                        self.upload_record.load()
-                        return True
-            
-            except Exception as e:
-                print(f"Error during deep retry {retry_count} for {relative_path}: {str(e)}")
-                traceback.print_exc()
-            
-            retry_count += 1
-        
-        print(f"Failed to upload {relative_path} after {retries} deep retry attempts")
-        return False
-    
-    async def process_batch(
-        self,
-        batch: List[Tuple[str, str]],
-        session: aiohttp.ClientSession,
-        file_retries: int = 3
-    ) -> List[Tuple[str, str]]:
-        """Process a batch of files and return list of failures for deeper retry"""
-        tasks = []
-        for local_file, relative_path in batch:
-            if self.upload_record.is_uploaded(relative_path):
-                continue
-                
-            task = asyncio.create_task(
-                self.upload_single_file(
-                    local_file,
-                    relative_path,
-                    session,
-                    max_retries=file_retries
-                )
-            )
-            tasks.append((task, local_file, relative_path))
-        
-        # Wait for all tasks to complete, collect failures
-        failed_uploads = []
-        for task, local_file, relative_path in tasks:
-            try:
-                success = await task
-                if not success:
-                    failed_uploads.append((local_file, relative_path))
-            except Exception as e:
-                print(f"Unhandled exception for {relative_path}: {str(e)}")
-                # Cancel the task if it's still running
-                if not task.done():
-                    task.cancel()
-                failed_uploads.append((local_file, relative_path))
-        
-        return failed_uploads
-    
     async def upload_files_in_batches(self, to_upload: List[Tuple[str, str]], batch_size: int = 20) -> bool:
         """
         Upload files in batches using a queue for better concurrency.
@@ -437,17 +340,31 @@ class ArtifactUploader:
         
         # Create semaphore for limiting concurrent operations
         url_semaphore = asyncio.Semaphore(Config.CONCURRENCY_LIMIT)
-
+        
+        # Keep track of all worker tasks
+        url_workers = []
+        upload_workers = []
+        stopping = False
+        
         async def url_worker():
             """Worker to get presigned URLs in batches"""
-            while True:
+            nonlocal stopping
+            
+            while not stopping:
                 try:
+                    # Check if we should exit - either queue is empty or we have too many failures
+                    if file_queue.empty() and not in_progress:
+                        break
+                        
+                    if len(failed_files) >= Config.MAX_FAILED_FILES:
+                        print(f"More than {Config.MAX_FAILED_FILES} failed files detected, pausing URL worker...")
+                        await asyncio.sleep(0.5)
+                        continue
+                    
                     # Get a batch of files to process
                     batch = []
                     batch_size = min(Config.URL_BATCH_SIZE, file_queue.qsize())
                     if batch_size == 0:
-                        if file_queue.empty() and not in_progress:
-                            break
                         await asyncio.sleep(0.1)
                         continue
                     
@@ -502,7 +419,7 @@ class ArtifactUploader:
                                 file_queue.task_done()
                                 in_progress.remove((local_file, relative_path))
                                 
-                                # Add to failed files to retry later with exponential backoff
+                                # Add to failed files to retry later
                                 failed_files.add((local_file, relative_path))
                                 
                 except Exception as e:
@@ -511,8 +428,19 @@ class ArtifactUploader:
         
         async def upload_worker(session: aiohttp.ClientSession):
             """Worker to upload files using presigned URLs"""
-            while True:
+            nonlocal stopping
+            
+            while not stopping:
                 try:
+                    # Check if we should exit
+                    if url_queue.empty() and file_queue.empty() and not in_progress:
+                        break
+                    
+                    if len(failed_files) >= Config.MAX_FAILED_FILES:
+                        print(f"More than {Config.MAX_FAILED_FILES} failed files detected, pausing upload worker...")
+                        await asyncio.sleep(0.5)
+                        continue
+                    
                     # Get a file and its presigned URL
                     try:
                         local_file, relative_path, put_url = await asyncio.wait_for(
@@ -525,14 +453,21 @@ class ArtifactUploader:
                             break
                         continue
                     
+                    # Skip if it's already uploaded
+                    if self.upload_record.is_uploaded(relative_path):
+                        url_queue.task_done()
+                        file_queue.task_done()
+                        if (local_file, relative_path) in in_progress:
+                            in_progress.remove((local_file, relative_path))
+                        continue
+                    
                     # Attempt upload with optimized settings
                     success = False
                     retries = 0
                     
-                    while retries < 3 and not success:  # Limit retries per worker
+                    while retries < 5 and not success and not stopping:  # Limit retries per worker
                         try:
                             file_size = os.path.getsize(local_file)
-                            buffer_size = min(file_size, 1024 * 1024)  # 1MB buffer for large files
                             
                             with open(local_file, "rb") as file_data:
                                 headers = {
@@ -585,85 +520,180 @@ class ArtifactUploader:
                     # Mark as done in URL queue and remove from in_progress
                     url_queue.task_done()
                     file_queue.task_done()
-                    in_progress.remove((local_file, relative_path))
+                    if (local_file, relative_path) in in_progress:
+                        in_progress.remove((local_file, relative_path))
                     
                 except Exception as e:
                     print(f"Error in upload worker: {str(e)}")
                     await asyncio.sleep(1)
         
+        async def stop_workers():
+            """Stop all worker tasks"""
+            nonlocal stopping, url_workers, upload_workers
+            
+            print("Stopping all workers...")
+            stopping = True
+            
+            # Wait for workers to finish gracefully
+            await asyncio.sleep(1)
+            
+            # Cancel any remaining workers
+            for task in url_workers + upload_workers:
+                if not task.done():
+                    task.cancel()
+            
+            try:
+                # Wait for cancellations with timeout
+                await asyncio.wait(url_workers + upload_workers, timeout=5)
+            except asyncio.TimeoutError:
+                print("Timeout waiting for workers to cancel")
+            except asyncio.CancelledError:
+                pass
+            
+            # Clear worker lists
+            url_workers = []
+            upload_workers = []
+            stopping = False
+            print("All workers stopped")
+        
+        async def reset_connection():
+            """Reset Hypha connection"""
+            print(f"Resetting connection to handle {len(failed_files)} failed files")
+            
+            # Stop all workers first
+            await stop_workers()
+            # Disconnect and reconnect
+            await self.connection.disconnect()
+            await asyncio.sleep(2)  # Wait for server to clean up
+            # Cancel any existing connection task
+            if self.connection_task and not self.connection_task.done():
+                self.connection_task.cancel()
+                try:
+                    await asyncio.wait_for(asyncio.shield(self.connection_task), timeout=1)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+                self.connection_task = None
+            
+            
+            # Create a fresh connection
+            connect_retries = Config.MAX_RETRIES
+            connection_success = False
+            
+            connection_success = await self.connection.connect_with_retry(client_id=self.client_id, max_retries=connect_retries)
+  
+            
+            return connection_success
+        
         # Start worker tasks with optimized session
         async with aiohttp.ClientSession(connector=connector) as session:
             # Calculate number of workers based on system resources
-            num_url_workers = min(4, batch_size)  # Fewer URL workers to avoid overwhelming the API
+            num_url_workers = min(Config.MIN_URL_WORKERS, batch_size)
             num_upload_workers = min(Config.MAX_WORKERS, batch_size)
             
             # Create worker tasks
             url_workers = [asyncio.create_task(url_worker()) for _ in range(num_url_workers)]
             upload_workers = [asyncio.create_task(upload_worker(session)) for _ in range(num_upload_workers)]
             
-            # Wait for queues to be processed
-            try:
-                await file_queue.join()
-                await url_queue.join()
-            except Exception as e:
-                print(f"Error waiting for queues: {str(e)}")
+            # Main processing loop
+            max_reset_attempts = 5
+            reset_count = 0
             
-            # Cancel worker tasks
-            for task in url_workers + upload_workers:
-                task.cancel()
-            
-            # Handle any failed files with deep retry
-            if failed_files:
-                print(f"{len(failed_files)} files failed during normal upload, attempting deep retry...")
-                retry_success = 0
-                connection_task = None
+            while True:
+                # Check if all files are processed
+                if file_queue.empty() and url_queue.empty() and not in_progress and not failed_files:
+                    print("All files processed successfully!")
+                    break
                 
-                try:
-                    # Ensure we have a working connection before starting deep retries
-                    # First, properly disconnect and clean up any existing tasks
-                    await self.connection.disconnect()
-                    await asyncio.sleep(2)  # Wait for server to clean up
+                # Handle remaining failed files if less than MAX_FAILED_FILES
+                if file_queue.empty() and url_queue.empty() and not in_progress and failed_files:
+                    if len(failed_files) < Config.MAX_FAILED_FILES:
+                        print(f"Processing remaining {len(failed_files)} failed files individually...")
+                        retry_success = True
+                        
+                        # Process each failed file individually with single file uploader
+                        async with aiohttp.ClientSession(connector=connector) as retry_session:
+                            for local_file, relative_path in list(failed_files):
+                                if not self.upload_record.is_uploaded(relative_path):
+                                    print(f"Retrying file: {relative_path} using single file uploader")
+                                    success = await self.upload_single_file(
+                                        local_file=local_file,
+                                        relative_path=relative_path,
+                                        session=retry_session,
+                                        max_retries=Config.MAX_RETRIES * 2,  # Use more retries for these last files
+                                        retry_delay=Config.INITIAL_RETRY_DELAY
+                                    )
+                                    
+                                    if success:
+                                        failed_files.remove((local_file, relative_path))
+                                        print(f"Successfully uploaded {relative_path} on individual retry")
+                                    else:
+                                        retry_success = False
+                                        print(f"Failed to upload {relative_path} even with individual retry")
+                        
+                        if not failed_files:
+                            print("All remaining files processed successfully!")
+                            break
+                        
+                        if not retry_success:
+                            print(f"Upload completed with {len(failed_files)} unrecoverable failed files")
+                            return False
+                        
+                    # Handle case where we have too many failed files
+                    else:
+                        # Continue with existing reset connection logic for many failed files
+                        pass
+                
+                # Check if we need to reset connection due to too many failures
+                if len(failed_files) >= Config.MAX_FAILED_FILES:
+                    print(f"More than {Config.MAX_FAILED_FILES} failed files detected ({len(failed_files)}), resetting connection...")
+                    reset_count += 1
                     
-                    # Reconnect with our main connection
-                    print("Creating fresh connection for deep retries")
-                    try:
-                        # Create a new connection task we can track and cancel if needed
-                        connection_task = asyncio.create_task(self.connection.connect(client_id=self.client_id))
-                        await asyncio.wait_for(connection_task, timeout=Config.CONNECTION_TIMEOUT)
-                        connect_success = True
-                    except asyncio.TimeoutError:
-                        print("Connection timeout during deep retry reconnection")
-                        if connection_task and not connection_task.done():
-                            connection_task.cancel()
-                        connect_success = False
-                    except Exception as e:
-                        print(f"Connection error during deep retry reconnection: {e}")
-                        if connection_task and not connection_task.done():
-                            connection_task.cancel()
-                        connect_success = False
-                    
-                    if connect_success:
-                        # Try deep retry for each failed file using the existing connection
-                        for local_file, relative_path in failed_files:
-                            if await self.deep_retry_upload(local_file, relative_path):
-                                retry_success += 1
-                    
-                    print(f"Deep retry recovered {retry_success}/{len(failed_files)} files")
-                    
-                    # Return failure if any files still failed
-                    if retry_success < len(failed_files):
+                    if reset_count > max_reset_attempts:
+                        print(f"Failed to recover after {max_reset_attempts} connection resets")
                         return False
-                except Exception as e:
-                    print(f"Error during deep retry process: {e}")
-                    # Ensure connection task is canceled if there's an error
-                    if connection_task and not connection_task.done():
-                        connection_task.cancel()
-                finally:
-                    # Ensure we always cleanup any hanging tasks
-                    if connection_task and not connection_task.done():
-                        connection_task.cancel()
-        
-        return True
+                    
+                    # Reset connection
+                    connection_success = await reset_connection()
+                    
+                    if connection_success:
+                        # Add failed files back to queue
+                        print(f"Re-queueing {len(failed_files)} failed files")
+                        for local_file, relative_path in failed_files:
+                            # Skip if it's somehow been uploaded in the meantime
+                            if not self.upload_record.is_uploaded(relative_path):
+                                await file_queue.put((local_file, relative_path))
+                        
+                        # Clear failed files since they're now in the queue
+                        failed_files.clear()
+                        
+                        # Start new worker tasks
+                        url_workers = [asyncio.create_task(url_worker()) for _ in range(num_url_workers)]
+                        upload_workers = [asyncio.create_task(upload_worker(session)) for _ in range(num_upload_workers)]
+                    else:
+                        print("Failed to reset connection, aborting upload")
+                        return False
+                
+                # Wait a bit before checking again
+                await asyncio.sleep(1)
+                
+                # Check if all workers are done or stalled
+                all_workers_done = all(worker.done() for worker in url_workers + upload_workers)
+                
+                if all_workers_done and not file_queue.empty():
+                    # Workers finished but queue isn't empty, start new workers
+                    print("All workers completed but files remain, starting new workers")
+                    url_workers = [asyncio.create_task(url_worker()) for _ in range(num_url_workers)]
+                    upload_workers = [asyncio.create_task(upload_worker(session)) for _ in range(num_upload_workers)]
+            
+            # Clean up any remaining tasks
+            await stop_workers()
+            
+            # Check if we have any remaining failed files
+            if failed_files:
+                print(f"Upload completed with {len(failed_files)} unrecoverable failed files")
+                return False
+            
+            return True
 
     async def upload_zarr_files(self, file_paths: List[str]) -> bool:
         """Upload files to the artifact manager using batch processing."""

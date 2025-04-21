@@ -92,7 +92,10 @@ class IncubatorService:
                 # Try to get the service status
                 if self.service_id:
                     service = await self.server.get_service(self.service_id)
-                    await service.hello_world()
+                    hello_world_result = await service.hello_world()
+                    if hello_world_result != "Hello world":
+                        logger.error(f"Service health check failed: {hello_world_result}")
+                        raise Exception("Service not healthy")
                     # Try a simple operation to verify service is working
                     #await service.get_status()
                     #print("Service health check passed")

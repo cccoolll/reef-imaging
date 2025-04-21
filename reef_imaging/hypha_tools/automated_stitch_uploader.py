@@ -32,7 +32,7 @@ load_dotenv()
 ARTIFACT_ALIAS = "image-map-20250410-treatment-full"
 # Timeout and retry settings
 CONNECTION_TIMEOUT = 60  # Timeout for connection operations in seconds
-OPERATION_TIMEOUT = 120  # Timeout for Hypha operations in seconds (increased from 60)
+OPERATION_TIMEOUT = 180  # Timeout for Hypha operations in seconds (increased from 60)
 MAX_RETRIES = 300  # Maximum retries for operations
 # Optimized concurrency settings
 BATCH_SIZE = 30  # Batch size for file uploads
@@ -206,74 +206,6 @@ def stitch_folder(folder_path: str) -> bool:
         return False
 
 
-async def connect_with_timeout(connection, client_id, timeout=CONNECTION_TIMEOUT, max_retries=MAX_RETRIES):
-    """Connect to Hypha with timeout and retry logic."""
-    retry_count = 0
-    client_conflict_count = 0
-    
-    while retry_count < max_retries:
-        try:
-            # Always ensure disconnection before attempting to connect
-            await connection.disconnect()
-            
-            # Add longer delay if we've seen client conflicts
-            if client_conflict_count > 0:
-                conflict_delay = min(60, 10 * client_conflict_count) + random.uniform(1, 5)
-                print(f"Waiting {conflict_delay:.1f}s before reconnection due to client conflict")
-                await asyncio.sleep(conflict_delay)
-            
-            # Create task with timeout
-            print(f"Attempting connection to Hypha with client_id: {client_id}")
-            connect_task = asyncio.create_task(connection.connect(client_id=client_id))
-            await asyncio.wait_for(connect_task, timeout=timeout)
-            print("Connection established successfully")
-            return True
-            
-        except asyncio.TimeoutError:
-            retry_count += 1
-            print(f"Connection attempt timed out after {timeout}s (attempt {retry_count}/{max_retries})")
-            # Clean up the task and connection
-            if 'connect_task' in locals() and not connect_task.done():
-                connect_task.cancel()
-            await connection.disconnect()
-            if retry_count < max_retries:
-                # Wait before retrying
-                await asyncio.sleep(5)
-                
-        except Exception as e:
-            retry_count += 1
-            err_msg = str(e)
-            print(f"Connection error: {err_msg} (attempt {retry_count}/{max_retries})")
-            
-            # Handle "Client already exists" error specifically
-            if "Client already exists" in err_msg:
-                client_conflict_count += 1
-                print("Client ID conflict detected. Ensure only one instance is running or use unique client IDs.")
-                
-                # Clean up connection more aggressively
-                if 'connect_task' in locals() and not connect_task.done():
-                    connect_task.cancel()
-                
-                try:
-                    await connection.disconnect()
-                except:
-                    pass
-                
-                # Add a longer delay for client conflicts to allow server to clean up
-                # Increase delay with each conflict
-                conflict_delay = min(60, 10 * client_conflict_count) + random.uniform(1, 5)
-                print(f"Waiting {conflict_delay:.1f}s for server-side client cleanup")
-                await asyncio.sleep(conflict_delay)
-            else:
-                # For other errors, perform normal cleanup
-                await connection.disconnect()
-                if retry_count < max_retries:
-                    await asyncio.sleep(5)
-    
-    print("Failed to connect after multiple attempts")
-    return False
-
-
 async def upload_zarr_file(zarr_file: str) -> bool:
     """Upload a zarr file to the artifact manager."""
     zarr_path = os.path.join(STITCHED_DIR, zarr_file)
@@ -289,19 +221,25 @@ async def upload_zarr_file(zarr_file: str) -> bool:
         concurrency_limit=CONCURRENCY_LIMIT
     )
     
-    # Create a fresh connection with TCP optimizations
-    connection = HyphaConnection()
-    
+    # Use the uploader's internal connection management
+    connection = None  # We will get the connection object from the uploader after connecting
+
     try:
-        # Connect to Hypha with timeout and retry
-        connect_success = await connect_with_timeout(connection, client_id)
+        # Connect to Hypha using the uploader's method
+        connect_success = await uploader.connect_with_retry(client_id=client_id)
         if not connect_success:
-            print("Failed to establish connection to Hypha")
+            print("Failed to establish connection to Hypha via uploader")
             return False
         
-        # Assign connection to uploader
-        uploader.connection = connection
-        
+        # Get the connection object from the uploader AFTER successful connection
+        connection = uploader.connection 
+        if not connection or not connection.artifact_manager:
+             print("Failed to get a valid connection or artifact manager from the uploader.")
+             # Attempt to disconnect cleanly if connection object exists
+             if connection:
+                 await connection.disconnect()
+             return False
+
         # Put dataset in staging mode
         staging_success = False
         retry_count = 0
@@ -309,19 +247,22 @@ async def upload_zarr_file(zarr_file: str) -> bool:
         while not staging_success and retry_count < MAX_RETRIES:
             try:
                 print(f"Putting dataset {ARTIFACT_ALIAS} in staging mode...")
-                artifact_manager = connection.artifact_manager
-                
-                # Read the current manifest with timeout
-                dataset = await asyncio.wait_for(
-                    artifact_manager.read(artifact_id=ARTIFACT_ALIAS, silent=True),
-                    timeout=OPERATION_TIMEOUT
-                )
+                # Use the artifact_manager from the uploader's connection
+                artifact_manager = connection.artifact_manager 
+                if not artifact_manager:
+                    raise ValueError("Artifact manager is not available on the connection.")
+
+                # Read the current manifest with timeout (if needed, otherwise just edit)
+                dataset_manifest = {
+                    "name": "Full zarr dataset 20250410",
+                    "description": "The Full zarr dataset for U2OS FUCCI Drug Treatment from 20250410",
+                }
                 
                 # Put the dataset in staging mode with timeout
                 await asyncio.wait_for(
                     artifact_manager.edit(
                         artifact_id=ARTIFACT_ALIAS,
-                        manifest=dataset,  # Preserve the same manifest
+                        manifest=dataset_manifest,  # Preserve the same manifest
                         version="stage"    # Put in staging mode
                     ),
                     timeout=OPERATION_TIMEOUT
@@ -334,14 +275,20 @@ async def upload_zarr_file(zarr_file: str) -> bool:
                 retry_count += 1
                 print(f"Staging operation timed out (attempt {retry_count}/{MAX_RETRIES})")
                 
-                # Reset connection on timeout
-                await connection.disconnect()
+                # Reset connection using the uploader's method
+                print("Attempting to reset connection via uploader...")
+                await connection.disconnect() # Disconnect first
                 if retry_count < MAX_RETRIES:
-                    connect_success = await connect_with_timeout(connection, client_id)
+                    connect_success = await uploader.connect_with_retry(client_id=client_id)
                     if not connect_success:
+                        print("Failed to re-establish connection after timeout.")
                         return False
-                    uploader.connection = connection
-                    await asyncio.sleep(5)
+                    # Update connection object reference after successful reconnect
+                    connection = uploader.connection 
+                    if not connection or not connection.artifact_manager:
+                        print("Failed to get valid connection after reconnect.")
+                        return False
+                    await asyncio.sleep(5) # Wait a bit after reconnecting
             
             except Exception as e:
                 retry_count += 1
@@ -349,19 +296,28 @@ async def upload_zarr_file(zarr_file: str) -> bool:
                 
                 if "not found" in str(e).lower():
                     print("Dataset not found. It may need to be created first.")
+                    # Disconnect cleanly before returning
+                    if connection: await connection.disconnect()
                     return False
                 
-                # Reset connection on error
-                await connection.disconnect()
+                # Reset connection using the uploader's method
+                print("Attempting to reset connection via uploader due to error...")
+                if connection: await connection.disconnect() # Disconnect first
                 if retry_count < MAX_RETRIES:
-                    connect_success = await connect_with_timeout(connection, client_id)
+                    connect_success = await uploader.connect_with_retry(client_id=client_id)
                     if not connect_success:
+                        print("Failed to re-establish connection after error.")
                         return False
-                    uploader.connection = connection
-                    await asyncio.sleep(5)
+                     # Update connection object reference after successful reconnect
+                    connection = uploader.connection
+                    if not connection or not connection.artifact_manager:
+                         print("Failed to get valid connection after error reconnect.")
+                         return False
+                    await asyncio.sleep(5) # Wait a bit after reconnecting
         
         if not staging_success:
             print("Failed to put dataset in staging mode after multiple attempts")
+            if connection: await connection.disconnect()
             return False
         
         # Add zarr path to the list of zarr files to upload
@@ -400,56 +356,94 @@ async def upload_zarr_file(zarr_file: str) -> bool:
             commit_success = False
             commit_attempts = 0
             
-            while not commit_success and commit_attempts < 5:
+            while not commit_success and commit_attempts < Config.MAX_COMMIT_ATTEMPTS: # Use config value
                 try:
-                    # Refresh connection before commit
-                    await connection.disconnect()
-                    connect_success = await connect_with_timeout(connection, client_id)
+                    # Refresh connection using uploader's method before commit
+                    print(f"Attempting to refresh connection via uploader before commit (attempt {commit_attempts + 1}/{Config.MAX_COMMIT_ATTEMPTS})...")
+                    if connection: await connection.disconnect() # Ensure disconnected first
+                    # Cancel any lingering connection task from the uploader itself
+                    if uploader.connection_task and not uploader.connection_task.done():
+                        uploader.connection_task.cancel()
+                        try:
+                            await asyncio.wait_for(asyncio.shield(uploader.connection_task), timeout=1)
+                        except (asyncio.CancelledError, asyncio.TimeoutError):
+                            pass
+                        uploader.connection_task = None
+
+                    connect_success = await uploader.connect_with_retry(client_id=client_id)
                     if not connect_success:
                         print("Failed to reconnect before commit")
-                        if commit_attempts < 4:  # Try again if we have attempts left
-                            commit_attempts += 1
-                            await asyncio.sleep(5)
-                            continue
-                        else:
-                            return False
-                    
-                    # Update uploader connection
-                    uploader.connection = connection
+                        commit_attempts += 1
+                        await asyncio.sleep(min(Config.INITIAL_RETRY_DELAY * (2 ** commit_attempts), Config.MAX_RETRY_DELAY)) # Exponential backoff
+                        continue # Try reconnecting again
+                        
+                    # Update connection object reference after successful reconnect
+                    connection = uploader.connection
+                    if not connection or not connection.artifact_manager:
+                        print("Failed to get valid connection for commit after reconnect.")
+                        commit_attempts += 1
+                        await asyncio.sleep(min(Config.INITIAL_RETRY_DELAY * (2 ** commit_attempts), Config.MAX_RETRY_DELAY))
+                        continue
                     
                     # Commit the dataset with timeout
-                    print(f"Committing dataset (attempt {commit_attempts + 1}/5)...")
+                    print(f"Committing dataset {ARTIFACT_ALIAS}...")
                     await asyncio.wait_for(
                         connection.artifact_manager.commit(ARTIFACT_ALIAS),
-                        timeout=OPERATION_TIMEOUT
+                        timeout=Config.MAX_COMMIT_DELAY # Use config value
                     )
                     print("Dataset committed successfully.")
                     commit_success = True
                     
                 except asyncio.TimeoutError:
                     commit_attempts += 1
-                    print(f"Commit operation timed out (attempt {commit_attempts}/5)")
-                    await connection.disconnect()
-                    await asyncio.sleep(5)
+                    print(f"Commit operation timed out (attempt {commit_attempts}/{Config.MAX_COMMIT_ATTEMPTS})")
+                    if connection: await connection.disconnect()
+                    await asyncio.sleep(min(Config.INITIAL_RETRY_DELAY * (2 ** commit_attempts), Config.MAX_RETRY_DELAY)) # Exponential backoff
                     
                 except Exception as e:
                     commit_attempts += 1
-                    print(f"Error committing dataset (attempt {commit_attempts}/5): {str(e)}")
-                    await connection.disconnect()
-                    await asyncio.sleep(5)
+                    print(f"Error committing dataset (attempt {commit_attempts}/{Config.MAX_COMMIT_ATTEMPTS}): {str(e)}")
+                    if connection: await connection.disconnect()
+                    await asyncio.sleep(min(Config.INITIAL_RETRY_DELAY * (2 ** commit_attempts), Config.MAX_RETRY_DELAY)) # Exponential backoff
             
             if not commit_success:
-                print("WARNING: Failed to commit the dataset after multiple attempts.")
+                print(f"WARNING: Failed to commit the dataset {ARTIFACT_ALIAS} after {Config.MAX_COMMIT_ATTEMPTS} attempts.")
+                # Decide if failure to commit should return False overall
+                # For now, let's return False if commit fails.
+                if connection: await connection.disconnect() # Clean up before returning
                 return False
                 
-        return success
+        # If upload itself failed, return False
+        if not success:
+             print(f"Upload process for {zarr_file} failed.")
+             if connection: await connection.disconnect()
+             return False
+
+        # If upload and commit (if applicable) were successful
+        return True 
         
     except Exception as e:
-        print(f"Error uploading zarr file: {e}")
+        print(f"Error during zarr file processing {zarr_file}: {e}")
+        import traceback
+        traceback.print_exc()
+        # Ensure disconnect on unexpected errors
+        if connection: await connection.disconnect()
         return False
     finally:
-        # Clean up connection
-        await connection.disconnect()
+        # Ensure final disconnection 
+        print(f"Ensuring final disconnection for {zarr_file} processing...")
+        # Check if the uploader still holds a connection reference and disconnect it
+        if uploader.connection:
+            await uploader.connection.disconnect()
+        # Also cancel any potentially lingering connection task
+        if uploader.connection_task and not uploader.connection_task.done():
+             uploader.connection_task.cancel()
+             try:
+                 await asyncio.wait_for(asyncio.shield(uploader.connection_task), timeout=1)
+             except (asyncio.CancelledError, asyncio.TimeoutError):
+                 pass
+             uploader.connection_task = None
+        print(f"Final disconnection completed for {zarr_file}.")
 
 
 async def process_folder(folder_name: str) -> bool:
@@ -509,6 +503,9 @@ async def process_folder(folder_name: str) -> bool:
     print(f"Cleaning up zarr file: {zarr_file}")
     cleanup_zarr_file(zarr_file)
     
+    # step 6, delete UPLOAD_RECORD_FILE
+    if os.path.exists(UPLOAD_RECORD_FILE):
+        os.remove(UPLOAD_RECORD_FILE)
     return True
 
 

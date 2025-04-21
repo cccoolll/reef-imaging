@@ -24,7 +24,7 @@ load_dotenv()
 DATASET_ALIAS = "20250410-treatment-full"
 # Timeout and retry settings
 CONNECTION_TIMEOUT = 60  # Timeout for connection operations in seconds
-OPERATION_TIMEOUT = 120  # Timeout for Hypha operations in seconds
+OPERATION_TIMEOUT = 180  # Timeout for Hypha operations in seconds
 MAX_RETRIES = 300  # Maximum retries for operations
 # Optimized concurrency settings
 BATCH_SIZE = 30  # Batch size for file uploads (increased from default)
@@ -74,72 +74,6 @@ def save_processed_folder(folder_name: str):
         f.write(f"{timestamp} - {folder_name}\n")
 
 
-async def connect_with_timeout(connection, client_id, timeout=CONNECTION_TIMEOUT, max_retries=MAX_RETRIES):
-    """Connect to Hypha with timeout and retry logic."""
-    retry_count = 0
-    client_conflict_count = 0
-    
-    while retry_count < max_retries:
-        try:
-            # Always ensure disconnection before attempting to connect
-            await connection.disconnect()
-            
-            # Add longer delay if we've seen client conflicts
-            if client_conflict_count > 0:
-                conflict_delay = min(60, 10 * client_conflict_count) + random.uniform(1, 5)
-                print(f"Waiting {conflict_delay:.1f}s before reconnection due to client conflict")
-                await asyncio.sleep(conflict_delay)
-            
-            # Create task with timeout
-            print(f"Attempting connection to Hypha with client_id: {client_id}")
-            connect_task = asyncio.create_task(connection.connect(client_id=client_id))
-            await asyncio.wait_for(connect_task, timeout=timeout)
-            print("Connection established successfully")
-            return True
-            
-        except asyncio.TimeoutError:
-            retry_count += 1
-            print(f"Connection attempt timed out after {timeout}s (attempt {retry_count}/{max_retries})")
-            # Clean up the task and connection
-            if 'connect_task' in locals() and not connect_task.done():
-                connect_task.cancel()
-            await connection.disconnect()
-            if retry_count < max_retries:
-                # Wait before retrying
-                await asyncio.sleep(5)
-                
-        except Exception as e:
-            retry_count += 1
-            err_msg = str(e)
-            print(f"Connection error: {err_msg} (attempt {retry_count}/{max_retries})")
-            
-            # Handle "Client already exists" error specifically
-            if "Client already exists" in err_msg:
-                client_conflict_count += 1
-                print("Client ID conflict detected. Ensure only one instance is running or use unique client IDs.")
-                
-                # Clean up connection more aggressively
-                if 'connect_task' in locals() and not connect_task.done():
-                    connect_task.cancel()
-                
-                try:
-                    await connection.disconnect()
-                except:
-                    pass
-                
-                # Add a longer delay for client conflicts to allow server to clean up
-                # Increase delay with each conflict
-                conflict_delay = min(60, 10 * client_conflict_count) + random.uniform(1, 5)
-                print(f"Waiting {conflict_delay:.1f}s for server-side client cleanup")
-                await asyncio.sleep(conflict_delay)
-            else:
-                # For other errors, perform normal cleanup
-                await connection.disconnect()
-                if retry_count < max_retries:
-                    await asyncio.sleep(5)
-    
-    print("Failed to connect after multiple attempts")
-    return False
 
 
 async def process_folder(folder_path):
@@ -161,7 +95,7 @@ async def process_folder(folder_path):
     
     try:
         # Connect to Hypha with timeout and retry
-        connect_success = await connect_with_timeout(connection, client_id)
+        connect_success = await connection.connect_with_retry(client_id=client_id)
         if not connect_success:
             print("Failed to establish connection to Hypha")
             return False
@@ -178,17 +112,16 @@ async def process_folder(folder_path):
                 print(f"Putting dataset {DATASET_ALIAS} in staging mode...")
                 artifact_manager = connection.artifact_manager
                 
-                # Read the current manifest with timeout
-                dataset = await asyncio.wait_for(
-                    artifact_manager.read(artifact_id=DATASET_ALIAS, silent=True),
-                    timeout=OPERATION_TIMEOUT
-                )
+                dataset_manifest = {
+                    "name": "Full treatment dataset 20250410",
+                    "description": "The Full treatment dataset from 20250410",
+                }
                 
                 # Put the dataset in staging mode with timeout
                 await asyncio.wait_for(
                     artifact_manager.edit(
                         artifact_id=DATASET_ALIAS,
-                        manifest=dataset,  # Preserve the same manifest
+                        manifest=dataset_manifest,  # Preserve the same manifest
                         version="stage"    # Put in staging mode
                     ),
                     timeout=OPERATION_TIMEOUT
@@ -204,7 +137,7 @@ async def process_folder(folder_path):
                 # Reset connection on timeout
                 await connection.disconnect()
                 if retry_count < MAX_RETRIES:
-                    connect_success = await connect_with_timeout(connection, client_id)
+                    connect_success = await connection.connect_with_retry(client_id=client_id)
                     if not connect_success:
                         return False
                     uploader.connection = connection
@@ -221,7 +154,7 @@ async def process_folder(folder_path):
                 # Reset connection on error
                 await connection.disconnect()
                 if retry_count < MAX_RETRIES:
-                    connect_success = await connect_with_timeout(connection, client_id)
+                    connect_success = await connection.connect_with_retry(client_id=client_id)
                     if not connect_success:
                         return False
                     uploader.connection = connection
@@ -261,10 +194,10 @@ async def process_folder(folder_path):
                 try:
                     # Refresh connection before commit
                     await connection.disconnect()
-                    connect_success = await connect_with_timeout(connection, client_id)
+                    connect_success = await connection.connect_with_retry(client_id=client_id)
                     if not connect_success:
                         print("Failed to reconnect before commit")
-                        if commit_attempts < 4:  # Try again if we have attempts left
+                        if commit_attempts < Config.MAX_COMMIT_ATTEMPTS:  # Try again if we have attempts left
                             commit_attempts += 1
                             await asyncio.sleep(5)
                             continue
@@ -278,7 +211,7 @@ async def process_folder(folder_path):
                     print(f"Committing dataset (attempt {commit_attempts + 1}/5)...")
                     await asyncio.wait_for(
                         connection.artifact_manager.commit(DATASET_ALIAS),
-                        timeout=OPERATION_TIMEOUT
+                        timeout=Config.MAX_COMMIT_DELAY
                     )
                     print("Dataset committed successfully.")
                     commit_success = True
@@ -407,6 +340,9 @@ async def main():
             save_processed_folder(folder_to_process)
             print(f"Successfully processed folder: {folder_to_process}")
             current_idx += 1
+            #delete treatment_upload_record.json file
+            if os.path.exists(UPLOAD_TRACKER_FILE):
+                os.remove(UPLOAD_TRACKER_FILE)
         else:
             # If failed, retry after a delay
             print(f"Failed to process {folder_to_process}. Retrying in {CHECK_INTERVAL} seconds...")

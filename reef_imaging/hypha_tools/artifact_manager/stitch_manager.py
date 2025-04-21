@@ -316,6 +316,10 @@ class StitchManager:
         imaging_params = ImagingParameters(parameter_file=parameter_file)
         pixel_size_xy = imaging_params.get_pixel_size()
         
+        # if zarr file exists, delete it
+        if os.path.exists(os.path.join(output_folder, zarr_filename)):
+            os.remove(os.path.join(output_folder, zarr_filename))
+
         # Create canvas
         self.canvas = StitchCanvas(stage_limits, pixel_size_xy)
         

@@ -4,6 +4,7 @@ import aiohttp
 from hypha_rpc import connect_to_server
 from dotenv import load_dotenv
 import json
+import random
 from datetime import datetime
 from typing import Dict, Set, Any, Tuple, Optional, List, Union
 
@@ -15,15 +16,18 @@ class Config:
     SERVER_URL = "https://hypha.aicell.io"
     WORKSPACE_TOKEN = os.getenv("REEF_WORKSPACE_TOKEN")
     CONCURRENCY_LIMIT = 25  # Max number of concurrent uploads (increased from 10)
-    MAX_RETRIES = 30  # Maximum number of retry attempts
+    MAX_RETRIES = 300  # Maximum number of retry attempts
     INITIAL_RETRY_DELAY = 5  # Initial retry delay in seconds
     MAX_RETRY_DELAY = 60  # Maximum retry delay in seconds
     CONNECTION_TIMEOUT = 30  # Timeout for API connections in seconds
     UPLOAD_TIMEOUT = 120  # Timeout for file uploads in seconds (increased from 60)
-    URL_BATCH_SIZE = 20  # Number of presigned URLs to request at once
+    URL_BATCH_SIZE = 30  # Number of presigned URLs to request at once
     MAX_WORKERS = 20  # Maximum number of worker tasks
+    MIN_URL_WORKERS = 6  # Minimum number of URL workers
     CONNECTION_POOL_SIZE = 100  # TCP connection pool size
-
+    MAX_FAILED_FILES = 10  # Maximum number of failed files before resetting connection
+    MAX_COMMIT_ATTEMPTS = 15  # Maximum number of commit attempts
+    MAX_COMMIT_DELAY = 220  # Maximum delay between commit attempts in seconds
 class UploadRecord:
     """Manages the record of uploaded files"""
     
@@ -147,9 +151,3 @@ class HyphaConnection:
         print("Attempting to reconnect...")
         await self.disconnect() # Ensure clean state before reconnecting
         await self.connect(timeout=timeout, client_id=client_id)
-
-async def get_artifact_manager() -> Tuple[Any, Any]:
-    """Get a new connection to the artifact manager"""
-    connection = HyphaConnection()
-    await connection.connect()
-    return connection.api, connection.artifact_manager 
