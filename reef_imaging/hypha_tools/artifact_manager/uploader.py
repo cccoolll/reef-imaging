@@ -579,7 +579,7 @@ class ArtifactUploader:
             connect_retries = Config.MAX_RETRIES
             connection_success = False
             
-            connection_success = await self.connection.connect_with_retry(client_id=self.client_id, max_retries=connect_retries)
+            connection_success = await self.connect_with_retry(client_id=self.client_id, max_retries=connect_retries)
   
             
             return connection_success
