@@ -441,11 +441,11 @@ class ArtifactUploader:
                         await asyncio.sleep(0.5)
                         continue
                     
-                    # Get a file and its presigned URL
+                    # Get a file and its presigned URL with timeout
                     try:
                         local_file, relative_path, put_url = await asyncio.wait_for(
                             url_queue.get(), 
-                            timeout=0.5
+                            timeout=1.0  # Increased timeout from 0.5 to 1.0
                         )
                     except asyncio.TimeoutError:
                         # Check if we should exit
@@ -464,10 +464,15 @@ class ArtifactUploader:
                     # Attempt upload with optimized settings
                     success = False
                     retries = 0
+                    max_retries = 5
+                    current_delay = 1
                     
-                    while retries < 5 and not success and not stopping:  # Limit retries per worker
+                    while retries < max_retries and not success and not stopping:
                         try:
                             file_size = os.path.getsize(local_file)
+                            
+                            # Calculate optimal timeout based on file size
+                            upload_timeout = min(Config.UPLOAD_TIMEOUT, max(60, file_size // (500 * 1024)))
                             
                             with open(local_file, "rb") as file_data:
                                 headers = {
@@ -475,47 +480,59 @@ class ArtifactUploader:
                                     'Content-Length': str(file_size)
                                 }
                                 
-                                async with asyncio.timeout(Config.UPLOAD_TIMEOUT):
-                                    if file_size > 10 * 1024 * 1024:  # For files > 10MB
-                                        # Stream file in chunks for large files
-                                        async with session.put(
-                                            put_url, 
-                                            data=file_data, 
-                                            headers=headers,
-                                            chunked=True,
-                                            timeout=aiohttp.ClientTimeout(total=Config.UPLOAD_TIMEOUT)
-                                        ) as resp:
-                                            if resp.status == 200:
-                                                success = True
-                                            else:
-                                                print(f"Upload failed with status {resp.status} for {relative_path}")
-                                    else:
-                                        # Small file upload
-                                        data = file_data.read()
-                                        async with session.put(
-                                            put_url, 
-                                            data=data,
-                                            headers=headers,
-                                            timeout=aiohttp.ClientTimeout(total=Config.UPLOAD_TIMEOUT)
-                                        ) as resp:
-                                            if resp.status == 200:
-                                                success = True
-                                            else:
-                                                print(f"Upload failed with status {resp.status} for {relative_path}")
+                                try:
+                                    async with asyncio.timeout(upload_timeout):
+                                        if file_size > 10 * 1024 * 1024:  # For files > 10MB
+                                            # Stream file in chunks for large files
+                                            async with session.put(
+                                                put_url, 
+                                                data=file_data, 
+                                                headers=headers,
+                                                chunked=True,
+                                                timeout=aiohttp.ClientTimeout(total=upload_timeout)
+                                            ) as resp:
+                                                if resp.status == 200:
+                                                    success = True
+                                                else:
+                                                    print(f"Upload failed with status {resp.status} for {relative_path}")
+                                        else:
+                                            # Small file upload
+                                            data = file_data.read()
+                                            async with session.put(
+                                                put_url, 
+                                                data=data,
+                                                headers=headers,
+                                                timeout=aiohttp.ClientTimeout(total=upload_timeout)
+                                            ) as resp:
+                                                if resp.status == 200:
+                                                    success = True
+                                                else:
+                                                    print(f"Upload failed with status {resp.status} for {relative_path}")
                                 
-                                if success:
-                                    # Record successful upload
-                                    self.upload_record.mark_uploaded(relative_path)
-                                    print(f"Uploaded file: {relative_path} ({self.upload_record.completed_files}/{self.upload_record.total_files})")
-                                    
+                                    if success:
+                                        # Record successful upload
+                                        self.upload_record.mark_uploaded(relative_path)
+                                        print(f"Uploaded file: {relative_path} ({self.upload_record.completed_files}/{self.upload_record.total_files})")
+                                        break
+                                
+                                except asyncio.TimeoutError:
+                                    print(f"Upload timed out after {upload_timeout} seconds for {relative_path}")
+                                    retries += 1
+                                    await asyncio.sleep(current_delay)
+                                    current_delay = min(current_delay * 2, 60)
+                                    continue
+                                
                         except Exception as e:
                             retries += 1
-                            print(f"Upload error for {relative_path}: {str(e)} (retry {retries}/3)")
-                            await asyncio.sleep(1)
+                            print(f"Upload error for {relative_path}: {str(e)} (retry {retries}/{max_retries})")
+                            await asyncio.sleep(current_delay)
+                            current_delay = min(current_delay * 2, 60)
+                            continue
                     
                     if not success:
                         # If still failed after retries, add to failed files
                         failed_files.add((local_file, relative_path))
+                        print(f"Failed to upload {relative_path} after {max_retries} retries")
                     
                     # Mark as done in URL queue and remove from in_progress
                     url_queue.task_done()
@@ -597,12 +614,47 @@ class ArtifactUploader:
             # Main processing loop
             max_reset_attempts = 5
             reset_count = 0
+            last_progress_time = time.time()
+            stall_timeout = 300  # 5 minutes without progress
             
             while True:
                 # Check if all files are processed
                 if file_queue.empty() and url_queue.empty() and not in_progress and not failed_files:
                     print("All files processed successfully!")
                     break
+                
+                # Check for stall condition
+                current_time = time.time()
+                if current_time - last_progress_time > stall_timeout:
+                    print(f"No progress for {stall_timeout} seconds, resetting connection...")
+                    reset_count += 1
+                    
+                    if reset_count > max_reset_attempts:
+                        print(f"Failed to recover after {max_reset_attempts} connection resets")
+                        return False
+                    
+                    # Reset connection
+                    connection_success = await reset_connection()
+                    
+                    if connection_success:
+                        # Add all in-progress files back to queue
+                        for item in list(in_progress):
+                            await file_queue.put(item)
+                            in_progress.remove(item)
+                        
+                        # Add failed files back to queue
+                        for item in list(failed_files):
+                            await file_queue.put(item)
+                        failed_files.clear()
+                        
+                        # Start new worker tasks
+                        url_workers = [asyncio.create_task(url_worker()) for _ in range(num_url_workers)]
+                        upload_workers = [asyncio.create_task(upload_worker(session)) for _ in range(num_upload_workers)]
+                        
+                        last_progress_time = current_time
+                    else:
+                        print("Failed to reset connection, aborting upload")
+                        return False
                 
                 # Handle remaining failed files if less than MAX_FAILED_FILES
                 if file_queue.empty() and url_queue.empty() and not in_progress and failed_files:
@@ -626,6 +678,7 @@ class ArtifactUploader:
                                     if success:
                                         failed_files.remove((local_file, relative_path))
                                         print(f"Successfully uploaded {relative_path} on individual retry")
+                                        last_progress_time = current_time
                                     else:
                                         retry_success = False
                                         print(f"Failed to upload {relative_path} even with individual retry")
@@ -637,11 +690,6 @@ class ArtifactUploader:
                         if not retry_success:
                             print(f"Upload completed with {len(failed_files)} unrecoverable failed files")
                             return False
-                        
-                    # Handle case where we have too many failed files
-                    else:
-                        # Continue with existing reset connection logic for many failed files
-                        pass
                 
                 # Check if we need to reset connection due to too many failures
                 if len(failed_files) >= Config.MAX_FAILED_FILES:
@@ -669,6 +717,8 @@ class ArtifactUploader:
                         # Start new worker tasks
                         url_workers = [asyncio.create_task(url_worker()) for _ in range(num_url_workers)]
                         upload_workers = [asyncio.create_task(upload_worker(session)) for _ in range(num_upload_workers)]
+                        
+                        last_progress_time = current_time
                     else:
                         print("Failed to reset connection, aborting upload")
                         return False
@@ -684,6 +734,7 @@ class ArtifactUploader:
                     print("All workers completed but files remain, starting new workers")
                     url_workers = [asyncio.create_task(url_worker()) for _ in range(num_url_workers)]
                     upload_workers = [asyncio.create_task(upload_worker(session)) for _ in range(num_upload_workers)]
+                    last_progress_time = current_time
             
             # Clean up any remaining tasks
             await stop_workers()
