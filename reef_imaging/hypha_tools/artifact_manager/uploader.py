@@ -27,6 +27,7 @@ class ArtifactUploader:
         self.semaphore = asyncio.Semaphore(concurrency_limit)
         self.client_id = client_id
         self.connection_task = None  # Track connection task at class level
+        self.last_progress_time = None
 
     async def connect_with_retry(self, client_id=None, max_retries=300, base_delay=5, max_delay=180):
         """Connect to Hypha with exponential backoff and retry."""
@@ -276,6 +277,7 @@ class ArtifactUploader:
                     print(
                         f"Uploaded file: {relative_path} ({self.upload_record.completed_files}/{self.upload_record.total_files})"
                     )
+                    self.last_progress_time = time.time()
                     return True
 
             except Exception as e:
@@ -643,7 +645,7 @@ class ArtifactUploader:
             await self.connection.disconnect()
             await asyncio.sleep(2)  # Wait for server to clean up
             # Cancel any existing connection task
-            if self.connection_task and not self.connection_task.done():
+            if self.connection_task is not None:
                 self.connection_task.cancel()
                 try:
                     await asyncio.wait_for(asyncio.shield(self.connection_task), timeout=1)
@@ -674,7 +676,7 @@ class ArtifactUploader:
             # Main processing loop
             max_reset_attempts = 5
             reset_count = 0
-            last_progress_time = time.time()
+            self.last_progress_time = time.time()
             stall_timeout = 300  # 5 minutes without progress
             
             while True:
@@ -685,7 +687,7 @@ class ArtifactUploader:
                 
                 # Check for stall condition
                 current_time = time.time()
-                if current_time - last_progress_time > stall_timeout:
+                if current_time - self.last_progress_time > stall_timeout:
                     print(f"No progress for {stall_timeout} seconds, resetting connection...")
                     reset_count += 1
                     
@@ -711,7 +713,7 @@ class ArtifactUploader:
                         url_workers = [asyncio.create_task(url_worker()) for _ in range(num_url_workers)]
                         upload_workers = [asyncio.create_task(upload_worker(session)) for _ in range(num_upload_workers)]
                         
-                        last_progress_time = current_time
+                        self.last_progress_time = current_time
                     else:
                         print("Failed to reset connection, aborting upload")
                         return False
@@ -738,7 +740,7 @@ class ArtifactUploader:
                                     if success:
                                         failed_files.remove((local_file, relative_path))
                                         print(f"Successfully uploaded {relative_path} on individual retry")
-                                        last_progress_time = current_time
+                                        self.last_progress_time = current_time
                                     else:
                                         retry_success = False
                                         print(f"Failed to upload {relative_path} even with individual retry")
@@ -778,7 +780,7 @@ class ArtifactUploader:
                         url_workers = [asyncio.create_task(url_worker()) for _ in range(num_url_workers)]
                         upload_workers = [asyncio.create_task(upload_worker(session)) for _ in range(num_upload_workers)]
                         
-                        last_progress_time = current_time
+                        self.last_progress_time = current_time
                     else:
                         print("Failed to reset connection, aborting upload")
                         return False
@@ -794,7 +796,7 @@ class ArtifactUploader:
                     print("All workers completed but files remain, starting new workers")
                     url_workers = [asyncio.create_task(url_worker()) for _ in range(num_url_workers)]
                     upload_workers = [asyncio.create_task(upload_worker(session)) for _ in range(num_upload_workers)]
-                    last_progress_time = current_time
+                    self.last_progress_time = current_time
             
             # Clean up any remaining tasks
             await stop_workers()
