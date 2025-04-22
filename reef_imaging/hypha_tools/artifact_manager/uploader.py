@@ -360,23 +360,35 @@ class ArtifactUploader:
                         print(f"More than {Config.MAX_FAILED_FILES} failed files detected, attempting connection reset...")
                         # Try to reset connection up to MAX_RETRIES times
                         reset_attempts = 0
-                        while reset_attempts < Config.MAX_RETRIES and not stopping:
-                            connection_success = await reset_connection()
-                            if connection_success:
-                                # Re-queue failed files
-                                for item in list(failed_files):
-                                    await file_queue.put(item)
-                                failed_files.clear()
-                                print("Connection reset and files re-queued, continuing...")
-                                break
-                            else:
-                                reset_attempts += 1
-                                print(f"Connection reset attempt {reset_attempts}/{Config.MAX_RETRIES} failed, retrying...")
-                                await asyncio.sleep(Config.INITIAL_RETRY_DELAY * (2 ** min(reset_attempts, 5)))  # Exponential backoff
+                        connection_reset_successful = False
                         
-                        if reset_attempts >= Config.MAX_RETRIES:
-                            print(f"Failed to reset connection after {Config.MAX_RETRIES} attempts, stopping URL worker...")
-                            break
+                        while reset_attempts < Config.MAX_RETRIES and not stopping and not connection_reset_successful:
+                            try:
+                                connection_success = await reset_connection()
+                                if connection_success:
+                                    # Re-queue failed files
+                                    for item in list(failed_files):
+                                        await file_queue.put(item)
+                                    failed_files.clear()
+                                    print("Connection reset and files re-queued, continuing...")
+                                    connection_reset_successful = True
+                                    # Connection reset worked, wait briefly before continuing
+                                    await asyncio.sleep(3)
+                                else:
+                                    reset_attempts += 1
+                                    print(f"Connection reset attempt {reset_attempts}/{Config.MAX_RETRIES} failed, retrying...")
+                                    await asyncio.sleep(Config.INITIAL_RETRY_DELAY * (2 ** min(reset_attempts, 5)))  # Exponential backoff
+                            except Exception as e:
+                                reset_attempts += 1
+                                print(f"Error during connection reset: {e}, attempt {reset_attempts}/{Config.MAX_RETRIES}")
+                                await asyncio.sleep(Config.INITIAL_RETRY_DELAY * (2 ** min(reset_attempts, 5)))
+                        
+                        if not connection_reset_successful:
+                            print(f"Failed to reset connection after {reset_attempts} attempts, will continue processing other files...")
+                            # Clear the failed files to avoid continuous reset attempts
+                            # But don't re-queue them since the connection is unreliable
+                            failed_files.clear()
+                            await asyncio.sleep(60)  # Wait a minute before continuing to prevent rapid resets
                         continue
                     
                     # Get a batch of files to process
@@ -458,23 +470,35 @@ class ArtifactUploader:
                         print(f"More than {Config.MAX_FAILED_FILES} failed files detected, attempting connection reset...")
                         # Try to reset connection up to MAX_RETRIES times
                         reset_attempts = 0
-                        while reset_attempts < Config.MAX_RETRIES and not stopping:
-                            connection_success = await reset_connection()
-                            if connection_success:
-                                # Re-queue failed files
-                                for item in list(failed_files):
-                                    await file_queue.put(item)
-                                failed_files.clear()
-                                print("Connection reset and files re-queued, continuing...")
-                                break
-                            else:
-                                reset_attempts += 1
-                                print(f"Connection reset attempt {reset_attempts}/{Config.MAX_RETRIES} failed, retrying...")
-                                await asyncio.sleep(Config.INITIAL_RETRY_DELAY * (2 ** min(reset_attempts, 5)))  # Exponential backoff
+                        connection_reset_successful = False
                         
-                        if reset_attempts >= Config.MAX_RETRIES:
-                            print(f"Failed to reset connection after {Config.MAX_RETRIES} attempts, stopping upload worker...")
-                            break
+                        while reset_attempts < Config.MAX_RETRIES and not stopping and not connection_reset_successful:
+                            try:
+                                connection_success = await reset_connection()
+                                if connection_success:
+                                    # Re-queue failed files
+                                    for item in list(failed_files):
+                                        await file_queue.put(item)
+                                    failed_files.clear()
+                                    print("Connection reset and files re-queued, continuing...")
+                                    connection_reset_successful = True
+                                    # Connection reset worked, wait briefly before continuing
+                                    await asyncio.sleep(3)
+                                else:
+                                    reset_attempts += 1
+                                    print(f"Connection reset attempt {reset_attempts}/{Config.MAX_RETRIES} failed, retrying...")
+                                    await asyncio.sleep(Config.INITIAL_RETRY_DELAY * (2 ** min(reset_attempts, 5)))  # Exponential backoff
+                            except Exception as e:
+                                reset_attempts += 1
+                                print(f"Error during connection reset: {e}, attempt {reset_attempts}/{Config.MAX_RETRIES}")
+                                await asyncio.sleep(Config.INITIAL_RETRY_DELAY * (2 ** min(reset_attempts, 5)))
+                        
+                        if not connection_reset_successful:
+                            print(f"Failed to reset connection after {reset_attempts} attempts, will continue processing other files...")
+                            # Clear the failed files to avoid continuous reset attempts
+                            # But don't re-queue them since the connection is unreliable
+                            failed_files.clear()
+                            await asyncio.sleep(60)  # Wait a minute before continuing to prevent rapid resets
                         continue
                     
                     # Get a file and its presigned URL with timeout
