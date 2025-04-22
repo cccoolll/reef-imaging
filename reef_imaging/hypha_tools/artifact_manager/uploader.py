@@ -358,8 +358,12 @@ class ArtifactUploader:
                         
                     if len(failed_files) >= Config.MAX_FAILED_FILES:
                         print(f"More than {Config.MAX_FAILED_FILES} failed files detected, pausing URL worker...")
-                        await asyncio.sleep(0.5)
-                        continue
+                        # Wait longer when we have too many failures
+                        await asyncio.sleep(5)  # Increased from 0.5 to 5 seconds
+                        # Check if we should reset connection
+                        if len(failed_files) >= Config.MAX_FAILED_FILES:
+                            # Let the main loop handle the reset
+                            continue
                     
                     # Get a batch of files to process
                     batch = []
@@ -438,8 +442,12 @@ class ArtifactUploader:
                     
                     if len(failed_files) >= Config.MAX_FAILED_FILES:
                         print(f"More than {Config.MAX_FAILED_FILES} failed files detected, pausing upload worker...")
-                        await asyncio.sleep(0.5)
-                        continue
+                        # Wait longer when we have too many failures
+                        await asyncio.sleep(5)  # Increased from 0.5 to 5 seconds
+                        # Check if we should reset connection
+                        if len(failed_files) >= Config.MAX_FAILED_FILES:
+                            # Let the main loop handle the reset
+                            continue
                     
                     # Get a file and its presigned URL with timeout
                     try:
@@ -719,6 +727,8 @@ class ArtifactUploader:
                         upload_workers = [asyncio.create_task(upload_worker(session)) for _ in range(num_upload_workers)]
                         
                         last_progress_time = current_time
+                        # Wait a bit longer after reset to let things stabilize
+                        await asyncio.sleep(10)
                     else:
                         print("Failed to reset connection, aborting upload")
                         return False
