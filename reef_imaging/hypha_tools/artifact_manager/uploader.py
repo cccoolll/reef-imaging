@@ -357,13 +357,27 @@ class ArtifactUploader:
                         break
                         
                     if len(failed_files) >= Config.MAX_FAILED_FILES:
-                        print(f"More than {Config.MAX_FAILED_FILES} failed files detected, pausing URL worker...")
-                        # Wait longer when we have too many failures
-                        await asyncio.sleep(5)  # Increased from 0.5 to 5 seconds
-                        # Check if we should reset connection
-                        if len(failed_files) >= Config.MAX_FAILED_FILES:
-                            # Let the main loop handle the reset
-                            continue
+                        print(f"More than {Config.MAX_FAILED_FILES} failed files detected, attempting connection reset...")
+                        # Try to reset connection up to MAX_RETRIES times
+                        reset_attempts = 0
+                        while reset_attempts < Config.MAX_RETRIES and not stopping:
+                            connection_success = await reset_connection()
+                            if connection_success:
+                                # Re-queue failed files
+                                for item in list(failed_files):
+                                    await file_queue.put(item)
+                                failed_files.clear()
+                                print("Connection reset and files re-queued, continuing...")
+                                break
+                            else:
+                                reset_attempts += 1
+                                print(f"Connection reset attempt {reset_attempts}/{Config.MAX_RETRIES} failed, retrying...")
+                                await asyncio.sleep(Config.INITIAL_RETRY_DELAY * (2 ** min(reset_attempts, 5)))  # Exponential backoff
+                        
+                        if reset_attempts >= Config.MAX_RETRIES:
+                            print(f"Failed to reset connection after {Config.MAX_RETRIES} attempts, stopping URL worker...")
+                            break
+                        continue
                     
                     # Get a batch of files to process
                     batch = []
@@ -441,13 +455,27 @@ class ArtifactUploader:
                         break
                     
                     if len(failed_files) >= Config.MAX_FAILED_FILES:
-                        print(f"More than {Config.MAX_FAILED_FILES} failed files detected, pausing upload worker...")
-                        # Wait longer when we have too many failures
-                        await asyncio.sleep(5)  # Increased from 0.5 to 5 seconds
-                        # Check if we should reset connection
-                        if len(failed_files) >= Config.MAX_FAILED_FILES:
-                            # Let the main loop handle the reset
-                            continue
+                        print(f"More than {Config.MAX_FAILED_FILES} failed files detected, attempting connection reset...")
+                        # Try to reset connection up to MAX_RETRIES times
+                        reset_attempts = 0
+                        while reset_attempts < Config.MAX_RETRIES and not stopping:
+                            connection_success = await reset_connection()
+                            if connection_success:
+                                # Re-queue failed files
+                                for item in list(failed_files):
+                                    await file_queue.put(item)
+                                failed_files.clear()
+                                print("Connection reset and files re-queued, continuing...")
+                                break
+                            else:
+                                reset_attempts += 1
+                                print(f"Connection reset attempt {reset_attempts}/{Config.MAX_RETRIES} failed, retrying...")
+                                await asyncio.sleep(Config.INITIAL_RETRY_DELAY * (2 ** min(reset_attempts, 5)))  # Exponential backoff
+                        
+                        if reset_attempts >= Config.MAX_RETRIES:
+                            print(f"Failed to reset connection after {Config.MAX_RETRIES} attempts, stopping upload worker...")
+                            break
+                        continue
                     
                     # Get a file and its presigned URL with timeout
                     try:
@@ -494,7 +522,7 @@ class ArtifactUploader:
                                             # Stream file in chunks for large files
                                             async with session.put(
                                                 put_url, 
-                                                data=file_data, 
+                                                data=file_data,
                                                 headers=headers,
                                                 chunked=True,
                                                 timeout=aiohttp.ClientTimeout(total=upload_timeout)
@@ -727,8 +755,6 @@ class ArtifactUploader:
                         upload_workers = [asyncio.create_task(upload_worker(session)) for _ in range(num_upload_workers)]
                         
                         last_progress_time = current_time
-                        # Wait a bit longer after reset to let things stabilize
-                        await asyncio.sleep(10)
                     else:
                         print("Failed to reset connection, aborting upload")
                         return False
