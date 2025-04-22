@@ -82,7 +82,8 @@ async def process_folder(folder_path):
         print(f"Folder {folder_path} does not exist")
         return False
     
-    # Create uploader instance with optimized concurrency
+    # Create uploader instance without providing a connection initially
+    # Let the uploader manage its own connection lifecycle
     uploader = ArtifactUploader(
         artifact_alias=DATASET_ALIAS,
         record_file=UPLOAD_TRACKER_FILE,
@@ -90,19 +91,25 @@ async def process_folder(folder_path):
         concurrency_limit=CONCURRENCY_LIMIT
     )
     
-    # Create a fresh connection with TCP optimizations
-    connection = HyphaConnection()
+    # Connection object will be retrieved from the uploader after connection
+    connection = None 
     
     try:
-        # Connect to Hypha with timeout and retry
-        connect_success = await connection.connect_with_retry(client_id=client_id)
+        # Connect to Hypha using the uploader's robust method
+        connect_success = await uploader.connect_with_retry(client_id=client_id)
         if not connect_success:
-            print("Failed to establish connection to Hypha")
+            print("Failed to establish connection to Hypha via uploader")
             return False
         
-        # Assign connection to uploader
-        uploader.connection = connection
-        
+        # Get the connection object from the uploader AFTER successful connection
+        connection = uploader.connection
+        if not connection or not connection.artifact_manager:
+             print("Failed to get a valid connection or artifact manager from the uploader.")
+             # Attempt to disconnect cleanly if connection object exists
+             if connection:
+                 await connection.disconnect()
+             return False
+
         # Put dataset in staging mode
         staging_success = False
         retry_count = 0
@@ -110,7 +117,10 @@ async def process_folder(folder_path):
         while not staging_success and retry_count < MAX_RETRIES:
             try:
                 print(f"Putting dataset {DATASET_ALIAS} in staging mode...")
-                artifact_manager = connection.artifact_manager
+                # Use the artifact_manager from the uploader's connection
+                artifact_manager = connection.artifact_manager 
+                if not artifact_manager:
+                    raise ValueError("Artifact manager is not available on the connection.")
                 
                 dataset_manifest = {
                     "name": "Full treatment dataset 20250410",
@@ -134,14 +144,20 @@ async def process_folder(folder_path):
                 retry_count += 1
                 print(f"Staging operation timed out (attempt {retry_count}/{MAX_RETRIES})")
                 
-                # Reset connection on timeout
-                await connection.disconnect()
+                # Reset connection using the uploader's method
+                print("Attempting to reset connection via uploader...")
+                if connection: await connection.disconnect() # Disconnect current first
                 if retry_count < MAX_RETRIES:
-                    connect_success = await connection.connect_with_retry(client_id=client_id)
+                    connect_success = await uploader.connect_with_retry(client_id=client_id)
                     if not connect_success:
+                        print("Failed to re-establish connection after timeout.")
                         return False
-                    uploader.connection = connection
-                    await asyncio.sleep(5)
+                    # Update connection object reference after successful reconnect
+                    connection = uploader.connection 
+                    if not connection or not connection.artifact_manager:
+                        print("Failed to get valid connection after reconnect.")
+                        return False
+                    await asyncio.sleep(5) # Wait a bit after reconnecting
             
             except Exception as e:
                 retry_count += 1
@@ -149,19 +165,28 @@ async def process_folder(folder_path):
                 
                 if "not found" in str(e).lower():
                     print("Dataset not found. It may need to be created first.")
+                    # Disconnect cleanly before returning
+                    if connection: await connection.disconnect()
                     return False
                 
-                # Reset connection on error
-                await connection.disconnect()
+                # Reset connection using the uploader's method
+                print("Attempting to reset connection via uploader due to error...")
+                if connection: await connection.disconnect() # Disconnect current first
                 if retry_count < MAX_RETRIES:
-                    connect_success = await connection.connect_with_retry(client_id=client_id)
+                    connect_success = await uploader.connect_with_retry(client_id=client_id)
                     if not connect_success:
+                        print("Failed to re-establish connection after error.")
                         return False
-                    uploader.connection = connection
-                    await asyncio.sleep(5)
+                     # Update connection object reference after successful reconnect
+                    connection = uploader.connection
+                    if not connection or not connection.artifact_manager:
+                         print("Failed to get valid connection after error reconnect.")
+                         return False
+                    await asyncio.sleep(5) # Wait a bit after reconnecting
         
         if not staging_success:
             print("Failed to put dataset in staging mode after multiple attempts")
+            if connection: await connection.disconnect()
             return False
         
         # Extract folder name for organizing uploads
@@ -183,6 +208,7 @@ async def process_folder(folder_path):
         uploader.upload_record.set_total_files(len(to_upload))
         
         # Use the optimized upload_files_in_batches with higher batch size
+        # This method uses the uploader's internal connection management
         success = await uploader.upload_files_in_batches(to_upload, batch_size=BATCH_SIZE)
         
         # Commit the dataset
@@ -190,56 +216,93 @@ async def process_folder(folder_path):
             commit_success = False
             commit_attempts = 0
             
-            while not commit_success and commit_attempts < 5:
+            while not commit_success and commit_attempts < Config.MAX_COMMIT_ATTEMPTS: # Use config value
                 try:
-                    # Refresh connection before commit
-                    await connection.disconnect()
-                    connect_success = await connection.connect_with_retry(client_id=client_id)
+                    # Refresh connection using uploader's method before commit
+                    print(f"Attempting to refresh connection via uploader before commit (attempt {commit_attempts + 1}/{Config.MAX_COMMIT_ATTEMPTS})...")
+                    if connection: await connection.disconnect() # Ensure disconnected first
+                     # Cancel any lingering connection task from the uploader itself
+                    if uploader.connection_task and not uploader.connection_task.done():
+                        uploader.connection_task.cancel()
+                        try:
+                            await asyncio.wait_for(asyncio.shield(uploader.connection_task), timeout=1)
+                        except (asyncio.CancelledError, asyncio.TimeoutError):
+                            pass
+                        uploader.connection_task = None
+
+                    connect_success = await uploader.connect_with_retry(client_id=client_id)
                     if not connect_success:
                         print("Failed to reconnect before commit")
-                        if commit_attempts < Config.MAX_COMMIT_ATTEMPTS:  # Try again if we have attempts left
-                            commit_attempts += 1
-                            await asyncio.sleep(5)
-                            continue
-                        else:
-                            return False
-                    
-                    # Update uploader connection
-                    uploader.connection = connection
+                        commit_attempts += 1
+                        await asyncio.sleep(min(Config.INITIAL_RETRY_DELAY * (2 ** commit_attempts), Config.MAX_RETRY_DELAY)) # Exponential backoff
+                        continue # Try reconnecting again
+                        
+                    # Update connection object reference after successful reconnect
+                    connection = uploader.connection
+                    if not connection or not connection.artifact_manager:
+                        print("Failed to get valid connection for commit after reconnect.")
+                        commit_attempts += 1
+                        await asyncio.sleep(min(Config.INITIAL_RETRY_DELAY * (2 ** commit_attempts), Config.MAX_RETRY_DELAY))
+                        continue
                     
                     # Commit the dataset with timeout
-                    print(f"Committing dataset (attempt {commit_attempts + 1}/5)...")
+                    print(f"Committing dataset {DATASET_ALIAS}...")
                     await asyncio.wait_for(
                         connection.artifact_manager.commit(DATASET_ALIAS),
-                        timeout=Config.MAX_COMMIT_DELAY
+                        timeout=Config.MAX_COMMIT_DELAY # Use config value
                     )
                     print("Dataset committed successfully.")
                     commit_success = True
                     
                 except asyncio.TimeoutError:
                     commit_attempts += 1
-                    print(f"Commit operation timed out (attempt {commit_attempts}/5)")
-                    await connection.disconnect()
-                    await asyncio.sleep(5)
+                    print(f"Commit operation timed out (attempt {commit_attempts}/{Config.MAX_COMMIT_ATTEMPTS})")
+                    if connection: await connection.disconnect()
+                    await asyncio.sleep(min(Config.INITIAL_RETRY_DELAY * (2 ** commit_attempts), Config.MAX_RETRY_DELAY)) # Exponential backoff
                     
                 except Exception as e:
                     commit_attempts += 1
-                    print(f"Error committing dataset (attempt {commit_attempts}/5): {str(e)}")
-                    await connection.disconnect()
-                    await asyncio.sleep(5)
+                    print(f"Error committing dataset (attempt {commit_attempts}/{Config.MAX_COMMIT_ATTEMPTS}): {str(e)}")
+                    if connection: await connection.disconnect()
+                    await asyncio.sleep(min(Config.INITIAL_RETRY_DELAY * (2 ** commit_attempts), Config.MAX_RETRY_DELAY)) # Exponential backoff
             
             if not commit_success:
-                print("WARNING: Failed to commit the dataset after multiple attempts.")
+                print(f"WARNING: Failed to commit the dataset {DATASET_ALIAS} after {Config.MAX_COMMIT_ATTEMPTS} attempts.")
+                 # Return False if commit fails to maintain consistency
+                if connection: await connection.disconnect() # Clean up before returning
                 return False
-                
-        return success
         
+        # If upload itself failed, return False
+        if not success:
+             print(f"Upload process for {folder_path} failed.")
+             if connection: await connection.disconnect()
+             return False
+
+        # If upload and commit were successful
+        return True
+
     except Exception as e:
-        print(f"Error processing folder: {e}")
+        print(f"Error processing folder {folder_path}: {e}")
+        import traceback
+        traceback.print_exc()
+        # Ensure disconnect on unexpected errors
+        if connection: await connection.disconnect()
         return False
     finally:
-        # Clean up connection
-        await connection.disconnect()
+        # Ensure final disconnection using the uploader's connection
+        print(f"Ensuring final disconnection for {folder_path} processing...")
+        # Check if the uploader still holds a connection reference and disconnect it
+        if uploader.connection:
+            await uploader.connection.disconnect()
+        # Also cancel any potentially lingering connection task
+        if uploader.connection_task and not uploader.connection_task.done():
+             uploader.connection_task.cancel()
+             try:
+                 await asyncio.wait_for(asyncio.shield(uploader.connection_task), timeout=1)
+             except (asyncio.CancelledError, asyncio.TimeoutError):
+                 pass
+             uploader.connection_task = None
+        print(f"Final disconnection completed for {folder_path}.")
 
 
 async def main():
@@ -317,7 +380,8 @@ async def main():
         start_folder, end_folder = end_folder, start_folder
     
     print(f"Processing folders from {start_folder} to {end_folder}")
-    
+    print(f"Starting with folder index {start_idx+1} and ending with folder index {end_idx+1}") # Added index logging
+
     # Process the specified range of folders
     current_idx = start_idx
     
@@ -330,7 +394,7 @@ async def main():
             current_idx += 1
             continue
         
-        print(f"\nProcessing folder: {folder_to_process}")
+        print(f"\nProcessing folder: {folder_to_process} (index {current_idx+1})") # Added index logging
         folder_path = os.path.join(BASE_DIR, folder_to_process)
         
         # Process the folder
@@ -342,7 +406,11 @@ async def main():
             current_idx += 1
             #delete treatment_upload_record.json file
             if os.path.exists(UPLOAD_TRACKER_FILE):
-                os.remove(UPLOAD_TRACKER_FILE)
+                try:
+                    os.remove(UPLOAD_TRACKER_FILE)
+                    print(f"Removed upload tracker file: {UPLOAD_TRACKER_FILE}")
+                except OSError as e:
+                    print(f"Error removing tracker file {UPLOAD_TRACKER_FILE}: {e}")
         else:
             # If failed, retry after a delay
             print(f"Failed to process {folder_to_process}. Retrying in {CHECK_INTERVAL} seconds...")
