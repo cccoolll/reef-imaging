@@ -125,6 +125,12 @@ The system integrates with multiple hardware components:
 - **Incubator Control**: Manages sample storage and environmental conditions
 - **Mirror Services**: Proxies requests between cloud and local systems
 
+## Restart Hypha
+
+```
+docker-compose restart hypha
+```
+
 ## Data Management
 
 REEF Imaging uses the Hypha platform for data management with these key features:
