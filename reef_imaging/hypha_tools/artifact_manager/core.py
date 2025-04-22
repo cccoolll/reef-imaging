@@ -17,6 +17,7 @@ class Config:
     WORKSPACE_TOKEN = os.getenv("REEF_WORKSPACE_TOKEN")
     CONCURRENCY_LIMIT = 25  # Max number of concurrent uploads (increased from 10)
     MAX_RETRIES = 300  # Maximum number of retry attempts
+    MAX_RETRIES_PER_FILE = 10  # Maximum number of retry attempts per file
     INITIAL_RETRY_DELAY = 5  # Initial retry delay in seconds
     MAX_RETRY_DELAY = 60  # Maximum retry delay in seconds
     CONNECTION_TIMEOUT = 30  # Timeout for API connections in seconds

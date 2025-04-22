@@ -500,10 +500,10 @@ class ArtifactUploader:
                     # Attempt upload with optimized settings
                     success = False
                     retries = 0
-                    max_retries = 5
+                    max_retries_per_file = Config.MAX_RETRIES_PER_FILE
                     current_delay = 1
                     
-                    while retries < max_retries and not success and not stopping:
+                    while retries < max_retries_per_file and not success and not stopping:
                         try:
                             file_size = os.path.getsize(local_file)
                             
@@ -560,7 +560,7 @@ class ArtifactUploader:
                                 
                         except Exception as e:
                             retries += 1
-                            print(f"Upload error for {relative_path}: {str(e)} (retry {retries}/{max_retries})")
+                            print(f"Upload error for {relative_path}: {str(e)} (retry {retries}/{max_retries_per_file})")
                             await asyncio.sleep(current_delay)
                             current_delay = min(current_delay * 2, 60)
                             continue
@@ -568,7 +568,7 @@ class ArtifactUploader:
                     if not success:
                         # If still failed after retries, add to failed files
                         failed_files.add((local_file, relative_path))
-                        print(f"Failed to upload {relative_path} after {max_retries} retries")
+                        print(f"Failed to upload {relative_path} after {max_retries_per_file} retries")
                     
                     # Mark as done in URL queue and remove from in_progress
                     url_queue.task_done()
