@@ -26,7 +26,6 @@ class Config:
     MAX_WORKERS = 20  # Maximum number of worker tasks
     MIN_URL_WORKERS = 3  # Minimum number of URL workers
     CONNECTION_POOL_SIZE = 100  # TCP connection pool size
-    MAX_FAILED_FILES = 10  # Maximum number of failed files before resetting connection
     MAX_COMMIT_ATTEMPTS = 15  # Maximum number of commit attempts
     MAX_COMMIT_DELAY = 220  # Maximum delay between commit attempts in seconds
 class UploadRecord:

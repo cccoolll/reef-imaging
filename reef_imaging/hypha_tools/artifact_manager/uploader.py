@@ -358,41 +358,6 @@ class ArtifactUploader:
                     if file_queue.empty() and not in_progress:
                         break
                         
-                    if len(failed_files) >= Config.MAX_FAILED_FILES:
-                        print(f"More than {Config.MAX_FAILED_FILES} failed files detected, attempting connection reset...")
-                        # Try to reset connection up to MAX_RETRIES times
-                        reset_attempts = 0
-                        connection_reset_successful = False
-                        
-                        while reset_attempts < Config.MAX_RETRIES and not stopping and not connection_reset_successful:
-                            try:
-                                connection_success = await reset_connection()
-                                if connection_success:
-                                    # Re-queue failed files
-                                    for item in list(failed_files):
-                                        await file_queue.put(item)
-                                    failed_files.clear()
-                                    print("Connection reset and files re-queued, continuing...")
-                                    connection_reset_successful = True
-                                    # Connection reset worked, wait briefly before continuing
-                                    await asyncio.sleep(3)
-                                else:
-                                    reset_attempts += 1
-                                    print(f"Connection reset attempt {reset_attempts}/{Config.MAX_RETRIES} failed, retrying...")
-                                    await asyncio.sleep(Config.INITIAL_RETRY_DELAY * (2 ** min(reset_attempts, 5)))  # Exponential backoff
-                            except Exception as e:
-                                reset_attempts += 1
-                                print(f"Error during connection reset: {e}, attempt {reset_attempts}/{Config.MAX_RETRIES}")
-                                await asyncio.sleep(Config.INITIAL_RETRY_DELAY * (2 ** min(reset_attempts, 5)))
-                        
-                        if not connection_reset_successful:
-                            print(f"Failed to reset connection after {reset_attempts} attempts, will continue processing other files...")
-                            # Clear the failed files to avoid continuous reset attempts
-                            # But don't re-queue them since the connection is unreliable
-                            failed_files.clear()
-                            await asyncio.sleep(60)  # Wait a minute before continuing to prevent rapid resets
-                        continue
-                    
                     # Get a batch of files to process
                     batch = []
                     batch_size = min(Config.URL_BATCH_SIZE, file_queue.qsize())
@@ -467,41 +432,6 @@ class ArtifactUploader:
                     # Check if we should exit
                     if url_queue.empty() and file_queue.empty() and not in_progress:
                         break
-                    
-                    if len(failed_files) >= Config.MAX_FAILED_FILES:
-                        print(f"More than {Config.MAX_FAILED_FILES} failed files detected, attempting connection reset...")
-                        # Try to reset connection up to MAX_RETRIES times
-                        reset_attempts = 0
-                        connection_reset_successful = False
-                        
-                        while reset_attempts < Config.MAX_RETRIES and not stopping and not connection_reset_successful:
-                            try:
-                                connection_success = await reset_connection()
-                                if connection_success:
-                                    # Re-queue failed files
-                                    for item in list(failed_files):
-                                        await file_queue.put(item)
-                                    failed_files.clear()
-                                    print("Connection reset and files re-queued, continuing...")
-                                    connection_reset_successful = True
-                                    # Connection reset worked, wait briefly before continuing
-                                    await asyncio.sleep(3)
-                                else:
-                                    reset_attempts += 1
-                                    print(f"Connection reset attempt {reset_attempts}/{Config.MAX_RETRIES} failed, retrying...")
-                                    await asyncio.sleep(Config.INITIAL_RETRY_DELAY * (2 ** min(reset_attempts, 5)))  # Exponential backoff
-                            except Exception as e:
-                                reset_attempts += 1
-                                print(f"Error during connection reset: {e}, attempt {reset_attempts}/{Config.MAX_RETRIES}")
-                                await asyncio.sleep(Config.INITIAL_RETRY_DELAY * (2 ** min(reset_attempts, 5)))
-                        
-                        if not connection_reset_successful:
-                            print(f"Failed to reset connection after {reset_attempts} attempts, will continue processing other files...")
-                            # Clear the failed files to avoid continuous reset attempts
-                            # But don't re-queue them since the connection is unreliable
-                            failed_files.clear()
-                            await asyncio.sleep(60)  # Wait a minute before continuing to prevent rapid resets
-                        continue
                     
                     # Get a file and its presigned URL with timeout
                     try:
@@ -582,11 +512,19 @@ class ArtifactUploader:
                                     retries += 1
                                     await asyncio.sleep(current_delay)
                                     current_delay = min(current_delay * 2, 60)
-                                    continue
+                                    # Re-request URL if timeout occurs during upload
+                                    continue # Retry upload loop
                                 
                         except Exception as e:
                             retries += 1
                             print(f"Upload error for {relative_path}: {str(e)} (retry {retries}/{max_retries_per_file})")
+                            
+                            # Check for specific connection errors that might require URL refresh
+                            if isinstance(e, aiohttp.ClientConnectionError) or "connection reset" in str(e).lower():
+                                print(f"Connection error detected for {relative_path}, will attempt URL refresh.")
+                                # Break the inner retry loop to mark as failed and let outer logic handle potential re-queue/reset
+                                break
+                            
                             await asyncio.sleep(current_delay)
                             current_delay = min(current_delay * 2, 60)
                             continue
@@ -595,6 +533,9 @@ class ArtifactUploader:
                         # If still failed after retries, add to failed files
                         failed_files.add((local_file, relative_path))
                         print(f"Failed to upload {relative_path} after {max_retries_per_file} retries")
+                    else:
+                         # Update progress time on successful upload
+                         self.last_progress_time = time.time()
                     
                     # Mark as done in URL queue and remove from in_progress
                     url_queue.task_done()
@@ -687,6 +628,10 @@ class ArtifactUploader:
                 
                 # Check for stall condition
                 current_time = time.time()
+                # Ensure last_progress_time is initialized
+                if self.last_progress_time is None:
+                    self.last_progress_time = current_time
+
                 if current_time - self.last_progress_time > stall_timeout:
                     print(f"No progress for {stall_timeout} seconds, resetting connection...")
                     reset_count += 1
@@ -718,71 +663,39 @@ class ArtifactUploader:
                         print("Failed to reset connection, aborting upload")
                         return False
                 
-                # Handle remaining failed files if less than MAX_FAILED_FILES
+                # Handle remaining failed files
                 if file_queue.empty() and url_queue.empty() and not in_progress and failed_files:
-                    if len(failed_files) < Config.MAX_FAILED_FILES:
-                        print(f"Processing remaining {len(failed_files)} failed files individually...")
-                        retry_success = True
-                        
-                        # Process each failed file individually with single file uploader
-                        async with aiohttp.ClientSession(connector=connector) as retry_session:
-                            for local_file, relative_path in list(failed_files):
-                                if not self.upload_record.is_uploaded(relative_path):
-                                    print(f"Retrying file: {relative_path} using single file uploader")
-                                    success = await self.upload_single_file(
-                                        local_file=local_file,
-                                        relative_path=relative_path,
-                                        session=retry_session,
-                                        max_retries=Config.MAX_RETRIES * 2,  # Use more retries for these last files
-                                        retry_delay=Config.INITIAL_RETRY_DELAY
-                                    )
-                                    
-                                    if success:
-                                        failed_files.remove((local_file, relative_path))
-                                        print(f"Successfully uploaded {relative_path} on individual retry")
-                                        self.last_progress_time = current_time
-                                    else:
-                                        retry_success = False
-                                        print(f"Failed to upload {relative_path} even with individual retry")
-                        
-                        if not failed_files:
-                            print("All remaining files processed successfully!")
-                            break
-                        
-                        if not retry_success:
-                            print(f"Upload completed with {len(failed_files)} unrecoverable failed files")
-                            return False
-                
-                # Check if we need to reset connection due to too many failures
-                if len(failed_files) >= Config.MAX_FAILED_FILES:
-                    print(f"More than {Config.MAX_FAILED_FILES} failed files detected ({len(failed_files)}), resetting connection...")
-                    reset_count += 1
+                    print(f"Processing remaining {len(failed_files)} failed files individually...")
+                    retry_success = True
                     
-                    if reset_count > max_reset_attempts:
-                        print(f"Failed to recover after {max_reset_attempts} connection resets")
-                        return False
-                    
-                    # Reset connection
-                    connection_success = await reset_connection()
-                    
-                    if connection_success:
-                        # Add failed files back to queue
-                        print(f"Re-queueing {len(failed_files)} failed files")
-                        for local_file, relative_path in failed_files:
-                            # Skip if it's somehow been uploaded in the meantime
+                    # Process each failed file individually with single file uploader
+                    async with aiohttp.ClientSession(connector=connector) as retry_session:
+                        for local_file, relative_path in list(failed_files):
                             if not self.upload_record.is_uploaded(relative_path):
-                                await file_queue.put((local_file, relative_path))
-                        
-                        # Clear failed files since they're now in the queue
-                        failed_files.clear()
-                        
-                        # Start new worker tasks
-                        url_workers = [asyncio.create_task(url_worker()) for _ in range(num_url_workers)]
-                        upload_workers = [asyncio.create_task(upload_worker(session)) for _ in range(num_upload_workers)]
-                        
-                        self.last_progress_time = current_time
-                    else:
-                        print("Failed to reset connection, aborting upload")
+                                print(f"Retrying file: {relative_path} using single file uploader")
+                                success = await self.upload_single_file(
+                                    local_file=local_file,
+                                    relative_path=relative_path,
+                                    session=retry_session,
+                                    max_retries=Config.MAX_RETRIES * 2,  # Use more retries for these last files
+                                    retry_delay=Config.INITIAL_RETRY_DELAY
+                                )
+                                
+                                if success:
+                                    failed_files.remove((local_file, relative_path))
+                                    print(f"Successfully uploaded {relative_path} on individual retry")
+                                    self.last_progress_time = current_time
+                                else:
+                                    retry_success = False
+                                    print(f"Failed to upload {relative_path} even with individual retry")
+                    
+                    if not failed_files:
+                        print("All remaining files processed successfully!")
+                        break
+                    
+                    if not retry_success:
+                        print(f"Upload completed with {len(failed_files)} unrecoverable failed files")
+                        # For now, let's return based on whether *any* files failed the final retry.
                         return False
                 
                 # Wait a bit before checking again
