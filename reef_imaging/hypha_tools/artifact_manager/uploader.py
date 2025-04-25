@@ -60,7 +60,6 @@ class ArtifactUploader:
                     await asyncio.sleep(delay)
                 
                 # Create connection task with timeout
-                print(f"Attempting connection to {self.connection.server_url} with client_id: {self.client_id}")
                 self.connection_task = asyncio.create_task(self.connection.connect(client_id=self.client_id))
                 await asyncio.wait_for(self.connection_task, timeout=Config.CONNECTION_TIMEOUT)
                 print("Connection established successfully")
