@@ -24,7 +24,7 @@ class Config:
     UPLOAD_TIMEOUT = 120  # Timeout for file uploads in seconds (increased from 60)
     URL_BATCH_SIZE = 30  # Number of presigned URLs to request at once
     MAX_WORKERS = 20  # Maximum number of worker tasks
-    MIN_URL_WORKERS = 6  # Minimum number of URL workers
+    MIN_URL_WORKERS = 4  # Minimum number of URL workers
     CONNECTION_POOL_SIZE = 100  # TCP connection pool size
     MAX_COMMIT_ATTEMPTS = 15  # Maximum number of commit attempts
     MAX_COMMIT_DELAY = 220  # Maximum delay between commit attempts in seconds
