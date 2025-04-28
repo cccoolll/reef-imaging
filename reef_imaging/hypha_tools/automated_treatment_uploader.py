@@ -21,7 +21,7 @@ CHECK_INTERVAL = 60  # Check for new folders every 60 seconds
 client_id="reef-client-treatment-uploader"
 # Load environment variables
 load_dotenv()
-DATASET_ALIAS = "20250410-treatment-full"
+DATASET_ALIAS = "20250410-treatment-zip"
 # Timeout and retry settings
 CONNECTION_TIMEOUT = 60  # Timeout for connection operations in seconds
 OPERATION_TIMEOUT = 180  # Timeout for Hypha operations in seconds
@@ -194,22 +194,14 @@ async def process_folder(folder_path):
         extracted_name = uploader.extract_date_time_from_path(folder_path)
         print(f"Processing directory: {folder_path} -> {extracted_name}")
         
-        # Upload the folder contents with optimized batch size
-        # Modified to use the optimized batch size parameter
-        to_upload = []
-        for root, _, files in os.walk(folder_path):
-            for file in files:
-                local_file = os.path.join(root, file)
-                rel_path = os.path.relpath(local_file, folder_path)
-                relative_path = os.path.join(extracted_name, rel_path)
-                to_upload.append((local_file, relative_path))
-        
-        print(f"Found {len(to_upload)} files to upload")
-        uploader.upload_record.set_total_files(len(to_upload))
-        
-        # Use the optimized upload_files_in_batches with higher batch size
-        # This method uses the uploader's internal connection management
-        success = await uploader.upload_files_in_batches(to_upload, batch_size=BATCH_SIZE)
+        # Use the new zip_and_upload_folder method instead of file-by-file uploads
+        relative_path = extracted_name if extracted_name else folder_name
+        print(f"Using zip-based upload for folder: {folder_path}")
+        success = await uploader.zip_and_upload_folder(
+            folder_path=folder_path,
+            relative_path=relative_path,
+            delete_zip_after=True
+        )
         
         # Commit the dataset
         if success:

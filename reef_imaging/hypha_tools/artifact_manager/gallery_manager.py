@@ -105,9 +105,10 @@ async def create_gallery_example() -> None:
     try:
         # Create a gallery
         await gallery_manager.create_gallery(
-            name="Image Map of U2OS FUCCI Drug Treatment",
+            name="U2OS FUCCI Drug Treatment in zip format",
             description="A collection for organizing imaging datasets acquired by microscopes",
-            alias="reef-imaging/image-map-of-u2os-fucci-drug-treatment"
+            alias="reef-imaging/u2os-fucci-drug-treatment-zip",
+            permissions = {"*": "r", "@": "*", "misty-teeth-42051243": "*","google-oauth2|103047988474094226050": "*"}
         )
     finally:
         await gallery_manager.connection.disconnect()
@@ -118,10 +119,10 @@ async def create_dataset_example() -> None:
     try:
         # Create a dataset in the gallery
         await gallery_manager.create_dataset(
-            name="image-map-20250410-treatment-full",
-            description="The Image Map of U2OS FUCCI Drug Treatment",
-            alias="image-map-20250410-treatment-full",
-            parent_id="reef-imaging/image-map-of-u2os-fucci-drug-treatment",
+            name="20250410-treatment-zip",
+            description="The Image Map of U2OS FUCCI Drug Treatment in zip format",
+            alias="20250410-treatment-zip",
+            parent_id="reef-imaging/u2os-fucci-drug-treatment-zip",
             version="stage",
             permissions = {"*": "r", "@": "*", "misty-teeth-42051243": "*","google-oauth2|103047988474094226050": "*"}
         )
@@ -134,9 +135,10 @@ async def delete_dataset_example() -> None:
     """Example of deleting a dataset"""
     gallery_manager = GalleryManager()
     await gallery_manager.connection.connect(client_id=None)
-    await gallery_manager.delete(artifact_id="reef-imaging/image-map-20250410-treatment-full", delete_files=True, recursive=True)
+    await gallery_manager.delete(artifact_id="reef-imaging/image-map-20250410-treatment-zip", delete_files=True, recursive=True)
     print("Dataset deleted.")
     await gallery_manager.connection.disconnect()
 
 if __name__ == "__main__":
     asyncio.run(create_gallery_example()) 
+    asyncio.run(create_dataset_example())

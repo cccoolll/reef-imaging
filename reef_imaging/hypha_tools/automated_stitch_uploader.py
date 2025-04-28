@@ -29,7 +29,7 @@ CHECK_INTERVAL = 60  # Check for new folders every 60 seconds
 client_id = "reef-client-stitch-uploader"
 # Load environment variables
 load_dotenv()
-ARTIFACT_ALIAS = "image-map-20250410-treatment-full"
+ARTIFACT_ALIAS = "image-map-20250410-treatment-zip"
 # Timeout and retry settings
 CONNECTION_TIMEOUT = 60  # Timeout for connection operations in seconds
 OPERATION_TIMEOUT = 180  # Timeout for Hypha operations in seconds (increased from 60)
@@ -320,36 +320,18 @@ async def upload_zarr_file(zarr_file: str) -> bool:
             if connection: await connection.disconnect()
             return False
         
-        # Add zarr path to the list of zarr files to upload
-        zarr_paths = [zarr_path]
-        
-        # Prepare a list of files from the zarr directory for optimized batch upload
-        to_upload = []
-        if os.path.isdir(zarr_path):
-            print(f"Processing zarr directory: {zarr_path}")
-            for root, _, files in os.walk(zarr_path):
-                for file in files:
-                    local_file = os.path.join(root, file)
-                    rel_path = os.path.relpath(local_file, zarr_path)
-                    # Get basename without .zarr extension
-                    base_name = os.path.basename(zarr_path)
-                    if base_name.endswith('.zarr'):
-                        base_name = base_name[:-5]  # Remove the .zarr extension
-                    relative_path = os.path.join(base_name, rel_path)
-                    to_upload.append((local_file, relative_path))
-        else:
-            # Handle single file case (unlikely for zarr, but just in case)
-            local_file = zarr_path
-            relative_path = os.path.basename(zarr_path)
-            if relative_path.endswith('.zarr'):
-                relative_path = relative_path[:-5]  # Remove the .zarr extension
-            to_upload.append((local_file, relative_path))
+        # Get basename without .zarr extension for the relative path in artifact
+        base_name = os.path.basename(zarr_path)
+        if base_name.endswith('.zarr'):
+            base_name = base_name[:-5]  # Remove the .zarr extension
             
-        print(f"Found {len(to_upload)} files to upload from zarr structure")
-        uploader.upload_record.set_total_files(len(to_upload))
-        
-        # Use optimized batch upload with higher concurrency
-        success = await uploader.upload_files_in_batches(to_upload, batch_size=BATCH_SIZE)
+        # Use the new zip_and_upload_folder method instead of file-by-file uploads
+        print(f"Using zip-based upload for zarr file: {zarr_path}")
+        success = await uploader.zip_and_upload_folder(
+            folder_path=zarr_path,
+            relative_path=base_name,
+            delete_zip_after=True
+        )
         
         # Commit the dataset
         if success:

@@ -7,6 +7,12 @@ from datetime import datetime
 import traceback
 from asyncio import Queue
 import random
+import sys
+import json
+import zipfile
+import tempfile
+import shutil
+import threading
 
 from .core import HyphaConnection, UploadRecord, Config
 
@@ -235,7 +241,6 @@ class ArtifactUploader:
                                         put_url, 
                                         data=file_data,
                                         headers=headers,
-                                        chunked=True,
                                         timeout=aiohttp.ClientTimeout(total=upload_timeout)
                                     ) as resp:
                                         if resp.status != 200:
@@ -479,7 +484,6 @@ class ArtifactUploader:
                                                 put_url, 
                                                 data=file_data,
                                                 headers=headers,
-                                                chunked=True,
                                                 timeout=aiohttp.ClientTimeout(total=upload_timeout)
                                             ) as resp:
                                                 if resp.status == 200:
@@ -721,10 +725,22 @@ class ArtifactUploader:
             return True
 
     async def upload_zarr_files(self, file_paths: List[str]) -> bool:
-        """Upload files to the artifact manager using batch processing."""
-        to_upload = []
+        """
+        Upload zarr files to the artifact manager.
+        
+        Args:
+            file_paths: List of paths to zarr files to upload
+            
+        Returns:
+            bool: True if all uploads were successful, False otherwise
+        """
         for file_path in file_paths:
+            print(f"Processing {file_path}...")
+            
             if os.path.isdir(file_path):
+                # Directory case - walk through the directory and upload files
+                to_upload = []
+                
                 for root, _, files in os.walk(file_path):
                     for file in files:
                         local_file = os.path.join(root, file)
@@ -735,23 +751,151 @@ class ArtifactUploader:
                             base_name = base_name[:-5]  # Remove the .zarr extension
                         relative_path = os.path.join(base_name, rel_path)
                         to_upload.append((local_file, relative_path))
+                
+                self.upload_record.set_total_files(len(to_upload))
+                success = await self.upload_files_in_batches(to_upload)
+                
+                if not success:
+                    return False
             else:
+                # Single file case
                 local_file = file_path
-                # Get basename without .zarr extension for individual files too
                 relative_path = os.path.basename(file_path)
                 if relative_path.endswith('.zarr'):
                     relative_path = relative_path[:-5]  # Remove the .zarr extension
-                to_upload.append((local_file, relative_path))
+                
+                async with aiohttp.ClientSession() as session:
+                    success = await self.upload_single_file(local_file, relative_path, session)
+                    
+                    if not success:
+                        return False
+        
+        return True
 
-        self.upload_record.set_total_files(len(to_upload))
+    async def zip_and_upload_folder(self, folder_path: str, relative_path: str = None, delete_zip_after: bool = True) -> bool:
+        """
+        Zip a folder and upload it as a single file to the artifact manager.
+        
+        Args:
+            folder_path: Path to the folder to zip and upload
+            relative_path: Optional relative path for the zip file in the artifact
+            delete_zip_after: Whether to delete the zip file after uploading
+            
+        Returns:
+            bool: True if upload was successful, False otherwise
+        """
+        if not os.path.exists(folder_path):
+            print(f"Folder {folder_path} does not exist")
+            return False
+            
+        # Use folder name for the zip filename if relative_path not provided
+        if relative_path is None:
+            folder_name = os.path.basename(folder_path)
+            relative_path = folder_name
+            
+        # Ensure the relative path has .zip extension
+        if not relative_path.endswith('.zip'):
+            relative_path += '.zip'
+            
+        # Create the temporary zip file in the parent directory of the folder_path
+        parent_dir = os.path.dirname(folder_path)
+        # Use a more descriptive temp file name if possible
+        temp_zip_base = os.path.basename(folder_path) + ".zip.tmp"
+        temp_zip_path = os.path.join(parent_dir, temp_zip_base)
+        
+        # Define the synchronous zipping function
+        def _create_zip_sync(target_zip_path: str, source_folder: str):
+            print(f"Starting zip creation in background thread: {source_folder} -> {target_zip_path}")
+            try:
+                with zipfile.ZipFile(target_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    for root, _, files in os.walk(source_folder):
+                        for file in files:
+                            file_path = os.path.join(root, file)
+                            # Calculate the arcname (path within the zip file) relative to the *folder being zipped*
+                            arcname = os.path.relpath(file_path, source_folder)
+                            zipf.write(file_path, arcname)
+                zip_size_mb = os.path.getsize(target_zip_path) / (1024 * 1024)
+                print(f"Background zip creation complete: {target_zip_path} ({zip_size_mb:.2f} MB)")
+                return True, None
+            except Exception as e:
+                print(f"Error during background zip creation: {e}")
+                import traceback
+                traceback.print_exc()
+                # Attempt to remove partial zip file on error
+                if os.path.exists(target_zip_path):
+                    try:
+                        os.unlink(target_zip_path)
+                    except Exception as rm_e:
+                        print(f"Warning: Could not remove partial zip file {target_zip_path}: {rm_e}")
+                return False, e
 
-        # Use batch processing for uploads
-        success = await self.upload_files_in_batches(to_upload)
+        try:
+            print(f"Scheduling zip file creation for {folder_path}...")
+            # Run the synchronous zip creation in a separate thread
+            zip_success, zip_error = await asyncio.to_thread(_create_zip_sync, temp_zip_path, folder_path)
 
-        if success:
-            self.upload_record.save()
+            if not zip_success:
+                 print(f"Zip creation failed for {folder_path}: {zip_error}")
+                 return False # Stop if zipping failed
 
-        return success
+            # Check if file exists after thread completion before uploading
+            if not os.path.exists(temp_zip_path):
+                print(f"Error: Temporary zip file {temp_zip_path} not found after thread completion.")
+                return False
+
+            # Upload the zip file
+            print(f"Uploading zip file {temp_zip_path} to {relative_path}...")
+            async with aiohttp.ClientSession() as session:
+                success = await self.upload_single_file(temp_zip_path, relative_path, session)
+                
+            if success:
+                print(f"Successfully uploaded {relative_path}")
+                return True
+            else:
+                print(f"Failed to upload {relative_path}")
+                return False
+                
+        except Exception as e:
+            print(f"Error during zip and upload process: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+        finally:
+            # Clean up the temporary zip file if requested and if it exists
+            if delete_zip_after and os.path.exists(temp_zip_path):
+                try:
+                    os.unlink(temp_zip_path)
+                    print(f"Deleted temporary zip file: {temp_zip_path}")
+                except Exception as e:
+                    print(f"Warning: Could not delete temporary file {temp_zip_path}: {e}")
+
+    async def zip_and_upload_folders(self, folder_paths: List[str], relative_path_prefix: str = "", delete_zips_after: bool = True) -> bool:
+        """
+        Zip multiple folders and upload them as separate zip files to the artifact manager.
+        
+        Args:
+            folder_paths: List of paths to folders to zip and upload
+            relative_path_prefix: Optional prefix for relative paths in the artifact
+            delete_zips_after: Whether to delete the zip files after uploading
+            
+        Returns:
+            bool: True if all uploads were successful, False otherwise
+        """
+        if not await self.ensure_connected():
+            return False
+            
+        all_success = True
+        for folder_path in folder_paths:
+            folder_name = os.path.basename(folder_path)
+            # Extract date time from path to use as a meaningful name
+            date_time = self.extract_date_time_from_path(folder_path)
+            rel_path = os.path.join(relative_path_prefix, date_time if date_time else folder_name)
+            
+            success = await self.zip_and_upload_folder(folder_path, rel_path, delete_zips_after)
+            if not success:
+                all_success = False
+                
+        return all_success
 
     async def upload_treatment_data(self, source_dirs: List[str]) -> bool:
         """Upload treatment data files to the artifact manager using batch processing."""
