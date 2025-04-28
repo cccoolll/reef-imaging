@@ -24,6 +24,7 @@ from hypha_tools.chatbot.aask import aask
 import base64
 from pydantic import Field
 from hypha_rpc.utils.schema import schema_function
+import signal
 
 dotenv.load_dotenv()  
 ENV_FILE = dotenv.find_dotenv()  
@@ -820,10 +821,7 @@ class Microscope:
                 if self.service_id:
                     service = await self.server.get_service(self.service_id)
                     # Try a simple operation to verify service is working
-                    hello_world_result = await service.hello_world()
-                    if hello_world_result != "Hello world":
-                        logger.error(f"Service health check failed: {hello_world_result}")
-                        raise Exception("Service not healthy")
+                    await service.hello_world()
                     #print("Service health check passed")
                 else:
                     logger.info("Service ID not set, waiting for service registration")
@@ -937,21 +935,26 @@ class Microscope:
         logger.info(f"Extension service registered with id: {svc.id}, you can visit the service at:\n {self.chatbot_service_url}")
 
     async def setup(self):
+        data_store_token = os.environ.get("SQUID_WORKSPACE_TOKEN")
+        data_store_server = await connect_to_server(
+                {"server_url": "https://hypha.aicell.io", "token": data_store_token, "workspace": "squid-control", "ping_interval": None}
+            )
         if not self.service_id:
             raise ValueError("MICROSCOPE_SERVICE_ID is not set in the environment variables.")
         if self.is_local:
             token = os.environ.get("REEF_LOCAL_TOKEN")
+            workspace = os.environ.get("REEF_LOCAL_WORKSPACE")
             server = await connect_to_server(
-                {"server_url": self.server_url, "token": token,  "ping_interval": None}
+                {"server_url": self.server_url, "token": token, "workspace": workspace, "ping_interval": None}
             )
         else:
             try:  
-                token = os.environ.get("SQUID_WORKSPACE_TOKEN")  
+                token = os.environ.get("REEF_WORKSPACE_TOKEN")  
             except:  
                 token = await login({"server_url": self.server_url})
             
             server = await connect_to_server(
-                {"server_url": self.server_url, "token": token, "workspace": "squid-control",  "ping_interval": None}
+                {"server_url": self.server_url, "token": token, "workspace": "reef-imaging",  "ping_interval": None}
             )
         if self.is_simulation:
             await self.start_hypha_service(server, service_id=self.service_id)
@@ -963,12 +966,12 @@ class Microscope:
             chatbot_id = f"squid-control-chatbot-real-{self.service_id}"
         self.datastore = HyphaDataStore()
         try:
-            await self.datastore.setup(server, service_id=datastore_id)
+            await self.datastore.setup(data_store_server, service_id=datastore_id)
         except TypeError as e:
             if "Future" in str(e):
                 # If config is a Future, wait for it to resolve
                 config = await asyncio.wrap_future(server.config)
-                await self.datastore.setup(server, service_id=datastore_id, config=config)
+                await self.datastore.setup(data_store_server, service_id=datastore_id, config=config)
             else:
                 raise e
     
@@ -979,6 +982,16 @@ class Microscope:
             chatbot_token = await login({"server_url": chatbot_server_url})
         chatbot_server = await connect_to_server({"server_url": chatbot_server_url, "token": chatbot_token,  "ping_interval": None})
         await self.start_chatbot_service(chatbot_server, chatbot_id)
+
+# Define a signal handler for graceful shutdown
+def signal_handler(sig, frame):
+    logger.info('Signal received, shutting down gracefully...')
+    microscope.squidController.close()
+    sys.exit(0)
+
+# Register the signal handler for SIGINT and SIGTERM
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
