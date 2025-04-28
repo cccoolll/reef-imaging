@@ -212,7 +212,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status["connect"] = "failed"
             logger.error(f"Failed to connect: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def disconnect(self):
@@ -231,7 +231,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status["disconnect"] = "failed"
             logger.error(f"Failed to disconnect: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def set_motor(self, state: int=Field(1, description="Enable or disable the motor, 1 for enable, 0 for disable")):
@@ -277,7 +277,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status["get_all_joints"] = "failed"
             logger.error(f"Failed to get all joints: {e}")
-            return {}
+            raise e
 
     @schema_function(skip_self=True)
     def get_all_positions(self):
@@ -299,7 +299,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status["get_all_positions"] = "failed"
             logger.error(f"Failed to get all positions: {e}")
-            return {}
+            raise e
 
     @schema_function(skip_self=True)
     def move_sample_from_microscope1_to_incubator(self):
@@ -320,7 +320,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to move sample from microscope1 to incubator: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def move_sample_from_incubator_to_microscope1(self):
@@ -339,7 +339,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to move sample from incubator to microscope1: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def grab_sample_from_microscope1(self):
@@ -358,7 +358,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to grab sample from microscope1: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def grab_sample_from_incubator(self):
@@ -377,7 +377,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to grab sample from incubator: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def put_sample_on_microscope1(self):
@@ -396,7 +396,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to put sample on microscope1: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def put_sample_on_incubator(self):
@@ -415,7 +415,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to put sample on incubator: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def transport_from_incubator_to_microscope1(self):
@@ -434,7 +434,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to transport sample from incubator to microscope1: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def transport_from_microscope1_to_incubator(self):
@@ -453,7 +453,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to transport sample from microscope1 to incubator: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def halt(self):
@@ -473,7 +473,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to halt robot: {e}")
-            return False
+            raise e
     
     @schema_function(skip_self=True)
     def set_alarm(self, state: int=Field(1, description="Enable or disable the alarm, 1 for enable, 0 for disable")):
@@ -489,7 +489,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to set alarm: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def light_on(self):
@@ -505,7 +505,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to turn on light: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def light_off(self):    
@@ -521,7 +521,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to turn off light: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def get_actions(self):
@@ -647,7 +647,7 @@ class RoboticArmService:
         
         if action_id not in action_to_script:
             logger.error(f"Unknown action ID: {action_id}")
-            return False
+            raise Exception("Unknown action ID")
             
         script_path = action_to_script[action_id]
         try:
@@ -659,7 +659,7 @@ class RoboticArmService:
             return True
         except Exception as e:
             logger.error(f"Failed to execute action {action_id}: {e}")
-            return False
+            raise e
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Start the Hypha service for the robotic arm.")

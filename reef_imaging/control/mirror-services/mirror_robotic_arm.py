@@ -243,7 +243,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to move sample from microscope1 to incubator: {e}")
-            return False
+            raise e
 
     async def move_sample_from_incubator_to_microscope1(self):
         """Mirror function for move_sample_from_incubator_to_microscope1"""
@@ -259,7 +259,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to move sample from incubator to microscope1: {e}")
-            return False
+            raise e
 
     async def grab_sample_from_microscope1(self):
         """Mirror function for grab_sample_from_microscope1"""
@@ -275,7 +275,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to grab sample from microscope1: {e}")
-            return False
+            raise e
 
     async def grab_sample_from_incubator(self):
         """Mirror function for grab_sample_from_incubator"""
@@ -291,7 +291,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to grab sample from incubator: {e}")
-            return False
+            raise e
 
     async def put_sample_on_microscope1(self):
         """Mirror function for put_sample_on_microscope1"""
@@ -307,7 +307,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to put sample on microscope1: {e}")
-            return False
+            raise e
 
     async def put_sample_on_incubator(self):
         """Mirror function for put_sample_on_incubator"""
@@ -323,7 +323,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to put sample on incubator: {e}")
-            return False
+            raise e
 
     async def transport_from_incubator_to_microscope1(self):
         """Mirror function for transport_from_incubator_to_microscope1"""
@@ -339,7 +339,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to transport from incubator to microscope1: {e}")
-            return False
+            raise e
 
     async def transport_from_microscope1_to_incubator(self):
         """Mirror function for transport_from_microscope1_to_incubator"""
@@ -355,7 +355,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to transport from microscope1 to incubator: {e}")
-            return False
+            raise e
 
     async def connect(self):
         """Mirror function for connect"""
@@ -371,7 +371,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to connect: {e}")
-            return False
+            raise e
 
     async def disconnect(self):
         """Mirror function for disconnect"""
@@ -387,7 +387,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to disconnect: {e}")
-            return False
+            raise e
 
     async def halt(self):
         """Mirror function for halt"""
@@ -403,7 +403,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to halt: {e}")
-            return False
+            raise e
 
     async def get_all_joints(self):
         """Mirror function for get_all_joints"""
@@ -419,7 +419,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get all joints: {e}")
-            return {}
+            raise e
 
     async def get_all_positions(self):
         """Mirror function for get_all_positions"""
@@ -435,7 +435,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get all positions: {e}")
-            return {}
+            raise e
 
     async def set_alarm(self, state=1):
         """Mirror function for set_alarm"""
@@ -451,7 +451,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to set alarm: {e}")
-            return False
+            raise e
 
     async def light_on(self):
         """Mirror function for light_on"""
@@ -467,7 +467,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to turn on light: {e}")
-            return False
+            raise e
 
     async def light_off(self):
         """Mirror function for light_off"""
@@ -483,7 +483,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to turn off light: {e}")
-            return False
+            raise e
 
     async def get_actions(self):
         """Mirror function for get_actions"""
@@ -495,7 +495,7 @@ class MirrorRoboticArmService:
             return result
         except Exception as e:
             logger.error(f"Failed to get actions: {e}")
-            return {"actions": []}
+            raise e
 
     async def execute_action(self, action_id):
         """Mirror function for execute_action"""
@@ -507,7 +507,7 @@ class MirrorRoboticArmService:
             return result
         except Exception as e:
             logger.error(f"Failed to execute action: {e}")
-            return False
+            raise e
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

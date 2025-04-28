@@ -230,7 +230,7 @@ class MirrorIncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to initialize: {e}")
-            return f"Failed to initialize: {e}"
+            raise e
 
     async def put_sample_from_transfer_station_to_slot(self, slot: int = 5):
         """Mirror function for put_sample_from_transfer_station_to_slot"""
@@ -246,7 +246,7 @@ class MirrorIncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to put sample from transfer station to slot: {e}")
-            return f"Failed to put sample from transfer station to slot: {e}"
+            raise e
 
     async def get_sample_from_slot_to_transfer_station(self, slot: int = 5):
         """Mirror function for get_sample_from_slot_to_transfer_station"""
@@ -262,7 +262,7 @@ class MirrorIncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get sample from slot to transfer station: {e}")
-            return f"Failed to get sample from slot to transfer station: {e}"
+            raise e
 
     async def get_status(self):
         """Mirror function for get_status"""
@@ -278,7 +278,7 @@ class MirrorIncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get status: {e}")
-            return {}
+            raise e
 
     async def is_busy(self):
         """Mirror function for is_busy"""
@@ -294,7 +294,7 @@ class MirrorIncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to check if busy: {e}")
-            return False
+            raise e
 
     async def reset_error_status(self):
         """Mirror function for reset_error_status"""
@@ -310,7 +310,7 @@ class MirrorIncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to reset error status: {e}")
-            return None
+            raise e
 
     async def get_sample_status(self, slot: Optional[int] = None):
         """Mirror function for get_sample_status"""
@@ -326,7 +326,7 @@ class MirrorIncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get sample status: {e}")
-            return {}
+            raise e
 
     async def get_temperature(self):
         """Mirror function for get_temperature"""
@@ -342,7 +342,7 @@ class MirrorIncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get temperature: {e}")
-            return None
+            raise e
 
     async def get_co2_level(self):
         """Mirror function for get_co2_level"""
@@ -358,7 +358,7 @@ class MirrorIncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get CO2 level: {e}")
-            return None
+            raise e
 
     async def get_slot_information(self, slot: int = 1):
         """Mirror function for get_slot_information"""
@@ -374,7 +374,7 @@ class MirrorIncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get slot information: {e}")
-            return None
+            raise e
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
