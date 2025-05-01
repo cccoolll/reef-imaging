@@ -21,16 +21,46 @@ def get_pixel_size(parameters, default_pixel_size=1.85, default_tube_lens_mm=50.
     print(f"Pixel size: {pixel_size_xy} µm (with adjustment factor: {adjustment_factor})")
     return pixel_size_xy
 
+def rotate_image(image, angle):
+    """Rotate an image by the specified angle in degrees without introducing black edges."""
+    height, width = image.shape[:2]
+    center = (width // 2, height // 2)
+    rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+    
+    # Use a slightly larger border to avoid black edges
+    border_size = int(max(height, width) * 0.1)  # 10% border padding
+    padded_image = cv2.copyMakeBorder(image, border_size, border_size, border_size, border_size, 
+                                      cv2.BORDER_REPLICATE)
+    
+    # Adjust rotation center for padded image
+    padded_center = (center[0] + border_size, center[1] + border_size)
+    padded_rotation_matrix = cv2.getRotationMatrix2D(padded_center, angle, 1.0)
+    
+    # Rotate padded image
+    padded_height, padded_width = padded_image.shape[:2]
+    rotated_padded = cv2.warpAffine(padded_image, padded_rotation_matrix, (padded_width, padded_height), 
+                                    flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    
+    # Crop back to original size
+    result = rotated_padded[border_size:border_size+height, border_size:border_size+width]
+    return result
+
 def stitch_region_a1(
     image_folder,
     coordinates_file,
-    parameters,  # Added parameters dictionary
+    parameters,
     region_name="A1",
-    output_filename="stitched_result_A1.jpg"
+    output_filename="stitched_result_A1.jpg",
+    rotation_angle=0,
+    output_scale=0.25,
+    blend_overlap=True,
+    overlap_margin=50  # Add extra margin to ensure proper overlap blending
 ):
     """
-    Naively stitch images for region A1 only, based on the coordinates file.
-    No registration is performed. Images are flipped horizontally and vertically.
+    Stitch images for region A1 based on the coordinates file.
+    Images can be rotated by a specified angle before stitching.
+    Images are flipped horizontally and vertically.
+    Overlapping regions are blended to avoid black areas from rotation.
     The final stitched preview is saved as a JPG.
 
     Args:
@@ -39,6 +69,10 @@ def stitch_region_a1(
         parameters (dict): Dictionary containing imaging parameters for pixel size calculation.
         region_name (str): Which region to stitch (e.g. 'A1').
         output_filename (str): Output JPG file name for the stitched result (preview).
+        rotation_angle (float): Angle in degrees to rotate all images before stitching.
+        output_scale (float): Scale factor for the final output image (e.g., 0.25 for 25% size).
+        blend_overlap (bool): Whether to blend overlapping regions (default: True).
+        overlap_margin (int): Extra margin in pixels to ensure better blending in overlapping areas.
     """
     # 1. Read the coordinates
     df = pd.read_csv(coordinates_file)
@@ -127,13 +161,11 @@ def stitch_region_a1(
 
     print(f"Canvas size for region {region_name}: {canvas_width_px} x {canvas_height_px} px")
 
-    # 8. Create a blank canvas (8-bit grayscale for this preview)
-    stitched_canvas = np.zeros((canvas_height_px, canvas_width_px), dtype=np.uint8)
+    # 8. Create a blank canvas (8-bit grayscale for this preview) and a weight map for blending
+    stitched_canvas = np.zeros((canvas_height_px, canvas_width_px), dtype=np.float32)
+    weight_map = np.zeros((canvas_height_px, canvas_width_px), dtype=np.float32)
 
     # 9. Loop through rows in the region and place them in the canvas
-    #    We'll do it for all channels we find for each i,j,k. 
-    #    For the final preview, let's just handle BF_LED_matrix_full (you can adapt for others).
-    #    We'll create a single final BF mosaic for demonstration.
     for (i, j, k, x_mm, y_mm) in rows_info:
         file_prefix = f"{region_name}_{i}_{j}_{k}"
         # naive approach: we only stitch BF channel into the final preview
@@ -143,20 +175,51 @@ def stitch_region_a1(
             print(f"Skipping {bf_name}, file not found.")
             continue
 
-        # Read and flip
+        # Read
         img_bf = cv2.imread(bf_path, cv2.IMREAD_ANYDEPTH)
         if img_bf is None:
             print(f"Skipping {bf_path}, could not be read.")
             continue
 
-        # Flip horizontally and vertically
+        # Apply rotation first, before flipping
+        if rotation_angle != 0:
+            img_bf = rotate_image(img_bf, rotation_angle)
+            
+        # Then flip horizontally and vertically
         img_bf = cv2.flip(img_bf, -1)
 
-        # Convert 16-bit or other depth to 8-bit if needed
-        if img_bf.dtype != np.uint8:
-            # Simple normalization
+        # Convert to float for blending
+        if img_bf.dtype != np.float32:
+            # Simple normalization to 0-1 range
             min_val, max_val = np.min(img_bf), np.max(img_bf)
-            img_bf = (255 * (img_bf - min_val) / (max_val - min_val + 1e-5)).astype(np.uint8)
+            img_bf = (img_bf - min_val) / (max_val - min_val + 1e-5)
+            img_bf = img_bf.astype(np.float32)
+
+        # Create a weight mask for this image (higher in the center, lower at edges)
+        h, w = img_bf.shape[:2]
+        y, x = np.mgrid[0:h, 0:w]
+        center_y, center_x = h // 2, w // 2
+        
+        # Use a smoother transition function with a sharper falloff at edges
+        # This helps eliminate black edges in the blending
+        dist_from_center = np.sqrt((x - center_x)**2 + (y - center_y)**2)
+        max_dist = min(w, h) / 2
+        # Smooth falloff that's mostly 1.0 in the center and drops off sharply near edges
+        weight_mask = np.clip(1.0 - (dist_from_center / max_dist)**2, 0.01, 1.0)**2
+        weight_mask = weight_mask.astype(np.float32)
+        
+        # Add a small amount of feathering at the edges to further reduce visible seams
+        feather_width = int(min(w, h) * 0.05)  # 5% feather width
+        if feather_width > 0:
+            # Apply feathering by creating a mask that's 0 at the edges and 1 elsewhere
+            edge_mask = np.ones((h, w), dtype=np.float32)
+            edge_mask[:feather_width, :] *= np.linspace(0, 1, feather_width)[:, np.newaxis]
+            edge_mask[-feather_width:, :] *= np.linspace(1, 0, feather_width)[:, np.newaxis]
+            edge_mask[:, :feather_width] *= np.linspace(0, 1, feather_width)[np.newaxis, :]
+            edge_mask[:, -feather_width:] *= np.linspace(1, 0, feather_width)[np.newaxis, :]
+            
+            # Apply the edge feathering to our weight mask
+            weight_mask *= edge_mask
 
         # Determine top-left corner in the canvas
         rel_x_mm = x_mm - offset_x_mm
@@ -173,21 +236,47 @@ def stitch_region_a1(
             y_end = stitched_canvas.shape[0]
         if x_end > stitched_canvas.shape[1]:
             x_end = stitched_canvas.shape[1]
+        
         sub_h = y_end - y_start
         sub_w = x_end - x_start
 
-        # If the sub region is valid, place it
+        # If the sub region is valid, place it with an expanded overlap area
         if sub_h > 0 and sub_w > 0:
-            # Possibly combine by max, but let's just overwrite for a naive approach
-            stitched_canvas[y_start:y_end, x_start:x_end] = img_bf[:sub_h, :sub_w]
+            if blend_overlap:
+                # Add weighted image to the canvas
+                stitched_canvas[y_start:y_end, x_start:x_end] += (
+                    img_bf[:sub_h, :sub_w] * weight_mask[:sub_h, :sub_w]
+                )
+                # Add weights to the weight map
+                weight_map[y_start:y_end, x_start:x_end] += weight_mask[:sub_h, :sub_w]
+            else:
+                # Simple overwrite approach (original behavior)
+                stitched_canvas[y_start:y_end, x_start:x_end] = img_bf[:sub_h, :sub_w]
+                weight_map[y_start:y_end, x_start:x_end] = 1.0
 
-    # 10. Save the final mosaic
-    cv2.imwrite(output_filename, stitched_canvas)
-    print(f"Stitched preview saved to {output_filename}")
+    # Normalize by weight map to get the final blended result
+    # Avoid division by zero by adding a small epsilon
+    weight_map = np.maximum(weight_map, 1e-10)
+    stitched_canvas = stitched_canvas / weight_map
+    
+    # Convert back to uint8 for saving
+    stitched_canvas = (stitched_canvas * 255).astype(np.uint8)
+
+    # 10. Save the final mosaic at reduced size
+    if output_scale != 1.0:
+        resized_height = int(stitched_canvas.shape[0] * output_scale)
+        resized_width = int(stitched_canvas.shape[1] * output_scale)
+        resized_canvas = cv2.resize(stitched_canvas, (resized_width, resized_height), 
+                                   interpolation=cv2.INTER_AREA)
+        cv2.imwrite(output_filename, resized_canvas)
+        print(f"Stitched preview saved to {output_filename} (scaled to {output_scale*100:.0f}% of original size)")
+    else:
+        cv2.imwrite(output_filename, stitched_canvas)
+        print(f"Stitched preview saved to {output_filename}")
 
 def main():
     # Example usage:
-    data_folder = "/media/reef/harddisk/20250410-fucci-time-lapse-scan_2025-04-10_13-50-7.762411/0"  # user to specify
+    data_folder = "/home/tao/europa_disk/u2os-treatment/20250410/20250410-fucci-time-lapse-scan_2025-04-10_13-50-7.762411/0"  # user to specify
     image_folder = data_folder
     coordinates_path = os.path.join(data_folder, "coordinates.csv")
     
@@ -199,7 +288,7 @@ def main():
             'tube_lens_f_mm': 180.0,
             'magnification': 20.0  # 20x objective as mentioned in the description
         },
-        'pixel_size_adjustment_factor': 0.936  # Set to 1.0 by default (no adjustment)
+        'pixel_size_adjustment_factor': 0.935  # Set to 1.0 by default (no adjustment)
     }
 
     stitch_region_a1(
@@ -207,7 +296,11 @@ def main():
         coordinates_file=coordinates_path,
         parameters=parameters,
         region_name="A1",
-        output_filename="stitched_result_A1.jpg"
+        output_filename="stitched_result_A1.jpg",
+        rotation_angle=0.1,
+        output_scale=0.7,
+        blend_overlap=True,
+        overlap_margin=100  # Add extra margin for better blending
     )
 
 if __name__ == "__main__":
