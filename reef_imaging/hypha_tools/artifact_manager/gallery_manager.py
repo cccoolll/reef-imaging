@@ -105,9 +105,9 @@ async def create_gallery_example() -> None:
     try:
         # Create a gallery
         await gallery_manager.create_gallery(
-            name="U2OS FUCCI Drug Treatment in zip format",
+            name="Image Map of U2OS FUCCI Drug Treatment",
             description="A collection for organizing imaging datasets acquired by microscopes",
-            alias="reef-imaging/u2os-fucci-drug-treatment-zip",
+            alias="agent-lens/image-map-u2os-fucci-drug-treatment",
             permissions = {"*": "r", "@": "*", "misty-teeth-42051243": "*","google-oauth2|103047988474094226050": "*"}
         )
     finally:
@@ -119,10 +119,10 @@ async def create_dataset_example() -> None:
     try:
         # Create a dataset in the gallery
         await gallery_manager.create_dataset(
-            name="20250410-treatment-zip",
-            description="The Image Map of U2OS FUCCI Drug Treatment in zip format",
-            alias="20250410-treatment-zip",
-            parent_id="reef-imaging/u2os-fucci-drug-treatment-zip",
+            name="20250410-treatment",
+            description="The Image Map of U2OS FUCCI Drug Treatment",
+            alias="20250410-treatment",
+            parent_id="agent-lens/image-map-u2os-fucci-drug-treatment",
             version="stage",
             permissions = {"*": "r", "@": "*", "misty-teeth-42051243": "*","google-oauth2|103047988474094226050": "*"}
         )
@@ -135,7 +135,7 @@ async def delete_dataset_example() -> None:
     """Example of deleting a dataset"""
     gallery_manager = GalleryManager()
     await gallery_manager.connection.connect(client_id=None)
-    await gallery_manager.delete(artifact_id="reef-imaging/image-map-20250410-treatment-zip", delete_files=True, recursive=True)
+    await gallery_manager.delete(artifact_id="agent-lens/image-map-u2os-fucci-drug-treatment", delete_files=True, recursive=True)
     print("Dataset deleted.")
     await gallery_manager.connection.disconnect()
 
