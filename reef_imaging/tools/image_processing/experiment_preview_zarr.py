@@ -6,7 +6,7 @@ import cv2
 Description: Access a specific chunk from an OME-NGFF file and save it as a JPEG image.
 """
 def preview_chunk(zarr_path, output_path, channel='Fluorescence_405_nm_Ex', 
-                 chunk_coords=(0, 0), chunk_size=(2048, 2048), scale=3,
+                 chunk_coords=(0, 0), chunk_size=(256, 256), scale=3,
                  use_histogram_eq=False, clip_percentiles=(0.5, 99.5)):
     """
     Access a specific chunk from an OME-NGFF file and save it as a JPEG image.

@@ -173,7 +173,7 @@ class ZarrWriter:
                 channels: List[str], 
                 zarr_filename: str = None, 
                 pyramid_levels: int = 7, 
-                chunk_size: Tuple[int, int] = (2048, 2048)):
+                chunk_size: Tuple[int, int] = (256, 256)):
         """
         Initialize the zarr writer with canvas dimensions and other parameters.
         
@@ -184,7 +184,7 @@ class ZarrWriter:
             channels: List of channel names
             zarr_filename: Name of the zarr file (default: "stitched_images.zarr")
             pyramid_levels: Number of pyramid levels to create (default: 7)
-            chunk_size: Size of chunks for zarr storage (default: (2048, 2048))
+            chunk_size: Size of chunks for zarr storage (default: (256, 256))
         """
         self.output_folder = output_folder
         self.canvas_width = canvas_width
@@ -593,7 +593,7 @@ def stitch_images_example() -> None:
     image_parser = ImageFileParser()
     image_info = image_parser.parse_image_filenames(image_folder)
     channels = list(set(info["channel_name"] for info in image_info))
-    selected_channel = ['BF_LED_matrix_full']#, 'Fluorescence_488_nm_Ex', 'Fluorescence_561_nm_Ex']
+    selected_channel = ['BF_LED_matrix_full', 'Fluorescence_488_nm_Ex', 'Fluorescence_561_nm_Ex']
     
     # Initialize stitch manager
     stitch_manager = StitchManager()

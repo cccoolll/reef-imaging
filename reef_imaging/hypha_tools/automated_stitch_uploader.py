@@ -5,7 +5,7 @@ import asyncio
 import json
 import shutil
 import re
-import random  # Add this import
+import random
 from datetime import datetime
 from typing import List, Optional, Tuple
 from dotenv import load_dotenv
@@ -22,7 +22,7 @@ from artifact_manager.stitch_manager import StitchManager, ImageFileParser
 
 # Constants
 BASE_DIR = "/media/reef/harddisk"
-EXPERIMENT_ID = "20250410-fucci-time-lapse-scan"
+EXPERIMENT_ID = "20250429-scan-time-lapse"
 STITCHED_DIR = "/media/reef/harddisk/test_stitch_zarr"
 STITCH_RECORD_FILE = "stitch_upload_progress.txt"
 UPLOAD_RECORD_FILE = "zarr_upload_record.json"
@@ -30,10 +30,10 @@ CHECK_INTERVAL = 60  # Check for new folders every 60 seconds
 client_id = "reef-client-stitch-uploader"
 # Load environment variables
 load_dotenv()
-ARTIFACT_ALIAS = "image-map-20250410-treatment-zip"
+ARTIFACT_ALIAS = "agent-lens/image-map-20250429-treatment"
 # Timeout and retry settings
 CONNECTION_TIMEOUT = 60  # Timeout for connection operations in seconds
-OPERATION_TIMEOUT = 180  # Timeout for Hypha operations in seconds (increased from 60)
+OPERATION_TIMEOUT = 3600  # Timeout for Hypha operations in seconds (increased from 60)
 MAX_RETRIES = 300  # Maximum retries for operations
 # Optimized concurrency settings
 BATCH_SIZE = 30  # Batch size for file uploads
@@ -93,8 +93,10 @@ def get_zarr_files() -> List[str]:
 
 
 def cleanup_zarr_file(zarr_file: str):
-    """Delete a zarr file."""
+    """Delete a zarr file and its associated .done file."""
     zarr_path = os.path.join(STITCHED_DIR, zarr_file)
+    done_file = os.path.join(STITCHED_DIR, f"{zarr_file}.done")
+    
     try:
         print(f"Removing zarr file: {zarr_path}")
         if os.path.isdir(zarr_path):
@@ -102,8 +104,13 @@ def cleanup_zarr_file(zarr_file: str):
         else:
             os.remove(zarr_path)
         print(f"Successfully removed {zarr_path}")
+        
+        # Remove the .done file if it exists
+        if os.path.exists(done_file):
+            os.remove(done_file)
+            print(f"Successfully removed {done_file}")
     except Exception as e:
-        print(f"Error removing {zarr_path}: {e}")
+        print(f"Error during cleanup: {e}")
 
 
 def extract_datetime_from_folder(folder_name: str) -> Optional[str]:
@@ -207,52 +214,37 @@ def stitch_folder(folder_path: str) -> bool:
         return False
 
 
-async def upload_zarr_channel(zarr_path: str, channel: str, uploader: ArtifactUploader, connection: HyphaConnection) -> bool:
+async def upload_zarr_channel(zarr_path: str, channel: str, uploader: ArtifactUploader) -> bool:
     """Upload a single channel from a zarr file to the artifact manager."""
     try:
-        # Create a temporary directory for the channel
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # Create a new zarr file with just this channel
-            channel_zarr_path = os.path.join(temp_dir, f"{channel}.zarr")
-            store = zarr.DirectoryStore(channel_zarr_path)
-            root = zarr.group(store=store)
+        # Get the base name for the relative path
+        zarr_file = os.path.basename(zarr_path)
+        base_name = zarr_file.replace('.zarr', '')
             
-            # Copy the channel data
-            source_zarr = zarr.open(zarr_path, mode='r')
-            if channel not in source_zarr:
-                print(f"Channel {channel} not found in zarr file")
-                return False
-                
-            # Copy the channel group
-            source_channel = source_zarr[channel]
-            dest_channel = root.create_group(channel)
+        # The full path to the channel in the zarr file
+        channel_path = os.path.join(zarr_path, channel)
+        
+        if not os.path.exists(channel_path):
+            print(f"Channel directory {channel_path} not found in zarr file")
+            return False
+        
+        # Set the relative path for upload - this will determine how it's stored in the artifact
+        relative_path = f"{base_name}/{channel}.zip"
+        print(f"Uploading channel {channel} as {relative_path}")
+        
+        # Use the zip_and_upload_folder method from the uploader
+        success = await uploader.zip_and_upload_folder(
+            folder_path=channel_path,
+            relative_path=relative_path,
+            delete_zip_after=True
+        )
+        
+        if success:
+            print(f"Successfully uploaded channel {channel}")
+        else:
+            print(f"Failed to upload channel {channel}")
             
-            # Copy all datasets in the channel
-            for key in source_channel.keys():
-                source_dataset = source_channel[key]
-                dest_channel.create_dataset(
-                    key,
-                    data=source_dataset[:],
-                    chunks=source_dataset.chunks,
-                    dtype=source_dataset.dtype,
-                    compressor=source_dataset.compressor
-                )
-            
-            # Upload the channel zarr file
-            base_name = os.path.basename(zarr_path)
-            if base_name.endswith('.zarr'):
-                base_name = base_name[:-5]  # Remove the .zarr extension
-                
-            relative_path = f"{base_name}/{channel}.zarr"
-            print(f"Uploading channel {channel} to {relative_path}")
-            
-            success = await uploader.zip_and_upload_folder(
-                folder_path=channel_zarr_path,
-                relative_path=relative_path,
-                delete_zip_after=True
-            )
-            
-            return success
+        return success
             
     except Exception as e:
         print(f"Error uploading channel {channel}: {e}")
@@ -262,7 +254,7 @@ async def upload_zarr_channel(zarr_path: str, channel: str, uploader: ArtifactUp
 
 
 async def upload_zarr_file(zarr_file: str) -> bool:
-    """Upload a zarr file to the artifact manager."""
+    """Upload a zarr file to the artifact manager by zipping and uploading each channel separately."""
     zarr_path = os.path.join(STITCHED_DIR, zarr_file)
     if not os.path.exists(zarr_path):
         print(f"Zarr file {zarr_path} does not exist")
@@ -375,15 +367,15 @@ async def upload_zarr_file(zarr_file: str) -> bool:
             if connection: await connection.disconnect()
             return False
         
-        # Get the channels from the zarr file
-        source_zarr = zarr.open(zarr_path, mode='r')
-        channels = list(source_zarr.keys())
+        # Get the channels from the zarr file (top-level directories in zarr)
+        channels = [d for d in os.listdir(zarr_path) if os.path.isdir(os.path.join(zarr_path, d))]
         print(f"Found channels in zarr file: {channels}")
         
-        # Upload each channel separately
+        # Upload each channel separately as its own zip file
         all_success = True
         for channel in channels:
-            channel_success = await upload_zarr_channel(zarr_path, channel, uploader, connection)
+            print(f"Processing channel: {channel}")
+            channel_success = await upload_zarr_channel(zarr_path, channel, uploader)
             if not channel_success:
                 print(f"Failed to upload channel {channel}")
                 all_success = False

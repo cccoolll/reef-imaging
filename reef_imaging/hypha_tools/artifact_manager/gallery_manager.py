@@ -119,9 +119,9 @@ async def create_dataset_example() -> None:
     try:
         # Create a dataset in the gallery
         await gallery_manager.create_dataset(
-            name="20250410-treatment",
+            name="20250429-treatment",
             description="The Image Map of U2OS FUCCI Drug Treatment",
-            alias="20250410-treatment",
+            alias="agent-lens/image-map-20250429-treatment",
             parent_id="agent-lens/image-map-u2os-fucci-drug-treatment",
             version="stage",
             permissions = {"*": "r", "@": "*", "misty-teeth-42051243": "*","google-oauth2|103047988474094226050": "*"}

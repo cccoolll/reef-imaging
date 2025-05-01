@@ -928,7 +928,7 @@ async def upload_zarr_example() -> None:
     ]
     
     uploader = ArtifactUploader(
-        artifact_alias="image-map-20250410-treatment",
+        artifact_alias="agent-lens/image-map-20250429-treatment",
         record_file="zarr_upload_record.json"
     )
     
@@ -938,7 +938,7 @@ async def upload_zarr_example() -> None:
         # Commit the dataset if all files were uploaded successfully
         from .gallery_manager import GalleryManager
         gallery_manager = GalleryManager()
-        await gallery_manager.commit_dataset("image-map-20250410-treatment")
+        await gallery_manager.commit_dataset("")
         await gallery_manager.connection.disconnect()
 
 async def upload_treatment_example() -> None:
