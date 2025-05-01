@@ -105,10 +105,6 @@ def cleanup_zarr_file(zarr_file: str):
             os.remove(zarr_path)
         print(f"Successfully removed {zarr_path}")
         
-        # Remove the .done file if it exists
-        if os.path.exists(done_file):
-            os.remove(done_file)
-            print(f"Successfully removed {done_file}")
     except Exception as e:
         print(f"Error during cleanup: {e}")
 
