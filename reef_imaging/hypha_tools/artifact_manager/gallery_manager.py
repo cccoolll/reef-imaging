@@ -47,7 +47,7 @@ class GalleryManager:
                            description: str, 
                            alias: str,
                            parent_id: str,
-                           version: str = "stage",
+                           stage: bool = True,
                            permissions: Dict[str, str] = None) -> None:
         """Create a new dataset within a gallery"""
         await self.ensure_connected()
@@ -62,7 +62,7 @@ class GalleryManager:
             alias=alias,
             manifest=dataset_manifest,
             config={"permissions": permissions},
-            version=version,
+            stage=stage,
             overwrite=True,
         )
         print(f"Dataset '{name}' created with alias '{alias}' in gallery '{parent_id}'.")
@@ -123,7 +123,7 @@ async def create_dataset_example() -> None:
             description="The Image Map of U2OS FUCCI Drug Treatment",
             alias="agent-lens/image-map-20250429-treatment",
             parent_id="agent-lens/image-map-u2os-fucci-drug-treatment",
-            version="stage",
+            stage=True,
             permissions = {"*": "r", "@": "*", "misty-teeth-42051243": "*","google-oauth2|103047988474094226050": "*"}
         )
     finally:
