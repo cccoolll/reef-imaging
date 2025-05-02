@@ -93,15 +93,26 @@ class ArtifactUploader:
                     file_path=relative_path
                 )
                 print(f"Put URL: {put_url}")
-                # Upload using requests - direct approach from tutorial
-                print(f"Uploading {relative_path} using direct PUT request")
-                with open(local_file, "rb") as file_data:
-                    response = requests.put(
-                        put_url, 
-                        data=file_data,
-                    )
-                    if not response.ok:
-                        raise RuntimeError(f"File upload failed for {local_file}, status={response.status_code}")
+                
+                # Define a nonblocking upload function to run in a thread
+                def upload_file_in_thread(file_path, url):
+                    try:
+                        with open(file_path, "rb") as file_data:
+                            response = requests.put(
+                                url, 
+                                data=file_data,
+                            )
+                            return response.ok, response.status_code
+                    except Exception as e:
+                        print(f"Error in upload thread: {e}")
+                        return False, 0
+                
+                # Upload using requests in a separate thread to avoid blocking
+                print(f"Uploading {relative_path} using direct PUT request in background thread")
+                ok, status_code = await asyncio.to_thread(upload_file_in_thread, local_file, put_url)
+                
+                if not ok:
+                    raise RuntimeError(f"File upload failed for {local_file}, status={status_code}")
                 
                 # Record successful upload
                 self.upload_record.mark_uploaded(relative_path)
@@ -172,37 +183,79 @@ class ArtifactUploader:
                 traceback.print_exc()
                 return False
         
-        try:
-            print(f"Starting zip file creation in background thread for {folder_path}...")
-            # Run zip creation in a separate thread
-            zip_success = await asyncio.to_thread(create_zip_file, folder_path, temp_zip_path)
-            
-            if not zip_success:
-                print(f"Failed to create zip file for {folder_path}")
-                return False
-            
-            if not os.path.exists(temp_zip_path):
-                print(f"Expected zip file {temp_zip_path} doesn't exist after thread completion")
-                return False
-            
-            # Upload the zip file
-            print(f"Zip creation complete, now uploading {temp_zip_path} to {relative_path}...")
-            success = await self.upload_single_file(temp_zip_path, relative_path)
-            
-            return success
+        # Define a keepalive task
+        async def keepalive_task():
+            """Send periodic keepalive to maintain the connection"""
+            try:
+                while True:
+                    if self.connection and self.connection.artifact_manager:
+                        # Just check a simple property to keep the connection alive
+                        await self.connection.api.ping()
+                        print("Sent keepalive ping to maintain connection")
+                    await asyncio.sleep(30)  # Ping every 30 seconds
+            except asyncio.CancelledError:
+                # Task was cancelled, this is expected
+                pass
+            except Exception as e:
+                print(f"Error in keepalive task: {e}")
                 
-        except Exception as e:
-            print(f"Error during zip and upload process: {e}")
-            traceback.print_exc()
-            return False
-        finally:
-            # Clean up the temporary zip file if requested and if it exists
-            if delete_zip_after and os.path.exists(temp_zip_path):
+        # Create a separate upload task
+        async def zip_and_upload_task():
+            try:
+                # Start the keepalive task
+                keepalive = asyncio.create_task(keepalive_task())
+                
                 try:
-                    os.unlink(temp_zip_path)
-                    print(f"Deleted temporary zip file: {temp_zip_path}")
-                except Exception as e:
-                    print(f"Warning: Could not delete temporary file {temp_zip_path}: {e}")
+                    print(f"Starting zip file creation in background thread for {folder_path}...")
+                    # Run zip creation in a separate thread
+                    zip_success = await asyncio.to_thread(create_zip_file, folder_path, temp_zip_path)
+                    
+                    if not zip_success:
+                        print(f"Failed to create zip file for {folder_path}")
+                        return False
+                    
+                    if not os.path.exists(temp_zip_path):
+                        print(f"Expected zip file {temp_zip_path} doesn't exist after thread completion")
+                        return False
+                    
+                    # Make sure we're connected
+                    connected = await self.ensure_connected()
+                    if not connected:
+                        print(f"Failed to connect, retrying...")
+                        await asyncio.sleep(5)
+                        connected = await self.ensure_connected()
+                        if not connected:
+                            print(f"Failed to establish connection after retry")
+                            return False
+                    
+                    # Upload the zip file
+                    print(f"Zip creation complete, now uploading {temp_zip_path} to {relative_path}...")
+                    success = await self.upload_single_file(temp_zip_path, relative_path)
+                    
+                    return success
+                finally:
+                    # Always clean up the keepalive task
+                    keepalive.cancel()
+                    try:
+                        await keepalive
+                    except asyncio.CancelledError:
+                        pass
+                    
+                    # Clean up the temporary zip file if requested and if it exists
+                    if delete_zip_after and os.path.exists(temp_zip_path):
+                        try:
+                            os.unlink(temp_zip_path)
+                            print(f"Deleted temporary zip file: {temp_zip_path}")
+                        except Exception as e:
+                            print(f"Warning: Could not delete temporary file {temp_zip_path}: {e}")
+                    
+            except Exception as e:
+                print(f"Error during zip and upload process: {e}")
+                traceback.print_exc()
+                return False
+        
+        # Execute the task and wait for it to complete
+        return await zip_and_upload_task()
 
     async def upload_zarr_files(self, file_paths: List[str]) -> bool:
         """Upload zarr files to the artifact manager - simplified."""
