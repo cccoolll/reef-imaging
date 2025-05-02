@@ -101,7 +101,8 @@ class MirrorRoboticArmService:
                 if self.cloud_service_id:
                     service = await self.cloud_server.get_service(self.cloud_service_id)
                     # Try a simple operation to verify service is working
-                    hello_world_result = await service.hello_world()
+                    
+                    hello_world_result = await asyncio.wait_for(service.hello_world(), timeout=10)
                     if hello_world_result != "Hello world":
                         logger.error(f"Service health check failed: {hello_world_result}")
                         raise Exception("Service not healthy")
