@@ -94,6 +94,7 @@ class MirrorRoboticArmService:
 
     async def check_service_health(self):
         """Check if the service is healthy and rerun setup if needed"""
+        logger.info("Starting service health check task")
         while True:
             try:
                 # Try to get the service status
@@ -106,11 +107,33 @@ class MirrorRoboticArmService:
                         raise Exception("Service not healthy")
                 else:
                     logger.info("Service ID not set, waiting for service registration")
+                
+                # Always check local service regardless of whether it's None
+                try:
+                    if self.local_service is None:
+                        logger.info("Local service connection lost, attempting to reconnect")
+                        await self.connect_to_local_service()
+                        if self.local_service is None:
+                            raise Exception("Failed to connect to local service")
                     
-                # Check local service connection
-                if self.local_service is None:
-                    logger.info("Local service connection lost, attempting to reconnect")
-                    await self.connect_to_local_service()
+                    #logger.info("Checking local service health with timeout, if timeout, local service is not healthy...")
+                    try:
+                        local_hello_world_result = await asyncio.wait_for(self.local_service.hello_world(), timeout=10)
+                    except asyncio.TimeoutError:
+                        logger.error("Local service health check timed out, assuming it's not healthy")
+                        raise Exception("Local service not healthy")
+                    
+                    #logger.info(f"Local service response: {local_hello_world_result}")
+                    
+                    if local_hello_world_result != "Hello world":
+                        logger.error(f"Local service health check failed: {local_hello_world_result}")
+                        raise Exception("Local service not healthy")
+                    
+                    #logger.info("Local service health check passed")
+                except Exception as e:
+                    logger.error(f"Local service health check failed: {e}")
+                    self.local_service = None  # Reset connection so it will reconnect next time
+                    raise Exception(f"Local service not healthy: {e}")
             except Exception as e:
                 logger.error(f"Service health check failed: {e}")
                 logger.info("Attempting to rerun setup...")
@@ -141,7 +164,7 @@ class MirrorRoboticArmService:
                         logger.error(f"Failed to rerun setup: {setup_error}")
                         await asyncio.sleep(30)  # Wait before retrying
             
-            await asyncio.sleep(30)  # Check every half minute
+            await asyncio.sleep(10)  # Check every half minute
 
     async def start_hypha_service(self, server):
         self.cloud_server = server
@@ -186,9 +209,6 @@ class MirrorRoboticArmService:
         id = svc.id.split(":")[1]
 
         logger.info(f"You can also test the service via the HTTP proxy: {self.cloud_server_url}/{server.config.workspace}/services/{id}")
-
-        # Start the health check task
-        asyncio.create_task(self.check_service_health())
 
     async def setup(self):
         # Connect to cloud workspace
@@ -523,6 +543,8 @@ if __name__ == "__main__":
         try:
             mirror_service.setup_task = asyncio.create_task(mirror_service.setup())
             await mirror_service.setup_task
+            # Start the health check task after setup is complete
+            asyncio.create_task(mirror_service.check_service_health())
         except Exception:
             traceback.print_exc()
 

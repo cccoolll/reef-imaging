@@ -151,8 +151,7 @@ class RoboticArmService:
         id = svc.id.split(":")[1]
         logger.info(f"You can also test the service via the HTTP proxy: {self.server_url}/{server.config.workspace}/services/{id}/hello_world")
 
-        # Start the health check task
-        asyncio.create_task(self.check_service_health())
+        # Health check will be started after setup is complete
 
     async def setup(self):
         if self.local:
@@ -685,6 +684,9 @@ if __name__ == "__main__":
         try:
             robotic_arm_service.setup_task = asyncio.create_task(robotic_arm_service.setup())
             await robotic_arm_service.setup_task
+            
+            # Start the health check task after setup is complete
+            asyncio.create_task(robotic_arm_service.check_service_health())
         except Exception as e:
             logger.error(f"Error setting up robotic arm service: {e}")
             raise e
