@@ -31,7 +31,7 @@ CHECK_INTERVAL = 60  # Check for new folders every 60 seconds
 client_id = "reef-client-stitch-uploader"
 # Load environment variables
 load_dotenv()
-ARTIFACT_ALIAS = "reef-imaging/image-map-20250429-treatment-zip"
+ARTIFACT_ALIAS = "agent-lens/image-map-20250429-treatment-zip"
 # Timeout and retry settings
 CONNECTION_TIMEOUT = 60  # Timeout for connection operations in seconds
 OPERATION_TIMEOUT = 3600  # Timeout for Hypha operations in seconds (increased from 60)

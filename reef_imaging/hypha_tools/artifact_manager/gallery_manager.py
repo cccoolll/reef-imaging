@@ -107,8 +107,8 @@ async def create_gallery_example() -> None:
         await gallery_manager.create_gallery(
             name="Image Map of U2OS FUCCI Drug Treatment",
             description="A collection for organizing imaging datasets acquired by microscopes",
-            alias="reef-imaging/image-map-of-u2os-fucci-drug-treatment-zip",
-            permissions = {"*": "r", "@": "*", "misty-teeth-42051243": "*","google-oauth2|103047988474094226050": "*"}
+            alias="agent-lens/image-map-of-u2os-fucci-drug-treatment-zip",
+            permissions = {"*": "*", "@": "*", "misty-teeth-42051243": "*","google-oauth2|103047988474094226050": "*"}
         )
     finally:
         await gallery_manager.connection.disconnect()
@@ -121,10 +121,10 @@ async def create_dataset_example() -> None:
         await gallery_manager.create_dataset(
             name="20250429-treatment",
             description="The Image Map of U2OS FUCCI Drug Treatment from 20250429",
-            alias="image-map-20250429-treatment-zip",
-            parent_id="reef-imaging/image-map-of-u2os-fucci-drug-treatment-zip",
+            alias="agent-lens/image-map-20250429-treatment-zip",
+            parent_id="agent-lens/image-map-of-u2os-fucci-drug-treatment-zip",
             version="stage",
-            permissions = {"*": "r", "@": "*", "misty-teeth-42051243": "*","google-oauth2|103047988474094226050": "*"}
+            permissions = {"*": "*", "@": "*", "misty-teeth-42051243": "*","google-oauth2|103047988474094226050": "*"}
         )
     finally:
         await gallery_manager.connection.disconnect()
@@ -139,7 +139,7 @@ async def delete_dataset_example() -> None:
     print("Dataset deleted.")
     await gallery_manager.connection.disconnect()
 
-async def reset_stats(artifact_id="reef-imaging/image-map-u2os-fucci-drug-treatment"):
+async def reset_stats(artifact_id="agent-lens/image-map-u2os-fucci-drug-treatment"):
     """Reset the stats of a dataset"""
     gallery_manager = GalleryManager()
     await gallery_manager.connection.connect(client_id=None)
@@ -148,5 +148,5 @@ async def reset_stats(artifact_id="reef-imaging/image-map-u2os-fucci-drug-treatm
     await gallery_manager.connection.disconnect()
 if __name__ == "__main__":
 
-    #asyncio.run(create_gallery_example()) 
+    asyncio.run(create_gallery_example()) 
     asyncio.run(create_dataset_example())

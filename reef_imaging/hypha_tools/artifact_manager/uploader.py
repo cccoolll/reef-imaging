@@ -99,7 +99,6 @@ class ArtifactUploader:
                     response = requests.put(
                         put_url, 
                         data=file_data,
-                        headers={'Content-Type': 'application/octet-stream'}
                     )
                     if not response.ok:
                         raise RuntimeError(f"File upload failed for {local_file}, status={response.status_code}")
