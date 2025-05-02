@@ -145,7 +145,7 @@ class ArtifactUploader:
         
         return success
 
-    async def zip_and_upload_folder(self, folder_path: str, relative_path: str = None, delete_zip_after: bool = False) -> bool:
+    async def zip_and_upload_folder(self, folder_path: str, relative_path: str = None, delete_zip_after: bool = True) -> bool:
         """Zip a folder and upload it as a single file."""
         if not os.path.exists(folder_path):
             print(f"Folder {folder_path} does not exist")
@@ -186,8 +186,6 @@ class ArtifactUploader:
         # Create a separate upload task
         async def zip_and_upload_task():
             try:
-                # Start the keepalive task
-                
                 try:
                     print(f"Starting zip file creation in background thread for {folder_path}...")
                     # Run zip creation in a separate thread
@@ -218,11 +216,6 @@ class ArtifactUploader:
                     return success
                 finally:
                     # Always clean up the keepalive task
-                    keepalive.cancel()
-                    try:
-                        await keepalive
-                    except asyncio.CancelledError:
-                        pass
                     
                     # Clean up the temporary zip file if requested and if it exists
                     if delete_zip_after and os.path.exists(temp_zip_path):

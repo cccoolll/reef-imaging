@@ -2,7 +2,7 @@ import os
 import asyncio
 from typing import Dict, Any, Optional
 
-from .core import HyphaConnection, Config
+from core import HyphaConnection, Config
 
 class GalleryManager:
     """Manages galleries and datasets in Hypha"""
@@ -129,7 +129,11 @@ async def create_dataset_example() -> None:
     finally:
         await gallery_manager.connection.disconnect()
 
-    
+async def commit_dataset_example() -> None:
+    """Example of committing a dataset"""
+    gallery_manager = GalleryManager()
+    await gallery_manager.commit_dataset(alias="agent-lens/image-map-20250429-treatment-zip")
+    await gallery_manager.connection.disconnect()
 
 async def delete_dataset_example() -> None:
     """Example of deleting a dataset"""
@@ -148,5 +152,4 @@ async def reset_stats(artifact_id="agent-lens/image-map-u2os-fucci-drug-treatmen
     await gallery_manager.connection.disconnect()
 if __name__ == "__main__":
 
-    asyncio.run(create_gallery_example()) 
-    asyncio.run(create_dataset_example())
+    asyncio.run(commit_dataset_example())
