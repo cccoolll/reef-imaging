@@ -268,7 +268,7 @@ async def process_channel_upload(zarr_path, channel, uploader):
         success = await uploader.zip_and_upload_folder(
             folder_path=channel_path,
             relative_path=relative_path,
-            delete_zip_after=True
+            delete_zip_after=False
         )
         
         if success:
@@ -305,7 +305,7 @@ async def upload_zarr_channel(zarr_path: str, channel: str, uploader: ArtifactUp
         success = await uploader.zip_and_upload_folder(
             folder_path=channel_path,
             relative_path=relative_path,
-            delete_zip_after=True
+            delete_zip_after=False
         )
         
         if success:

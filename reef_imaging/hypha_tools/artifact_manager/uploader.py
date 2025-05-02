@@ -92,7 +92,7 @@ class ArtifactUploader:
                     self.artifact_alias, 
                     file_path=relative_path
                 )
-                
+                print(f"Put URL: {put_url}")
                 # Upload using requests - direct approach from tutorial
                 print(f"Uploading {relative_path} using direct PUT request")
                 with open(local_file, "rb") as file_data:
@@ -134,7 +134,7 @@ class ArtifactUploader:
         
         return success
 
-    async def zip_and_upload_folder(self, folder_path: str, relative_path: str = None, delete_zip_after: bool = True) -> bool:
+    async def zip_and_upload_folder(self, folder_path: str, relative_path: str = None, delete_zip_after: bool = False) -> bool:
         """Zip a folder and upload it as a single file."""
         if not os.path.exists(folder_path):
             print(f"Folder {folder_path} does not exist")
@@ -149,9 +149,9 @@ class ArtifactUploader:
         if not relative_path.endswith('.zip'):
             relative_path += '.zip'
             
-        # Create the temporary zip file
+        # Create the zip file
         parent_dir = os.path.dirname(folder_path)
-        temp_zip_base = os.path.basename(folder_path) + ".zip.tmp"
+        temp_zip_base = os.path.basename(folder_path) + ".zip"  # Removed .tmp extension
         temp_zip_path = os.path.join(parent_dir, temp_zip_base)
         
         # Define the synchronous zipping function
