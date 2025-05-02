@@ -151,8 +151,7 @@ class RoboticArmService:
         id = svc.id.split(":")[1]
         logger.info(f"You can also test the service via the HTTP proxy: {self.server_url}/{server.config.workspace}/services/{id}/hello_world")
 
-        # Start the health check task
-        asyncio.create_task(self.check_service_health())
+        # Health check will be started after setup is complete
 
     async def setup(self):
         if self.local:
@@ -212,7 +211,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status["connect"] = "failed"
             logger.error(f"Failed to connect: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def disconnect(self):
@@ -231,7 +230,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status["disconnect"] = "failed"
             logger.error(f"Failed to disconnect: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def set_motor(self, state: int=Field(1, description="Enable or disable the motor, 1 for enable, 0 for disable")):
@@ -277,7 +276,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status["get_all_joints"] = "failed"
             logger.error(f"Failed to get all joints: {e}")
-            return {}
+            raise e
 
     @schema_function(skip_self=True)
     def get_all_positions(self):
@@ -299,7 +298,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status["get_all_positions"] = "failed"
             logger.error(f"Failed to get all positions: {e}")
-            return {}
+            raise e
 
     @schema_function(skip_self=True)
     def move_sample_from_microscope1_to_incubator(self):
@@ -320,7 +319,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to move sample from microscope1 to incubator: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def move_sample_from_incubator_to_microscope1(self):
@@ -339,7 +338,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to move sample from incubator to microscope1: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def grab_sample_from_microscope1(self):
@@ -358,7 +357,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to grab sample from microscope1: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def grab_sample_from_incubator(self):
@@ -377,7 +376,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to grab sample from incubator: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def put_sample_on_microscope1(self):
@@ -396,7 +395,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to put sample on microscope1: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def put_sample_on_incubator(self):
@@ -415,7 +414,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to put sample on incubator: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def transport_from_incubator_to_microscope1(self):
@@ -423,6 +422,8 @@ class RoboticArmService:
         Transport a sample from the incubator to microscope1
         Returns: bool
         """
+        if not self.connected:
+            self.connect()
         task_name = "transport_from_incubator_to_microscope1"
         self.task_status[task_name] = "started"
         self.set_motor(1)
@@ -434,7 +435,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to transport sample from incubator to microscope1: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def transport_from_microscope1_to_incubator(self):
@@ -442,6 +443,8 @@ class RoboticArmService:
         Transport a sample from microscope1 to the incubator
         Returns: bool
         """
+        if not self.connected:
+            self.connect()
         task_name = "transport_from_microscope1_to_incubator"
         self.task_status[task_name] = "started"
         self.set_motor(1)
@@ -453,7 +456,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to transport sample from microscope1 to incubator: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def halt(self):
@@ -473,7 +476,7 @@ class RoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to halt robot: {e}")
-            return False
+            raise e
     
     @schema_function(skip_self=True)
     def set_alarm(self, state: int=Field(1, description="Enable or disable the alarm, 1 for enable, 0 for disable")):
@@ -483,13 +486,15 @@ class RoboticArmService:
         task_name = "set_alarm"
         self.task_status[task_name] = "started"
         try:
+            if not self.connected:
+                self.connect()
             self.robot.set_alarm(state)
             self.task_status[task_name] = "finished"
             return True
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to set alarm: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def light_on(self):
@@ -499,13 +504,15 @@ class RoboticArmService:
         task_name = "light_on"
         self.task_status[task_name] = "started"
         try:
+            if not self.connected:
+                self.connect()
             self.robot.set_output(7, 0)
             self.task_status[task_name] = "finished"
             return True
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to turn on light: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def light_off(self):    
@@ -515,13 +522,15 @@ class RoboticArmService:
         task_name = "light_off"
         self.task_status[task_name] = "started"
         try:
+            if not self.connected:
+                self.connect()
             self.robot.set_output(7, 1)
             self.task_status[task_name] = "finished"
             return True
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to turn off light: {e}")
-            return False
+            raise e
 
     @schema_function(skip_self=True)
     def get_actions(self):
@@ -647,7 +656,7 @@ class RoboticArmService:
         
         if action_id not in action_to_script:
             logger.error(f"Unknown action ID: {action_id}")
-            return False
+            raise Exception("Unknown action ID")
             
         script_path = action_to_script[action_id]
         try:
@@ -659,7 +668,7 @@ class RoboticArmService:
             return True
         except Exception as e:
             logger.error(f"Failed to execute action {action_id}: {e}")
-            return False
+            raise e
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Start the Hypha service for the robotic arm.")
@@ -675,6 +684,9 @@ if __name__ == "__main__":
         try:
             robotic_arm_service.setup_task = asyncio.create_task(robotic_arm_service.setup())
             await robotic_arm_service.setup_task
+            
+            # Start the health check task after setup is complete
+            asyncio.create_task(robotic_arm_service.check_service_health())
         except Exception as e:
             logger.error(f"Error setting up robotic arm service: {e}")
             raise e

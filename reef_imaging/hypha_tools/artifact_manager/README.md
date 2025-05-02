@@ -7,6 +7,7 @@ This package provides a set of classes and utilities for working with the Hypha 
 - **Gallery Management**: Create and manage galleries and datasets
 - **File Uploading**: Upload files to the Hypha Artifact Manager with robust error handling and retries
 - **Treatment Data Handling**: Upload and manage scientific treatment data
+- **Channel-Based Upload**: Upload zarr channels as individual zip files for optimized data access
 
 ## Workflow Overview
 
@@ -16,6 +17,13 @@ The package includes two main upload workflows:
 2. **Stitch Upload**: Stitches microscopy images into zarr files before uploading
 
 Both workflows use optimized connection handling with retry logic, concurrent batch uploads, and progress tracking.
+
+### Zarr Channel Upload Workflow
+
+The latest version implements a channel-based upload approach for zarr files:
+1. The stitcher creates a zarr file with multiple channels (e.g., BF_LED_matrix_full, Fluorescence_488_nm_Ex, Fluorescence_561_nm_Ex)
+2. Each channel is uploaded as a separate zip file with the pattern `{timestamp}/{channel}.zip`
+3. This approach allows for more efficient data retrieval and better fault tolerance during uploads
 
 ![Reef Imaging Upload Process Architecture](docs/upload_process_diagram.png)
 
@@ -74,32 +82,52 @@ async def create_gallery():
 asyncio.run(create_gallery())
 ```
 
-### Upload Files
+### Upload Zarr Channels
 
 ```python
 import asyncio
+import os
 from reef_imaging.hypha_tools.artifact_manager import ArtifactUploader
 
-async def upload_files():
-    # Upload zarr files
-    zarr_paths = [
-        "/path/to/data.zarr",
-    ]
+async def upload_zarr_channels():
+    # Path to zarr file
+    zarr_path = "/path/to/2025-04-29_15-38-36.zarr"
     
     uploader = ArtifactUploader(
-        artifact_alias="my-dataset",
+        artifact_alias="agent-lens/image-map-20250429-treatment",
         record_file="upload_record.json"
     )
     
-    success = await uploader.upload_zarr_files(zarr_paths)
+    # Connect to Hypha
+    await uploader.connect_with_retry()
     
-    if success:
-        print("Files uploaded successfully!")
-    else:
-        print("Some files failed to upload")
+    try:
+        # Get all channels from the zarr file
+        channels = [d for d in os.listdir(zarr_path) 
+                   if os.path.isdir(os.path.join(zarr_path, d))]
+        
+        # Upload each channel as a separate zip file
+        for channel in channels:
+            base_name = os.path.basename(zarr_path).replace('.zarr', '')
+            channel_path = os.path.join(zarr_path, channel)
+            relative_path = f"{base_name}/{channel}.zip"
+            
+            success = await uploader.zip_and_upload_folder(
+                folder_path=channel_path,
+                relative_path=relative_path,
+                delete_zip_after=True
+            )
+            
+            if success:
+                print(f"Channel {channel} uploaded successfully!")
+            else:
+                print(f"Failed to upload channel {channel}")
+    finally:
+        if uploader.connection:
+            await uploader.connection.disconnect()
 
 # Run the async function
-asyncio.run(upload_files())
+asyncio.run(upload_zarr_channels())
 ```
 
 ### Upload Treatment Data

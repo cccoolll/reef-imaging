@@ -66,7 +66,7 @@ class IncubatorService:
         self.local = local
         self.simulation = simulation
         self.server_url = "http://localhost:9527" if local else "https://hypha.aicell.io"
-        self.c = Cytomat("/dev/ttyUSB0") if not simulation else None
+        self.c = Cytomat("/dev/ttyUSB1") if not simulation else None
         self.samples_file = "/home/tao/workspace/reef-imaging/reef_imaging/control/cytomat-control/samples.json"
         self.server = None
         self.service_id = "incubator-control" + ("-simulation" if simulation else "")
@@ -226,7 +226,7 @@ class IncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to initialize incubator: {e}")
-            return f"Failed to initialize incubator: {e}"
+            raise e
     
     @schema_function(skip_self=True)
     def get_temperature(self):
@@ -246,7 +246,7 @@ class IncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get temperature: {e}")
-            return None
+            raise e
     
     @schema_function(skip_self=True)
     def hello_world(self):
@@ -274,7 +274,7 @@ class IncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get slot information: {e}")
-            return None
+            raise e
 
     @schema_function(skip_self=True)
     def get_co2_level(self):
@@ -294,7 +294,7 @@ class IncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get CO2 level: {e}")
-            return None
+            raise e
 
     @schema_function(skip_self=True)
     def reset_error_status(self):
@@ -310,6 +310,7 @@ class IncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to reset error status: {e}")
+            raise e
 
     @schema_function(skip_self=True)
     def get_status(self):
@@ -334,7 +335,7 @@ class IncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get status: {e}")
-            return {}
+            raise e
 
     @schema_function(skip_self=True)
     def move_plate(self, slot:int=Field(5, description="Slot number,range: 1-42")):
@@ -362,7 +363,7 @@ class IncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to move plate: {e}")
-            return f"Failed to move plate: {e}"
+            raise e
     
     def update_sample_status(self, slot: int, status: str):
         # Update the sample's status in samples.json
@@ -402,7 +403,7 @@ class IncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to put sample in slot {slot}: {e}")
-            return f"Failed to put sample in slot {slot}: {e}"
+            raise e
     
     @schema_function(skip_self=True)
     def get_sample_from_slot_to_transfer_station(self, slot: int = Field(5, description="Slot number,range: 1-42")):
@@ -428,7 +429,7 @@ class IncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get sample from slot {slot}: {e}")
-            return f"Failed to get sample from slot {slot}: {e}"
+            raise e
 
     @schema_function(skip_self=True)
     def get_sample_status(self, slot: Optional[int] = Field(None, description="Slot number, range: 1-42, or None for all slots")):
@@ -455,7 +456,7 @@ class IncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get sample status: {e}")
-            return {}
+            raise e
 
     def is_busy(self):
         task_name = "is_busy"
@@ -471,7 +472,7 @@ class IncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to check if incubator is busy: {e}")
-            return False
+            raise e
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Start the Hypha service for the incubator.")

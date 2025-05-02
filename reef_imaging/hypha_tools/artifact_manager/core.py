@@ -14,18 +14,18 @@ load_dotenv()
 class Config:
     """Configuration settings for the artifact manager"""
     SERVER_URL = "https://hypha.aicell.io"
-    WORKSPACE_TOKEN = os.getenv("REEF_WORKSPACE_TOKEN")
+    WORKSPACE_TOKEN = os.getenv("AGENT_LENS_WORKSPACE_TOKEN")
     CONCURRENCY_LIMIT = 25  # Max number of concurrent uploads (increased from 10)
     MAX_RETRIES = 300  # Maximum number of retry attempts
+    MAX_RETRIES_PER_FILE = 10  # Maximum number of retry attempts per file
     INITIAL_RETRY_DELAY = 5  # Initial retry delay in seconds
     MAX_RETRY_DELAY = 60  # Maximum retry delay in seconds
     CONNECTION_TIMEOUT = 30  # Timeout for API connections in seconds
-    UPLOAD_TIMEOUT = 120  # Timeout for file uploads in seconds (increased from 60)
+    UPLOAD_TIMEOUT = 3600  # Timeout for file uploads in seconds (increased from 60)
     URL_BATCH_SIZE = 30  # Number of presigned URLs to request at once
     MAX_WORKERS = 20  # Maximum number of worker tasks
-    MIN_URL_WORKERS = 3  # Minimum number of URL workers
+    MIN_URL_WORKERS = 4  # Minimum number of URL workers
     CONNECTION_POOL_SIZE = 100  # TCP connection pool size
-    MAX_FAILED_FILES = 10  # Maximum number of failed files before resetting connection
     MAX_COMMIT_ATTEMPTS = 15  # Maximum number of commit attempts
     MAX_COMMIT_DELAY = 220  # Maximum delay between commit attempts in seconds
 class UploadRecord:

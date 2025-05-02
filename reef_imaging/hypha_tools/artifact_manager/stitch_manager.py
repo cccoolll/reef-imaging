@@ -7,6 +7,7 @@ from numcodecs import Blosc
 from tqdm import tqdm
 import json
 from typing import Dict, List, Tuple, Optional, Union, Any
+import shutil
 
 class ImagingParameters:
     """Class for handling imaging parameters"""
@@ -53,16 +54,37 @@ class ImageProcessor:
     @staticmethod
     def rotate_flip_image(image, angle=0, flip=True):
         """Rotate an image by a specified angle and flip if required."""
-        (h, w) = image.shape[:2]
-        center = (w // 2, h // 2)
-
-        # Get the rotation matrix
-        rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
-
-        # Perform the rotation
-        rotated = cv2.warpAffine(image, rotation_matrix, (w, h))
+        # If no rotation, just do the flip if needed
+        if angle == 0:
+            if flip:
+                return cv2.flip(image, -1)  # Flip horizontally and vertically
+            return image
+            
+        # Rotating with improved method to prevent black edges
+        height, width = image.shape[:2]
+        center = (width // 2, height // 2)
+        
+        # Use a border to avoid black edges
+        border_size = int(max(height, width) * 0.1)  # 10% border padding
+        padded_image = cv2.copyMakeBorder(image, border_size, border_size, border_size, border_size, 
+                                          cv2.BORDER_REPLICATE)
+        
+        # Adjust rotation center for padded image
+        padded_center = (center[0] + border_size, center[1] + border_size)
+        padded_rotation_matrix = cv2.getRotationMatrix2D(padded_center, angle, 1.0)
+        
+        # Rotate padded image
+        padded_height, padded_width = padded_image.shape[:2]
+        rotated_padded = cv2.warpAffine(padded_image, padded_rotation_matrix, (padded_width, padded_height), 
+                                        flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        
+        # Crop back to original size
+        rotated = rotated_padded[border_size:border_size+height, border_size:border_size+width]
+        
+        # Apply flip if required
         if flip:
             rotated = cv2.flip(rotated, -1)  # Flip horizontally and vertically
+            
         return rotated
     
     @staticmethod
@@ -74,6 +96,35 @@ class ImageProcessor:
             image = np.clip(image, img_min, img_max)
             image = ((image - img_min) * 255 / (img_max - img_min)).astype(np.uint8)
         return image
+    
+    @staticmethod
+    def create_weight_mask(height, width, feather_percent=0.05):
+        """Create a weight mask with higher values in the center and feathering at edges."""
+        y, x = np.mgrid[0:height, 0:width]
+        center_y, center_x = height // 2, width // 2
+        
+        # Distance from center
+        dist_from_center = np.sqrt((x - center_x)**2 + (y - center_y)**2)
+        max_dist = min(width, height) / 2
+        
+        # Smooth falloff that's mostly 1.0 in the center and drops off sharply near edges
+        weight_mask = np.clip(1.0 - (dist_from_center / max_dist)**2, 0.01, 1.0)**2
+        weight_mask = weight_mask.astype(np.float32)
+        
+        # Apply feathering at edges
+        feather_width = int(min(width, height) * feather_percent)
+        if feather_width > 0:
+            # Create edge mask
+            edge_mask = np.ones((height, width), dtype=np.float32)
+            edge_mask[:feather_width, :] *= np.linspace(0, 1, feather_width)[:, np.newaxis]
+            edge_mask[-feather_width:, :] *= np.linspace(1, 0, feather_width)[:, np.newaxis]
+            edge_mask[:, :feather_width] *= np.linspace(0, 1, feather_width)[np.newaxis, :]
+            edge_mask[:, -feather_width:] *= np.linspace(1, 0, feather_width)[np.newaxis, :]
+            
+            # Apply edge feathering
+            weight_mask *= edge_mask
+            
+        return weight_mask
 
 
 class StitchCanvas:
@@ -122,7 +173,7 @@ class ZarrWriter:
                 channels: List[str], 
                 zarr_filename: str = None, 
                 pyramid_levels: int = 7, 
-                chunk_size: Tuple[int, int] = (2048, 2048)):
+                chunk_size: Tuple[int, int] = (256, 256)):
         """
         Initialize the zarr writer with canvas dimensions and other parameters.
         
@@ -133,7 +184,7 @@ class ZarrWriter:
             channels: List of channel names
             zarr_filename: Name of the zarr file (default: "stitched_images.zarr")
             pyramid_levels: Number of pyramid levels to create (default: 7)
-            chunk_size: Size of chunks for zarr storage (default: (2048, 2048))
+            chunk_size: Size of chunks for zarr storage (default: (256, 256))
         """
         self.output_folder = output_folder
         self.canvas_width = canvas_width
@@ -317,8 +368,10 @@ class StitchManager:
         pixel_size_xy = imaging_params.get_pixel_size()
         
         # if zarr file exists, delete it
-        if os.path.exists(os.path.join(output_folder, zarr_filename)):
-            os.remove(os.path.join(output_folder, zarr_filename))
+        zarr_path = os.path.join(output_folder, zarr_filename)
+        if os.path.exists(zarr_path):
+            # Use shutil.rmtree instead of os.remove for directories
+            shutil.rmtree(zarr_path)
 
         # Create canvas
         self.canvas = StitchCanvas(stage_limits, pixel_size_xy)
@@ -352,7 +405,11 @@ class StitchManager:
                      image_info: List[Dict], 
                      coordinates: pd.DataFrame, 
                      selected_channel: List[str] = None,
-                     pyramid_levels: int = 7) -> None:
+                     pyramid_levels: int = 7,
+                     rotation_angle: float = 0.1, 
+                     blend_overlap: bool = False,  # Default to False to avoid memory issues
+                     feather_percent: float = 0.05,
+                     blend_tile_size: int = 4096) -> None:
         """
         Process images and place them on the canvas based on physical coordinates.
         
@@ -361,6 +418,10 @@ class StitchManager:
             coordinates: DataFrame with coordinates information
             selected_channel: List of channels to process
             pyramid_levels: Number of pyramid levels
+            rotation_angle: Angle in degrees to rotate images before processing
+            blend_overlap: Whether to use alpha blending for overlapping regions
+            feather_percent: Percentage of image size to use for edge feathering
+            blend_tile_size: Maximum size of tiles to use for local blending
         """
         if selected_channel is None:
             raise ValueError("selected_channel must be a list of channels to process.")
@@ -381,8 +442,8 @@ class StitchManager:
         # Sort position keys according to the grid pattern
         sorted_positions = sorted(position_groups.keys(), key=lambda pos: (
             pos[0],   # region
-            -pos[1],  # i decreasing (False in sort_values)
-            pos[2]    # j ascending (True in sort_values)
+            -pos[1],  # i decreasing
+            pos[2]    # j ascending
         ))
         
         # Find the first image to determine tile dimensions
@@ -393,7 +454,7 @@ class StitchManager:
                 sample_path = sample_info["filepath"]
                 sample_image = cv2.imread(sample_path, cv2.IMREAD_ANYDEPTH)
                 if sample_image is not None:
-                    sample_image = self.image_processor.rotate_flip_image(sample_image)
+                    sample_image = self.image_processor.rotate_flip_image(sample_image, angle=rotation_angle)
                     break
         
         if sample_image is None:
@@ -435,8 +496,8 @@ class StitchManager:
                 # Normalize image to 8-bit
                 image = self.image_processor.normalize_to_8bit(image)
                 
-                # Rotate and flip
-                image = self.image_processor.rotate_flip_image(image)
+                # Rotate and flip with the specified angle
+                image = self.image_processor.rotate_flip_image(image, angle=rotation_angle)
                 
                 # Check if image dimensions match the expected tile size
                 if image.shape[0] != tile_height or image.shape[1] != tile_width:
@@ -462,9 +523,38 @@ class StitchManager:
                     trimmed_image = image[:(y_end-y_start), :(x_end-x_start)]
                 else:
                     trimmed_image = image
-
-                # Place image directly on canvas at base level (scale0)
-                self.datasets[channel]["scale0"][y_start:y_end, x_start:x_end] = trimmed_image
+                    
+                # Apply simplified edge blending without using full weight map
+                if blend_overlap:
+                    # Create a feathered edge mask
+                    edge_mask = self.image_processor.create_weight_mask(
+                        trimmed_image.shape[0], 
+                        trimmed_image.shape[1], 
+                        feather_percent
+                    )
+                    
+                    # Read the current data from the zarr
+                    current_data = self.datasets[channel]["scale0"][y_start:y_end, x_start:x_end]
+                    
+                    # Calculate blended image (use additive blending instead of multiplicative)
+                    # This preserves brightness better at edges
+                    blended_image = np.zeros_like(trimmed_image, dtype=np.float32)
+                    
+                    # Convert to float for blending
+                    current_float = current_data.astype(np.float32)
+                    trimmed_float = trimmed_image.astype(np.float32)
+                    
+                    # Blend using the edge mask
+                    blended_image = (1.0 - edge_mask) * current_float + edge_mask * trimmed_float
+                    
+                    # Convert back to uint8
+                    blended_image = np.clip(blended_image, 0, 255).astype(np.uint8)
+                    
+                    # Place the blended image
+                    self.datasets[channel]["scale0"][y_start:y_end, x_start:x_end] = blended_image
+                else:
+                    # Direct placement without blending
+                    self.datasets[channel]["scale0"][y_start:y_end, x_start:x_end] = trimmed_image
 
                 # Update pyramid levels
                 for level in range(1, pyramid_levels):
@@ -476,7 +566,7 @@ class StitchManager:
 def stitch_images_example() -> None:
     """Example of stitching images"""
     # Paths and parameters
-    data_folder = "/media/reef/harddisk/20250410-fucci-time-lapse-scan_2025-04-10_13-50-7.762411"
+    data_folder = "/media/reef/harddisk/20250429-scan-time-lapse_2025-04-29_15-38-36.107800"
     image_folder = os.path.join(data_folder, "0")
     parameter_file = os.path.join(data_folder, "acquisition parameters.json")
     coordinates_file = os.path.join(image_folder, "coordinates.csv")
@@ -503,7 +593,7 @@ def stitch_images_example() -> None:
     image_parser = ImageFileParser()
     image_info = image_parser.parse_image_filenames(image_folder)
     channels = list(set(info["channel_name"] for info in image_info))
-    selected_channel = ['Fluorescence_561_nm_Ex', 'Fluorescence_488_nm_Ex', 'BF_LED_matrix_full']
+    selected_channel = ['BF_LED_matrix_full', 'Fluorescence_488_nm_Ex', 'Fluorescence_561_nm_Ex']
     
     # Initialize stitch manager
     stitch_manager = StitchManager()

@@ -99,24 +99,41 @@ class MirrorMicroscopeService:
 
     async def check_service_health(self):
         """Check if the service is healthy and rerun setup if needed"""
-        retry_count = 0
-        while retry_count < 30:
+        logger.info("Starting service health check task")
+        while True:
             try:
                 # Try to get the service status
                 if self.cloud_service_id:
                     service = await self.cloud_server.get_service(self.cloud_service_id)
                     # Try a simple operation to verify service is working
-                    hello_world_result = await service.hello_world()
+                    hello_world_result = await asyncio.wait_for(service.hello_world(), timeout=10)
                     if hello_world_result != "Hello world":
                         logger.error(f"Service health check failed: {hello_world_result}")
                         raise Exception("Service not healthy")
                 else:
                     logger.info("Service ID not set, waiting for service registration")
                     
-                # Check local service connection
-                if self.local_service is None:
-                    logger.info("Local service connection lost, attempting to reconnect")
-                    await self.connect_to_local_service()
+                # Always check local service regardless of whether it's None
+                try:
+                    if self.local_service is None:
+                        logger.info("Local service connection lost, attempting to reconnect")
+                        await self.connect_to_local_service()
+                        if self.local_service is None:
+                            raise Exception("Failed to connect to local service")
+                    
+                    #logger.info("Checking local service health...")
+                    local_hello_world_result = await asyncio.wait_for(self.local_service.hello_world(), timeout=10)
+                    #logger.info(f"Local service response: {local_hello_world_result}")
+                    
+                    if local_hello_world_result != "Hello world":
+                        logger.error(f"Local service health check failed: {local_hello_world_result}")
+                        raise Exception("Local service not healthy")
+                    
+                    #logger.info("Local service health check passed")
+                except Exception as e:
+                    logger.error(f"Local service health check failed: {e}")
+                    self.local_service = None  # Reset connection so it will reconnect next time
+                    raise Exception(f"Local service not healthy: {e}")
             except Exception as e:
                 logger.error(f"Service health check failed: {e}")
                 logger.info("Attempting to rerun setup...")
@@ -146,7 +163,7 @@ class MirrorMicroscopeService:
                         logger.error(f"Failed to rerun setup: {setup_error}")
                         await asyncio.sleep(30)  # Wait before retrying
             
-            await asyncio.sleep(30)  # Check every half minute
+            await asyncio.sleep(10)  # Check more frequently (was 30)
 
     async def start_hypha_service(self, server):
         self.cloud_server = server
@@ -197,8 +214,7 @@ class MirrorMicroscopeService:
 
         logger.info(f"You can also test the service via the HTTP proxy: {self.cloud_server_url}/{server.config.workspace}/services/{id}")
 
-        # Start the health check task
-        asyncio.create_task(self.check_service_health())
+
 
     async def setup(self):
         # Connect to cloud workspace
@@ -253,7 +269,7 @@ class MirrorMicroscopeService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to move by distance: {e}")
-            return {"success": False, "message": f"Failed to move by distance: {e}"}
+            raise e
 
     async def move_to_position(self, x=None, y=None, z=None, context=None):
         """Mirror function to move_to_position on local service"""
@@ -269,7 +285,7 @@ class MirrorMicroscopeService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to move to position: {e}")
-            return {"success": False, "message": f"Failed to move to position: {e}"}
+            raise e
 
     async def get_status(self, context=None):
         """Mirror function to get_status on local service"""
@@ -285,7 +301,7 @@ class MirrorMicroscopeService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get status: {e}")
-            return {}
+            raise e
 
     async def update_parameters_from_client(self, new_parameters=None, context=None):
         """Mirror function to update_parameters_from_client on local service"""
@@ -301,7 +317,7 @@ class MirrorMicroscopeService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to update parameters: {e}")
-            return {"success": False, "message": f"Failed to update parameters: {e}"}
+            raise e
 
     async def one_new_frame(self, exposure_time=100, channel=0, intensity=50, context=None):
         """Mirror function to one_new_frame on local service"""
@@ -317,7 +333,7 @@ class MirrorMicroscopeService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get new frame: {e}")
-            return None
+            raise e
 
     async def snap(self, exposure_time=100, channel=0, intensity=50, context=None):
         """Mirror function to snap on local service"""
@@ -333,7 +349,7 @@ class MirrorMicroscopeService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to snap image: {e}")
-            return None
+            raise e
 
     async def open_illumination(self, context=None):
         """Mirror function to open_illumination on local service"""
@@ -349,7 +365,7 @@ class MirrorMicroscopeService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to open illumination: {e}")
-            return f"Failed to open illumination: {e}"
+            raise e
 
     async def close_illumination(self, context=None):
         """Mirror function to close_illumination on local service"""
@@ -365,7 +381,7 @@ class MirrorMicroscopeService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to close illumination: {e}")
-            return f"Failed to close illumination: {e}"
+            raise e
 
     async def scan_well_plate(self, well_plate_type="96", illuminate_channels=None, do_contrast_autofocus=False, do_reflection_af=True, scanning_zone=None, Nx=3, Ny=3, action_ID='testPlateScan', context=None):
         """Mirror function to scan_well_plate on local service"""
@@ -390,7 +406,7 @@ class MirrorMicroscopeService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to scan well plate: {e}")
-            return f"Failed to scan well plate: {e}"
+            raise e
 
     async def scan_well_plate_simulated(self, context=None):
         """Mirror function to scan_well_plate_simulated on local service"""
@@ -406,7 +422,7 @@ class MirrorMicroscopeService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to scan well plate: {e}")
-            return f"Failed to scan well plate: {e}"
+            raise e
 
     async def set_illumination(self, channel=0, intensity=50, context=None):
         """Mirror function to set_illumination on local service"""
@@ -422,7 +438,7 @@ class MirrorMicroscopeService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to set illumination: {e}")
-            return f"Failed to set illumination: {e}"
+            raise e
 
     async def set_camera_exposure(self, exposure_time=100, context=None):
         """Mirror function to set_camera_exposure on local service"""
@@ -438,7 +454,7 @@ class MirrorMicroscopeService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to set camera exposure: {e}")
-            return f"Failed to set camera exposure: {e}"
+            raise e
 
     async def stop_scan(self, context=None):
         """Mirror function to stop_scan on local service"""
@@ -454,7 +470,7 @@ class MirrorMicroscopeService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to stop scan: {e}")
-            return f"Failed to stop scan: {e}"
+            raise e
 
     async def home_stage(self, context=None):
         """Mirror function to home_stage on local service"""
@@ -470,7 +486,7 @@ class MirrorMicroscopeService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to home stage: {e}")
-            return f"Failed to home stage: {e}"
+            raise e
 
     async def return_stage(self, context=None):
         """Mirror function to return_stage on local service"""
@@ -486,7 +502,7 @@ class MirrorMicroscopeService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to return stage: {e}")
-            return f"Failed to return stage: {e}"
+            raise e
 
     async def move_to_loading_position(self, context=None):
         """Mirror function to move_to_loading_position on local service"""
@@ -502,7 +518,7 @@ class MirrorMicroscopeService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to move to loading position: {e}")
-            return f"Failed to move to loading position: {e}"
+            raise e
 
     async def auto_focus(self, context=None):
         """Mirror function to auto_focus on local service"""
@@ -518,7 +534,7 @@ class MirrorMicroscopeService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to auto focus: {e}")
-            return f"Failed to auto focus: {e}"
+            raise e
 
     async def do_laser_autofocus(self, context=None):
         """Mirror function to do_laser_autofocus on local service"""
@@ -534,7 +550,7 @@ class MirrorMicroscopeService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to do laser autofocus: {e}")
-            return f"Failed to do laser autofocus: {e}"
+            raise e
 
     async def navigate_to_well(self, row='A', col=1, wellplate_type='96', context=None):
         """Mirror function to navigate_to_well on local service"""
@@ -550,7 +566,7 @@ class MirrorMicroscopeService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to navigate to well: {e}")
-            return f"Failed to navigate to well: {e}"
+            raise e
 
     async def get_chatbot_url(self, context=None):
         """Mirror function to get_chatbot_url on local service"""
@@ -566,7 +582,7 @@ class MirrorMicroscopeService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get chatbot URL: {e}")
-            return None
+            raise e
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -582,6 +598,8 @@ if __name__ == "__main__":
         try:
             mirror_service.setup_task = asyncio.create_task(mirror_service.setup())
             await mirror_service.setup_task
+            # Start the health check task
+            asyncio.create_task(mirror_service.check_service_health())
         except Exception:
             traceback.print_exc()
 

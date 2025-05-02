@@ -46,13 +46,13 @@ if ENV_FILE:
     dotenv.load_dotenv(ENV_FILE)
 
 # Configuration settings
-IMAGING_INTERVAL = 3600  # Time between cycles in seconds
-INCUBATOR_SLOT = 32  # Slot number in the incubator
+IMAGING_INTERVAL = 1800  # Time between cycles in seconds
+INCUBATOR_SLOT = 27  # Slot number in the incubator
 ILLUMINATE_CHANNELS = ['BF LED matrix full', 'Fluorescence 488 nm Ex', 'Fluorescence 561 nm Ex']
-SCANNING_ZONE = [(0, 0), (7, 9)] # the last 2 rows have no cells
-Nx = 3
-Ny = 3
-ACTION_ID = '20250410-fucci-time-lapse-scan'
+SCANNING_ZONE = [(1, 1), (6, 10)] # The outside rows and columns have no cells
+Nx = 2
+Ny = 2
+ACTION_ID = '20250429-scan-time-lapse'
 
 class OrchestrationSystem:
     def __init__(self, local=False):

@@ -7,6 +7,12 @@ from datetime import datetime
 import traceback
 from asyncio import Queue
 import random
+import sys
+import json
+import zipfile
+import tempfile
+import shutil
+import threading
 
 from .core import HyphaConnection, UploadRecord, Config
 
@@ -27,6 +33,7 @@ class ArtifactUploader:
         self.semaphore = asyncio.Semaphore(concurrency_limit)
         self.client_id = client_id
         self.connection_task = None  # Track connection task at class level
+        self.last_progress_time = None
 
     async def connect_with_retry(self, client_id=None, max_retries=300, base_delay=5, max_delay=180):
         """Connect to Hypha with exponential backoff and retry."""
@@ -59,7 +66,6 @@ class ArtifactUploader:
                     await asyncio.sleep(delay)
                 
                 # Create connection task with timeout
-                print(f"Attempting connection to {self.connection.server_url} with client_id: {self.client_id}")
                 self.connection_task = asyncio.create_task(self.connection.connect(client_id=self.client_id))
                 await asyncio.wait_for(self.connection_task, timeout=Config.CONNECTION_TIMEOUT)
                 print("Connection established successfully")
@@ -235,7 +241,6 @@ class ArtifactUploader:
                                         put_url, 
                                         data=file_data,
                                         headers=headers,
-                                        chunked=True,
                                         timeout=aiohttp.ClientTimeout(total=upload_timeout)
                                     ) as resp:
                                         if resp.status != 200:
@@ -276,6 +281,7 @@ class ArtifactUploader:
                     print(
                         f"Uploaded file: {relative_path} ({self.upload_record.completed_files}/{self.upload_record.total_files})"
                     )
+                    self.last_progress_time = time.time()
                     return True
 
             except Exception as e:
@@ -356,29 +362,6 @@ class ArtifactUploader:
                     if file_queue.empty() and not in_progress:
                         break
                         
-                    if len(failed_files) >= Config.MAX_FAILED_FILES:
-                        print(f"More than {Config.MAX_FAILED_FILES} failed files detected, attempting connection reset...")
-                        # Try to reset connection up to MAX_RETRIES times
-                        reset_attempts = 0
-                        while reset_attempts < Config.MAX_RETRIES and not stopping:
-                            connection_success = await reset_connection()
-                            if connection_success:
-                                # Re-queue failed files
-                                for item in list(failed_files):
-                                    await file_queue.put(item)
-                                failed_files.clear()
-                                print("Connection reset and files re-queued, continuing...")
-                                break
-                            else:
-                                reset_attempts += 1
-                                print(f"Connection reset attempt {reset_attempts}/{Config.MAX_RETRIES} failed, retrying...")
-                                await asyncio.sleep(Config.INITIAL_RETRY_DELAY * (2 ** min(reset_attempts, 5)))  # Exponential backoff
-                        
-                        if reset_attempts >= Config.MAX_RETRIES:
-                            print(f"Failed to reset connection after {Config.MAX_RETRIES} attempts, stopping URL worker...")
-                            break
-                        continue
-                    
                     # Get a batch of files to process
                     batch = []
                     batch_size = min(Config.URL_BATCH_SIZE, file_queue.qsize())
@@ -454,29 +437,6 @@ class ArtifactUploader:
                     if url_queue.empty() and file_queue.empty() and not in_progress:
                         break
                     
-                    if len(failed_files) >= Config.MAX_FAILED_FILES:
-                        print(f"More than {Config.MAX_FAILED_FILES} failed files detected, attempting connection reset...")
-                        # Try to reset connection up to MAX_RETRIES times
-                        reset_attempts = 0
-                        while reset_attempts < Config.MAX_RETRIES and not stopping:
-                            connection_success = await reset_connection()
-                            if connection_success:
-                                # Re-queue failed files
-                                for item in list(failed_files):
-                                    await file_queue.put(item)
-                                failed_files.clear()
-                                print("Connection reset and files re-queued, continuing...")
-                                break
-                            else:
-                                reset_attempts += 1
-                                print(f"Connection reset attempt {reset_attempts}/{Config.MAX_RETRIES} failed, retrying...")
-                                await asyncio.sleep(Config.INITIAL_RETRY_DELAY * (2 ** min(reset_attempts, 5)))  # Exponential backoff
-                        
-                        if reset_attempts >= Config.MAX_RETRIES:
-                            print(f"Failed to reset connection after {Config.MAX_RETRIES} attempts, stopping upload worker...")
-                            break
-                        continue
-                    
                     # Get a file and its presigned URL with timeout
                     try:
                         local_file, relative_path, put_url = await asyncio.wait_for(
@@ -500,10 +460,10 @@ class ArtifactUploader:
                     # Attempt upload with optimized settings
                     success = False
                     retries = 0
-                    max_retries = 5
+                    max_retries_per_file = Config.MAX_RETRIES_PER_FILE
                     current_delay = 1
                     
-                    while retries < max_retries and not success and not stopping:
+                    while retries < max_retries_per_file and not success and not stopping:
                         try:
                             file_size = os.path.getsize(local_file)
                             
@@ -524,7 +484,6 @@ class ArtifactUploader:
                                                 put_url, 
                                                 data=file_data,
                                                 headers=headers,
-                                                chunked=True,
                                                 timeout=aiohttp.ClientTimeout(total=upload_timeout)
                                             ) as resp:
                                                 if resp.status == 200:
@@ -556,11 +515,19 @@ class ArtifactUploader:
                                     retries += 1
                                     await asyncio.sleep(current_delay)
                                     current_delay = min(current_delay * 2, 60)
-                                    continue
+                                    # Re-request URL if timeout occurs during upload
+                                    continue # Retry upload loop
                                 
                         except Exception as e:
                             retries += 1
-                            print(f"Upload error for {relative_path}: {str(e)} (retry {retries}/{max_retries})")
+                            print(f"Upload error for {relative_path}: {str(e)} (retry {retries}/{max_retries_per_file})")
+                            
+                            # Check for specific connection errors that might require URL refresh
+                            if isinstance(e, aiohttp.ClientConnectionError) or "connection reset" in str(e).lower():
+                                print(f"Connection error detected for {relative_path}, will attempt URL refresh.")
+                                # Break the inner retry loop to mark as failed and let outer logic handle potential re-queue/reset
+                                break
+                            
                             await asyncio.sleep(current_delay)
                             current_delay = min(current_delay * 2, 60)
                             continue
@@ -568,7 +535,10 @@ class ArtifactUploader:
                     if not success:
                         # If still failed after retries, add to failed files
                         failed_files.add((local_file, relative_path))
-                        print(f"Failed to upload {relative_path} after {max_retries} retries")
+                        print(f"Failed to upload {relative_path} after {max_retries_per_file} retries")
+                    else:
+                         # Update progress time on successful upload
+                         self.last_progress_time = time.time()
                     
                     # Mark as done in URL queue and remove from in_progress
                     url_queue.task_done()
@@ -619,7 +589,7 @@ class ArtifactUploader:
             await self.connection.disconnect()
             await asyncio.sleep(2)  # Wait for server to clean up
             # Cancel any existing connection task
-            if self.connection_task and not self.connection_task.done():
+            if self.connection_task is not None:
                 self.connection_task.cancel()
                 try:
                     await asyncio.wait_for(asyncio.shield(self.connection_task), timeout=1)
@@ -650,7 +620,7 @@ class ArtifactUploader:
             # Main processing loop
             max_reset_attempts = 5
             reset_count = 0
-            last_progress_time = time.time()
+            self.last_progress_time = time.time()
             stall_timeout = 300  # 5 minutes without progress
             
             while True:
@@ -661,7 +631,11 @@ class ArtifactUploader:
                 
                 # Check for stall condition
                 current_time = time.time()
-                if current_time - last_progress_time > stall_timeout:
+                # Ensure last_progress_time is initialized
+                if self.last_progress_time is None:
+                    self.last_progress_time = current_time
+
+                if current_time - self.last_progress_time > stall_timeout:
                     print(f"No progress for {stall_timeout} seconds, resetting connection...")
                     reset_count += 1
                     
@@ -687,76 +661,44 @@ class ArtifactUploader:
                         url_workers = [asyncio.create_task(url_worker()) for _ in range(num_url_workers)]
                         upload_workers = [asyncio.create_task(upload_worker(session)) for _ in range(num_upload_workers)]
                         
-                        last_progress_time = current_time
+                        self.last_progress_time = current_time
                     else:
                         print("Failed to reset connection, aborting upload")
                         return False
                 
-                # Handle remaining failed files if less than MAX_FAILED_FILES
+                # Handle remaining failed files
                 if file_queue.empty() and url_queue.empty() and not in_progress and failed_files:
-                    if len(failed_files) < Config.MAX_FAILED_FILES:
-                        print(f"Processing remaining {len(failed_files)} failed files individually...")
-                        retry_success = True
-                        
-                        # Process each failed file individually with single file uploader
-                        async with aiohttp.ClientSession(connector=connector) as retry_session:
-                            for local_file, relative_path in list(failed_files):
-                                if not self.upload_record.is_uploaded(relative_path):
-                                    print(f"Retrying file: {relative_path} using single file uploader")
-                                    success = await self.upload_single_file(
-                                        local_file=local_file,
-                                        relative_path=relative_path,
-                                        session=retry_session,
-                                        max_retries=Config.MAX_RETRIES * 2,  # Use more retries for these last files
-                                        retry_delay=Config.INITIAL_RETRY_DELAY
-                                    )
-                                    
-                                    if success:
-                                        failed_files.remove((local_file, relative_path))
-                                        print(f"Successfully uploaded {relative_path} on individual retry")
-                                        last_progress_time = current_time
-                                    else:
-                                        retry_success = False
-                                        print(f"Failed to upload {relative_path} even with individual retry")
-                        
-                        if not failed_files:
-                            print("All remaining files processed successfully!")
-                            break
-                        
-                        if not retry_success:
-                            print(f"Upload completed with {len(failed_files)} unrecoverable failed files")
-                            return False
-                
-                # Check if we need to reset connection due to too many failures
-                if len(failed_files) >= Config.MAX_FAILED_FILES:
-                    print(f"More than {Config.MAX_FAILED_FILES} failed files detected ({len(failed_files)}), resetting connection...")
-                    reset_count += 1
+                    print(f"Processing remaining {len(failed_files)} failed files individually...")
+                    retry_success = True
                     
-                    if reset_count > max_reset_attempts:
-                        print(f"Failed to recover after {max_reset_attempts} connection resets")
-                        return False
-                    
-                    # Reset connection
-                    connection_success = await reset_connection()
-                    
-                    if connection_success:
-                        # Add failed files back to queue
-                        print(f"Re-queueing {len(failed_files)} failed files")
-                        for local_file, relative_path in failed_files:
-                            # Skip if it's somehow been uploaded in the meantime
+                    # Process each failed file individually with single file uploader
+                    async with aiohttp.ClientSession(connector=connector) as retry_session:
+                        for local_file, relative_path in list(failed_files):
                             if not self.upload_record.is_uploaded(relative_path):
-                                await file_queue.put((local_file, relative_path))
-                        
-                        # Clear failed files since they're now in the queue
-                        failed_files.clear()
-                        
-                        # Start new worker tasks
-                        url_workers = [asyncio.create_task(url_worker()) for _ in range(num_url_workers)]
-                        upload_workers = [asyncio.create_task(upload_worker(session)) for _ in range(num_upload_workers)]
-                        
-                        last_progress_time = current_time
-                    else:
-                        print("Failed to reset connection, aborting upload")
+                                print(f"Retrying file: {relative_path} using single file uploader")
+                                success = await self.upload_single_file(
+                                    local_file=local_file,
+                                    relative_path=relative_path,
+                                    session=retry_session,
+                                    max_retries=Config.MAX_RETRIES * 2,  # Use more retries for these last files
+                                    retry_delay=Config.INITIAL_RETRY_DELAY
+                                )
+                                
+                                if success:
+                                    failed_files.remove((local_file, relative_path))
+                                    print(f"Successfully uploaded {relative_path} on individual retry")
+                                    self.last_progress_time = current_time
+                                else:
+                                    retry_success = False
+                                    print(f"Failed to upload {relative_path} even with individual retry")
+                    
+                    if not failed_files:
+                        print("All remaining files processed successfully!")
+                        break
+                    
+                    if not retry_success:
+                        print(f"Upload completed with {len(failed_files)} unrecoverable failed files")
+                        # For now, let's return based on whether *any* files failed the final retry.
                         return False
                 
                 # Wait a bit before checking again
@@ -770,7 +712,7 @@ class ArtifactUploader:
                     print("All workers completed but files remain, starting new workers")
                     url_workers = [asyncio.create_task(url_worker()) for _ in range(num_url_workers)]
                     upload_workers = [asyncio.create_task(upload_worker(session)) for _ in range(num_upload_workers)]
-                    last_progress_time = current_time
+                    self.last_progress_time = current_time
             
             # Clean up any remaining tasks
             await stop_workers()
@@ -783,10 +725,22 @@ class ArtifactUploader:
             return True
 
     async def upload_zarr_files(self, file_paths: List[str]) -> bool:
-        """Upload files to the artifact manager using batch processing."""
-        to_upload = []
+        """
+        Upload zarr files to the artifact manager.
+        
+        Args:
+            file_paths: List of paths to zarr files to upload
+            
+        Returns:
+            bool: True if all uploads were successful, False otherwise
+        """
         for file_path in file_paths:
+            print(f"Processing {file_path}...")
+            
             if os.path.isdir(file_path):
+                # Directory case - walk through the directory and upload files
+                to_upload = []
+                
                 for root, _, files in os.walk(file_path):
                     for file in files:
                         local_file = os.path.join(root, file)
@@ -797,23 +751,151 @@ class ArtifactUploader:
                             base_name = base_name[:-5]  # Remove the .zarr extension
                         relative_path = os.path.join(base_name, rel_path)
                         to_upload.append((local_file, relative_path))
+                
+                self.upload_record.set_total_files(len(to_upload))
+                success = await self.upload_files_in_batches(to_upload)
+                
+                if not success:
+                    return False
             else:
+                # Single file case
                 local_file = file_path
-                # Get basename without .zarr extension for individual files too
                 relative_path = os.path.basename(file_path)
                 if relative_path.endswith('.zarr'):
                     relative_path = relative_path[:-5]  # Remove the .zarr extension
-                to_upload.append((local_file, relative_path))
+                
+                async with aiohttp.ClientSession() as session:
+                    success = await self.upload_single_file(local_file, relative_path, session)
+                    
+                    if not success:
+                        return False
+        
+        return True
 
-        self.upload_record.set_total_files(len(to_upload))
+    async def zip_and_upload_folder(self, folder_path: str, relative_path: str = None, delete_zip_after: bool = True) -> bool:
+        """
+        Zip a folder and upload it as a single file to the artifact manager.
+        
+        Args:
+            folder_path: Path to the folder to zip and upload
+            relative_path: Optional relative path for the zip file in the artifact
+            delete_zip_after: Whether to delete the zip file after uploading
+            
+        Returns:
+            bool: True if upload was successful, False otherwise
+        """
+        if not os.path.exists(folder_path):
+            print(f"Folder {folder_path} does not exist")
+            return False
+            
+        # Use folder name for the zip filename if relative_path not provided
+        if relative_path is None:
+            folder_name = os.path.basename(folder_path)
+            relative_path = folder_name
+            
+        # Ensure the relative path has .zip extension
+        if not relative_path.endswith('.zip'):
+            relative_path += '.zip'
+            
+        # Create the temporary zip file in the parent directory of the folder_path
+        parent_dir = os.path.dirname(folder_path)
+        # Use a more descriptive temp file name if possible
+        temp_zip_base = os.path.basename(folder_path) + ".zip.tmp"
+        temp_zip_path = os.path.join(parent_dir, temp_zip_base)
+        
+        # Define the synchronous zipping function
+        def _create_zip_sync(target_zip_path: str, source_folder: str):
+            print(f"Starting zip creation in background thread: {source_folder} -> {target_zip_path}")
+            try:
+                with zipfile.ZipFile(target_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    for root, _, files in os.walk(source_folder):
+                        for file in files:
+                            file_path = os.path.join(root, file)
+                            # Calculate the arcname (path within the zip file) relative to the *folder being zipped*
+                            arcname = os.path.relpath(file_path, source_folder)
+                            zipf.write(file_path, arcname)
+                zip_size_mb = os.path.getsize(target_zip_path) / (1024 * 1024)
+                print(f"Background zip creation complete: {target_zip_path} ({zip_size_mb:.2f} MB)")
+                return True, None
+            except Exception as e:
+                print(f"Error during background zip creation: {e}")
+                import traceback
+                traceback.print_exc()
+                # Attempt to remove partial zip file on error
+                if os.path.exists(target_zip_path):
+                    try:
+                        os.unlink(target_zip_path)
+                    except Exception as rm_e:
+                        print(f"Warning: Could not remove partial zip file {target_zip_path}: {rm_e}")
+                return False, e
 
-        # Use batch processing for uploads
-        success = await self.upload_files_in_batches(to_upload)
+        try:
+            print(f"Scheduling zip file creation for {folder_path}...")
+            # Run the synchronous zip creation in a separate thread
+            zip_success, zip_error = await asyncio.to_thread(_create_zip_sync, temp_zip_path, folder_path)
 
-        if success:
-            self.upload_record.save()
+            if not zip_success:
+                 print(f"Zip creation failed for {folder_path}: {zip_error}")
+                 return False # Stop if zipping failed
 
-        return success
+            # Check if file exists after thread completion before uploading
+            if not os.path.exists(temp_zip_path):
+                print(f"Error: Temporary zip file {temp_zip_path} not found after thread completion.")
+                return False
+
+            # Upload the zip file
+            print(f"Uploading zip file {temp_zip_path} to {relative_path}...")
+            async with aiohttp.ClientSession() as session:
+                success = await self.upload_single_file(temp_zip_path, relative_path, session)
+                
+            if success:
+                print(f"Successfully uploaded {relative_path}")
+                return True
+            else:
+                print(f"Failed to upload {relative_path}")
+                return False
+                
+        except Exception as e:
+            print(f"Error during zip and upload process: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+        finally:
+            # Clean up the temporary zip file if requested and if it exists
+            if delete_zip_after and os.path.exists(temp_zip_path):
+                try:
+                    os.unlink(temp_zip_path)
+                    print(f"Deleted temporary zip file: {temp_zip_path}")
+                except Exception as e:
+                    print(f"Warning: Could not delete temporary file {temp_zip_path}: {e}")
+
+    async def zip_and_upload_folders(self, folder_paths: List[str], relative_path_prefix: str = "", delete_zips_after: bool = True) -> bool:
+        """
+        Zip multiple folders and upload them as separate zip files to the artifact manager.
+        
+        Args:
+            folder_paths: List of paths to folders to zip and upload
+            relative_path_prefix: Optional prefix for relative paths in the artifact
+            delete_zips_after: Whether to delete the zip files after uploading
+            
+        Returns:
+            bool: True if all uploads were successful, False otherwise
+        """
+        if not await self.ensure_connected():
+            return False
+            
+        all_success = True
+        for folder_path in folder_paths:
+            folder_name = os.path.basename(folder_path)
+            # Extract date time from path to use as a meaningful name
+            date_time = self.extract_date_time_from_path(folder_path)
+            rel_path = os.path.join(relative_path_prefix, date_time if date_time else folder_name)
+            
+            success = await self.zip_and_upload_folder(folder_path, rel_path, delete_zips_after)
+            if not success:
+                all_success = False
+                
+        return all_success
 
     async def upload_treatment_data(self, source_dirs: List[str]) -> bool:
         """Upload treatment data files to the artifact manager using batch processing."""
@@ -846,7 +928,7 @@ async def upload_zarr_example() -> None:
     ]
     
     uploader = ArtifactUploader(
-        artifact_alias="image-map-20250410-treatment",
+        artifact_alias="agent-lens/image-map-20250429-treatment",
         record_file="zarr_upload_record.json"
     )
     
@@ -856,7 +938,7 @@ async def upload_zarr_example() -> None:
         # Commit the dataset if all files were uploaded successfully
         from .gallery_manager import GalleryManager
         gallery_manager = GalleryManager()
-        await gallery_manager.commit_dataset("image-map-20250410-treatment")
+        await gallery_manager.commit_dataset("")
         await gallery_manager.connection.disconnect()
 
 async def upload_treatment_example() -> None:

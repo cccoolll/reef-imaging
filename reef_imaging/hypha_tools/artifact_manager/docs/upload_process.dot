@@ -38,7 +38,14 @@ digraph ReefImagingUploadProcess {
         find_zarr [label="Find matching zarr file"];
         upload_zarr [label="Upload zarr file"];
         staging_zarr [label="Put artifact in\nstaging mode"];
-        batch_upload [label="Upload zarr files\nin batches"];
+        
+        // New nodes for channel-based upload
+        get_channels [label="Get channels from zarr file"];
+        channel_loop [label="For each channel"];
+        zip_channel [label="Zip individual channel"];
+        upload_channel [label="Upload channel as\n{timestamp}/{channel}.zip"];
+        channel_success [label="All channels\nuploaded?", shape=diamond];
+        
         commit_zarr [label="Commit dataset"];
         cleanup_zarr [label="Clean up zarr file"];
         stitch_record [label="Save record of\nprocessed folder"];
@@ -51,7 +58,12 @@ digraph ReefImagingUploadProcess {
         stitch_success -> find_zarr [label="Yes"];
         stitch_success -> stitch_next [label="No", style=dashed, color=red];
         find_zarr -> upload_zarr;
-        upload_zarr -> staging_zarr -> batch_upload -> commit_zarr -> cleanup_zarr -> stitch_record -> stitch_next;
+        upload_zarr -> staging_zarr -> get_channels -> channel_loop;
+        channel_loop -> zip_channel -> upload_channel -> channel_loop [constraint=false, label="Next channel"];
+        channel_loop -> channel_success;
+        channel_success -> commit_zarr [label="Yes"];
+        channel_success -> stitch_next [label="No", style=dashed, color=red];
+        commit_zarr -> cleanup_zarr -> stitch_record -> stitch_next;
     }
     
     // Hypha Connection Management
@@ -142,7 +154,7 @@ digraph ReefImagingUploadProcess {
     treatment_record [label="treatment_upload_record.json"];
     
     stitch_record -> stitch_upload_progress [style=dashed];
-    batch_upload -> zarr_upload_record [style=dashed];
+    upload_channel -> zarr_upload_record [style=dashed];
     treatment_record -> treatment_progress [style=dashed];
     treatment_upload -> treatment_record [style=dashed];
     
@@ -182,7 +194,7 @@ digraph ReefImagingUploadProcess {
     
     // Connect uploader process to existing processes
     treatment_upload -> uploader_start [lhead=cluster_uploader, style=dashed];
-    upload_zarr -> uploader_start [lhead=cluster_uploader, style=dashed];
+    upload_channel -> uploader_start [lhead=cluster_uploader, style=dashed];
     
     // Queue Management
     subgraph cluster_queue {
@@ -235,4 +247,20 @@ digraph ReefImagingUploadProcess {
     
     // Demonstrate connection reset after upload failures
     retry_failed -> connect [style=dashed, color=red, label="Reset Connection after failures"];
+    
+    // Add channel-specific notes
+    subgraph cluster_channels {
+        label="Channel-Based Upload Benefits";
+        style="rounded,filled";
+        fillcolor=thistle;
+        
+        channel_note1 [label="1. Improved fault tolerance", fillcolor=white];
+        channel_note2 [label="2. Optimized data retrieval", fillcolor=white];
+        channel_note3 [label="3. Parallel processing", fillcolor=white];
+        
+        channel_note1 -> channel_note2 -> channel_note3 [style=invis];
+    }
+    
+    // Connect the channel notes to the process
+    channel_loop -> cluster_channels [style=dashed, lhead=cluster_channels, constraint=false];
 } 

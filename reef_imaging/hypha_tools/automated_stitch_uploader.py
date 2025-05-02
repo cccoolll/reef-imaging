@@ -5,7 +5,7 @@ import asyncio
 import json
 import shutil
 import re
-import random  # Add this import
+import random
 from datetime import datetime
 from typing import List, Optional, Tuple
 from dotenv import load_dotenv
@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 import pandas as pd
 import zarr
+import tempfile
 
 # Import shared tools from artifact_manager
 from artifact_manager.core import Config, HyphaConnection
@@ -21,7 +22,7 @@ from artifact_manager.stitch_manager import StitchManager, ImageFileParser
 
 # Constants
 BASE_DIR = "/media/reef/harddisk"
-EXPERIMENT_ID = "20250410-fucci-time-lapse-scan"
+EXPERIMENT_ID = "20250429-scan-time-lapse"
 STITCHED_DIR = "/media/reef/harddisk/test_stitch_zarr"
 STITCH_RECORD_FILE = "stitch_upload_progress.txt"
 UPLOAD_RECORD_FILE = "zarr_upload_record.json"
@@ -29,10 +30,10 @@ CHECK_INTERVAL = 60  # Check for new folders every 60 seconds
 client_id = "reef-client-stitch-uploader"
 # Load environment variables
 load_dotenv()
-ARTIFACT_ALIAS = "image-map-20250410-treatment-full"
+ARTIFACT_ALIAS = "agent-lens/image-map-20250429-treatment"
 # Timeout and retry settings
 CONNECTION_TIMEOUT = 60  # Timeout for connection operations in seconds
-OPERATION_TIMEOUT = 180  # Timeout for Hypha operations in seconds (increased from 60)
+OPERATION_TIMEOUT = 3600  # Timeout for Hypha operations in seconds (increased from 60)
 MAX_RETRIES = 300  # Maximum retries for operations
 # Optimized concurrency settings
 BATCH_SIZE = 30  # Batch size for file uploads
@@ -92,8 +93,10 @@ def get_zarr_files() -> List[str]:
 
 
 def cleanup_zarr_file(zarr_file: str):
-    """Delete a zarr file."""
+    """Delete a zarr file and its associated .done file."""
     zarr_path = os.path.join(STITCHED_DIR, zarr_file)
+    done_file = os.path.join(STITCHED_DIR, f"{zarr_file}.done")
+    
     try:
         print(f"Removing zarr file: {zarr_path}")
         if os.path.isdir(zarr_path):
@@ -101,8 +104,9 @@ def cleanup_zarr_file(zarr_file: str):
         else:
             os.remove(zarr_path)
         print(f"Successfully removed {zarr_path}")
+        
     except Exception as e:
-        print(f"Error removing {zarr_path}: {e}")
+        print(f"Error during cleanup: {e}")
 
 
 def extract_datetime_from_folder(folder_name: str) -> Optional[str]:
@@ -206,8 +210,47 @@ def stitch_folder(folder_path: str) -> bool:
         return False
 
 
+async def upload_zarr_channel(zarr_path: str, channel: str, uploader: ArtifactUploader) -> bool:
+    """Upload a single channel from a zarr file to the artifact manager."""
+    try:
+        # Get the base name for the relative path
+        zarr_file = os.path.basename(zarr_path)
+        base_name = zarr_file.replace('.zarr', '')
+            
+        # The full path to the channel in the zarr file
+        channel_path = os.path.join(zarr_path, channel)
+        
+        if not os.path.exists(channel_path):
+            print(f"Channel directory {channel_path} not found in zarr file")
+            return False
+        
+        # Set the relative path for upload - this will determine how it's stored in the artifact
+        relative_path = f"{base_name}/{channel}.zip"
+        print(f"Uploading channel {channel} as {relative_path}")
+        
+        # Use the zip_and_upload_folder method from the uploader
+        success = await uploader.zip_and_upload_folder(
+            folder_path=channel_path,
+            relative_path=relative_path,
+            delete_zip_after=True
+        )
+        
+        if success:
+            print(f"Successfully uploaded channel {channel}")
+        else:
+            print(f"Failed to upload channel {channel}")
+            
+        return success
+            
+    except Exception as e:
+        print(f"Error uploading channel {channel}: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 async def upload_zarr_file(zarr_file: str) -> bool:
-    """Upload a zarr file to the artifact manager."""
+    """Upload a zarr file to the artifact manager by zipping and uploading each channel separately."""
     zarr_path = os.path.join(STITCHED_DIR, zarr_file)
     if not os.path.exists(zarr_path):
         print(f"Zarr file {zarr_path} does not exist")
@@ -320,107 +363,85 @@ async def upload_zarr_file(zarr_file: str) -> bool:
             if connection: await connection.disconnect()
             return False
         
-        # Add zarr path to the list of zarr files to upload
-        zarr_paths = [zarr_path]
+        # Get the channels from the zarr file (top-level directories in zarr)
+        channels = [d for d in os.listdir(zarr_path) if os.path.isdir(os.path.join(zarr_path, d))]
+        print(f"Found channels in zarr file: {channels}")
         
-        # Prepare a list of files from the zarr directory for optimized batch upload
-        to_upload = []
-        if os.path.isdir(zarr_path):
-            print(f"Processing zarr directory: {zarr_path}")
-            for root, _, files in os.walk(zarr_path):
-                for file in files:
-                    local_file = os.path.join(root, file)
-                    rel_path = os.path.relpath(local_file, zarr_path)
-                    # Get basename without .zarr extension
-                    base_name = os.path.basename(zarr_path)
-                    if base_name.endswith('.zarr'):
-                        base_name = base_name[:-5]  # Remove the .zarr extension
-                    relative_path = os.path.join(base_name, rel_path)
-                    to_upload.append((local_file, relative_path))
-        else:
-            # Handle single file case (unlikely for zarr, but just in case)
-            local_file = zarr_path
-            relative_path = os.path.basename(zarr_path)
-            if relative_path.endswith('.zarr'):
-                relative_path = relative_path[:-5]  # Remove the .zarr extension
-            to_upload.append((local_file, relative_path))
-            
-        print(f"Found {len(to_upload)} files to upload from zarr structure")
-        uploader.upload_record.set_total_files(len(to_upload))
+        # Upload each channel separately as its own zip file
+        all_success = True
+        for channel in channels:
+            print(f"Processing channel: {channel}")
+            channel_success = await upload_zarr_channel(zarr_path, channel, uploader)
+            if not channel_success:
+                print(f"Failed to upload channel {channel}")
+                all_success = False
+                break
         
-        # Use optimized batch upload with higher concurrency
-        success = await uploader.upload_files_in_batches(to_upload, batch_size=BATCH_SIZE)
+        if not all_success:
+            print("Failed to upload all channels")
+            if connection: await connection.disconnect()
+            return False
         
         # Commit the dataset
-        if success:
-            commit_success = False
-            commit_attempts = 0
-            
-            while not commit_success and commit_attempts < Config.MAX_COMMIT_ATTEMPTS: # Use config value
-                try:
-                    # Refresh connection using uploader's method before commit
-                    print(f"Attempting to refresh connection via uploader before commit (attempt {commit_attempts + 1}/{Config.MAX_COMMIT_ATTEMPTS})...")
-                    if connection: await connection.disconnect() # Ensure disconnected first
-                    # Cancel any lingering connection task from the uploader itself
-                    if uploader.connection_task and not uploader.connection_task.done():
-                        uploader.connection_task.cancel()
-                        try:
-                            await asyncio.wait_for(asyncio.shield(uploader.connection_task), timeout=1)
-                        except (asyncio.CancelledError, asyncio.TimeoutError):
-                            pass
-                        uploader.connection_task = None
+        commit_success = False
+        commit_attempts = 0
+        
+        while not commit_success and commit_attempts < Config.MAX_COMMIT_ATTEMPTS:
+            try:
+                # Refresh connection using uploader's method before commit
+                print(f"Attempting to refresh connection via uploader before commit (attempt {commit_attempts + 1}/{Config.MAX_COMMIT_ATTEMPTS})...")
+                if connection: await connection.disconnect() # Ensure disconnected first
+                # Cancel any lingering connection task from the uploader itself
+                if uploader.connection_task and not uploader.connection_task.done():
+                    uploader.connection_task.cancel()
+                    try:
+                        await asyncio.wait_for(asyncio.shield(uploader.connection_task), timeout=1)
+                    except (asyncio.CancelledError, asyncio.TimeoutError):
+                        pass
+                    uploader.connection_task = None
 
-                    connect_success = await uploader.connect_with_retry(client_id=client_id)
-                    if not connect_success:
-                        print("Failed to reconnect before commit")
-                        commit_attempts += 1
-                        await asyncio.sleep(min(Config.INITIAL_RETRY_DELAY * (2 ** commit_attempts), Config.MAX_RETRY_DELAY)) # Exponential backoff
-                        continue # Try reconnecting again
-                        
-                    # Update connection object reference after successful reconnect
-                    connection = uploader.connection
-                    if not connection or not connection.artifact_manager:
-                        print("Failed to get valid connection for commit after reconnect.")
-                        commit_attempts += 1
-                        await asyncio.sleep(min(Config.INITIAL_RETRY_DELAY * (2 ** commit_attempts), Config.MAX_RETRY_DELAY))
-                        continue
-                    
-                    # Commit the dataset with timeout
-                    print(f"Committing dataset {ARTIFACT_ALIAS}...")
-                    await asyncio.wait_for(
-                        connection.artifact_manager.commit(ARTIFACT_ALIAS),
-                        timeout=Config.MAX_COMMIT_DELAY # Use config value
-                    )
-                    print("Dataset committed successfully.")
-                    commit_success = True
-                    
-                except asyncio.TimeoutError:
+                connect_success = await uploader.connect_with_retry(client_id=client_id)
+                if not connect_success:
+                    print("Failed to reconnect before commit")
                     commit_attempts += 1
-                    print(f"Commit operation timed out (attempt {commit_attempts}/{Config.MAX_COMMIT_ATTEMPTS})")
-                    if connection: await connection.disconnect()
-                    await asyncio.sleep(min(Config.INITIAL_RETRY_DELAY * (2 ** commit_attempts), Config.MAX_RETRY_DELAY)) # Exponential backoff
+                    await asyncio.sleep(min(Config.INITIAL_RETRY_DELAY * (2 ** commit_attempts), Config.MAX_RETRY_DELAY))
+                    continue
                     
-                except Exception as e:
+                # Update connection object reference after successful reconnect
+                connection = uploader.connection
+                if not connection or not connection.artifact_manager:
+                    print("Failed to get valid connection for commit after reconnect.")
                     commit_attempts += 1
-                    print(f"Error committing dataset (attempt {commit_attempts}/{Config.MAX_COMMIT_ATTEMPTS}): {str(e)}")
-                    if connection: await connection.disconnect()
-                    await asyncio.sleep(min(Config.INITIAL_RETRY_DELAY * (2 ** commit_attempts), Config.MAX_RETRY_DELAY)) # Exponential backoff
-            
-            if not commit_success:
-                print(f"WARNING: Failed to commit the dataset {ARTIFACT_ALIAS} after {Config.MAX_COMMIT_ATTEMPTS} attempts.")
-                # Decide if failure to commit should return False overall
-                # For now, let's return False if commit fails.
-                if connection: await connection.disconnect() # Clean up before returning
-                return False
+                    await asyncio.sleep(min(Config.INITIAL_RETRY_DELAY * (2 ** commit_attempts), Config.MAX_RETRY_DELAY))
+                    continue
                 
-        # If upload itself failed, return False
-        if not success:
-             print(f"Upload process for {zarr_file} failed.")
-             if connection: await connection.disconnect()
-             return False
-
-        # If upload and commit (if applicable) were successful
-        return True 
+                # Commit the dataset with timeout
+                print(f"Committing dataset {ARTIFACT_ALIAS}...")
+                await asyncio.wait_for(
+                    connection.artifact_manager.commit(ARTIFACT_ALIAS),
+                    timeout=Config.MAX_COMMIT_DELAY
+                )
+                print("Dataset committed successfully.")
+                commit_success = True
+                
+            except asyncio.TimeoutError:
+                commit_attempts += 1
+                print(f"Commit operation timed out (attempt {commit_attempts}/{Config.MAX_COMMIT_ATTEMPTS})")
+                if connection: await connection.disconnect()
+                await asyncio.sleep(min(Config.INITIAL_RETRY_DELAY * (2 ** commit_attempts), Config.MAX_RETRY_DELAY))
+                
+            except Exception as e:
+                commit_attempts += 1
+                print(f"Error committing dataset (attempt {commit_attempts}/{Config.MAX_COMMIT_ATTEMPTS}): {str(e)}")
+                if connection: await connection.disconnect()
+                await asyncio.sleep(min(Config.INITIAL_RETRY_DELAY * (2 ** commit_attempts), Config.MAX_RETRY_DELAY))
+        
+        if not commit_success:
+            print(f"WARNING: Failed to commit the dataset {ARTIFACT_ALIAS} after {Config.MAX_COMMIT_ATTEMPTS} attempts.")
+            if connection: await connection.disconnect()
+            return False
+            
+        return True
         
     except Exception as e:
         print(f"Error during zarr file processing {zarr_file}: {e}")

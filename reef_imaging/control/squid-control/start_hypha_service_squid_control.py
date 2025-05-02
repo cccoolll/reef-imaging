@@ -24,6 +24,7 @@ from hypha_tools.chatbot.aask import aask
 import base64
 from pydantic import Field
 from hypha_rpc.utils.schema import schema_function
+import signal
 
 dotenv.load_dotenv()  
 ENV_FILE = dotenv.find_dotenv()  
@@ -212,10 +213,7 @@ class Microscope:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to move by distance: {e}")
-            return {
-                "success": False,
-                "message": f"Failed to move by distance: {e}"
-            }
+            raise e
 
     @schema_function(skip_self=True)
     def move_to_position(self, x:float=Field(1.0,description="Unit: milimeter"), y:float=Field(1.0,description="Unit: milimeter"), z:float=Field(1.0,description="Unit: milimeter"), context=None):
@@ -274,10 +272,7 @@ class Microscope:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to move to position: {e}")
-            return {
-                "success": False,
-                "message": f"Failed to move to position: {e}"
-            }
+            raise e
 
     @schema_function(skip_self=True)
     def get_status(self, context=None):
@@ -314,7 +309,7 @@ class Microscope:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get status: {e}")
-            return {}
+            raise e
 
     @schema_function(skip_self=True)
     def update_parameters_from_client(self, new_parameters: dict=Field(description="the dictionary parameters user want to update"), context=None):
@@ -347,7 +342,7 @@ class Microscope:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to update parameters: {e}")
-            return {"success": False, "message": f"Failed to update parameters: {e}"}
+            raise e
 
     @schema_function(skip_self=True)
     async def one_new_frame(self, exposure_time: int=Field(100, description="Exposure time in milliseconds"), channel: int=Field(0, description="Light source (0 for Bright Field, Fluorescence channels: 11 for 405 nm, 12 for 488 nm, 13 for 638nm, 14 for 561 nm, 15 for 730 nm)"), intensity: int=Field(50, description="Light intensity"), context=None):
@@ -397,7 +392,7 @@ class Microscope:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get new frame: {e}")
-            return None
+            raise e
 
     @schema_function(skip_self=True)
     async def snap(self, exposure_time: int=Field(100, description="Exposure time, in milliseconds"), channel: int=Field(0, description="Light source (0 for Bright Field, Fluorescence channels: 11 for 405 nm, 12 for 488 nm, 13 for 638nm, 14 for 561 nm, 15 for 730 nm)"), intensity: int=Field(50, description="Intensity of the illumination source"), context=None):
@@ -441,7 +436,7 @@ class Microscope:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to snap image: {e}")
-            return None
+            raise e
 
     @schema_function(skip_self=True)
     def open_illumination(self, context=None):
@@ -459,7 +454,7 @@ class Microscope:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to open illumination: {e}")
-            return f"Failed to open illumination: {e}"
+            raise e
 
     @schema_function(skip_self=True)
     def close_illumination(self, context=None):
@@ -477,7 +472,7 @@ class Microscope:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to close illumination: {e}")
-            return f"Failed to close illumination: {e}"
+            raise e
 
     @schema_function(skip_self=True)
     def scan_well_plate(self, well_plate_type: str=Field("96", description="Type of the well plate (e.g., '6', '12', '24', '96', '384')"), illuminate_channels: List[str]=Field(default_factory=lambda: ['BF LED matrix full','Fluorescence 488 nm Ex','Fluorescence 561 nm Ex'], description="Light source to illuminate the well plate"), do_contrast_autofocus: bool=Field(False, description="Whether to do contrast based autofocus"), do_reflection_af: bool=Field(True, description="Whether to do reflection based autofocus"), scanning_zone: List[tuple]=Field(default_factory=lambda: [(0,0),(0,0)], description="The scanning zone of the well plate, for 91 well plate, it should be[(0,0),(7,11)] "), Nx: int=Field(3, description="Number of columns to scan"), Ny: int=Field(3, description="Number of rows to scan"), action_ID: str=Field('testPlateScan', description="The ID of the action"), context=None):
@@ -498,7 +493,7 @@ class Microscope:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to scan well plate: {e}")
-            return f"Failed to scan well plate: {e}"
+            raise e
     
     @schema_function(skip_self=True)
     def scan_well_plate_simulated(self, context=None):
@@ -515,7 +510,7 @@ class Microscope:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to scan well plate: {e}")
-            return f"Failed to scan well plate: {e}"
+            raise e
 
 
     @schema_function(skip_self=True)
@@ -534,7 +529,7 @@ class Microscope:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to set illumination: {e}")
-            return f"Failed to set illumination: {e}"
+            raise e
     
     @schema_function(skip_self=True)
     def set_camera_exposure(self, exposure_time: int=Field(100, description="Exposure time in milliseconds"), context=None):
@@ -552,7 +547,7 @@ class Microscope:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to set camera exposure: {e}")
-            return f"Failed to set camera exposure: {e}"
+            raise e
 
     @schema_function(skip_self=True)
     def stop_scan(self, context=None):
@@ -571,7 +566,7 @@ class Microscope:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to stop scan: {e}")
-            return f"Failed to stop scan: {e}"
+            raise e
 
     @schema_function(skip_self=True)
     def home_stage(self, context=None):
@@ -589,7 +584,7 @@ class Microscope:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to home stage: {e}")
-            return f"Failed to home stage: {e}"
+            raise e
     
     @schema_function(skip_self=True)
     def return_stage(self,context=None):
@@ -607,7 +602,7 @@ class Microscope:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to return stage: {e}")
-            return f"Failed to return stage: {e}"
+            raise e
     
     @schema_function(skip_self=True)
     def move_to_loading_position(self, context=None):
@@ -625,7 +620,7 @@ class Microscope:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to move to loading position: {e}")
-            return f"Failed to move to loading position: {e}"
+            raise e
 
     @schema_function(skip_self=True)
     def auto_focus(self, context=None):
@@ -643,7 +638,7 @@ class Microscope:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to auto focus: {e}")
-            return f"Failed to auto focus: {e}"
+            raise e
     
     @schema_function(skip_self=True)
     def do_laser_autofocus(self, context=None):
@@ -661,7 +656,7 @@ class Microscope:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to do laser autofocus: {e}")
-            return f"Failed to do laser autofocus: {e}"
+            raise e
 
     @schema_function(skip_self=True)
     def navigate_to_well(self, row: str=Field('A', description="Row number of the well position (e.g., 'A')"), col: int=Field(1, description="Column number of the well position"), wellplate_type: str=Field('96', description="Type of the well plate (e.g., '6', '12', '24', '96', '384')"), context=None):
@@ -681,7 +676,7 @@ class Microscope:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to navigate to well: {e}")
-            return f"Failed to navigate to well: {e}"
+            raise e
 
     @schema_function(skip_self=True)
     def get_chatbot_url(self, context=None):
@@ -698,7 +693,7 @@ class Microscope:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get chatbot URL: {e}")
-            return None
+            raise e
     
     class MoveByDistanceInput(BaseModel):
         """Move the stage by a distance in x, y, z axis."""
@@ -820,10 +815,7 @@ class Microscope:
                 if self.service_id:
                     service = await self.server.get_service(self.service_id)
                     # Try a simple operation to verify service is working
-                    hello_world_result = await service.hello_world()
-                    if hello_world_result != "Hello world":
-                        logger.error(f"Service health check failed: {hello_world_result}")
-                        raise Exception("Service not healthy")
+                    await service.hello_world()
                     #print("Service health check passed")
                 else:
                     logger.info("Service ID not set, waiting for service registration")
@@ -937,21 +929,26 @@ class Microscope:
         logger.info(f"Extension service registered with id: {svc.id}, you can visit the service at:\n {self.chatbot_service_url}")
 
     async def setup(self):
+        data_store_token = os.environ.get("SQUID_WORKSPACE_TOKEN")
+        data_store_server = await connect_to_server(
+                {"server_url": "https://hypha.aicell.io", "token": data_store_token, "workspace": "squid-control", "ping_interval": None}
+            )
         if not self.service_id:
             raise ValueError("MICROSCOPE_SERVICE_ID is not set in the environment variables.")
         if self.is_local:
             token = os.environ.get("REEF_LOCAL_TOKEN")
+            workspace = os.environ.get("REEF_LOCAL_WORKSPACE")
             server = await connect_to_server(
-                {"server_url": self.server_url, "token": token,  "ping_interval": None}
+                {"server_url": self.server_url, "token": token, "workspace": workspace, "ping_interval": None}
             )
         else:
             try:  
-                token = os.environ.get("SQUID_WORKSPACE_TOKEN")  
+                token = os.environ.get("REEF_WORKSPACE_TOKEN")  
             except:  
                 token = await login({"server_url": self.server_url})
             
             server = await connect_to_server(
-                {"server_url": self.server_url, "token": token, "workspace": "squid-control",  "ping_interval": None}
+                {"server_url": self.server_url, "token": token, "workspace": "reef-imaging",  "ping_interval": None}
             )
         if self.is_simulation:
             await self.start_hypha_service(server, service_id=self.service_id)
@@ -963,12 +960,12 @@ class Microscope:
             chatbot_id = f"squid-control-chatbot-real-{self.service_id}"
         self.datastore = HyphaDataStore()
         try:
-            await self.datastore.setup(server, service_id=datastore_id)
+            await self.datastore.setup(data_store_server, service_id=datastore_id)
         except TypeError as e:
             if "Future" in str(e):
                 # If config is a Future, wait for it to resolve
                 config = await asyncio.wrap_future(server.config)
-                await self.datastore.setup(server, service_id=datastore_id, config=config)
+                await self.datastore.setup(data_store_server, service_id=datastore_id, config=config)
             else:
                 raise e
     
@@ -979,6 +976,16 @@ class Microscope:
             chatbot_token = await login({"server_url": chatbot_server_url})
         chatbot_server = await connect_to_server({"server_url": chatbot_server_url, "token": chatbot_token,  "ping_interval": None})
         await self.start_chatbot_service(chatbot_server, chatbot_id)
+
+# Define a signal handler for graceful shutdown
+def signal_handler(sig, frame):
+    logger.info('Signal received, shutting down gracefully...')
+    microscope.squidController.close()
+    sys.exit(0)
+
+# Register the signal handler for SIGINT and SIGTERM
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

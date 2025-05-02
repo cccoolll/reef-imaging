@@ -94,23 +94,47 @@ class MirrorRoboticArmService:
 
     async def check_service_health(self):
         """Check if the service is healthy and rerun setup if needed"""
+        logger.info("Starting service health check task")
         while True:
             try:
                 # Try to get the service status
                 if self.cloud_service_id:
                     service = await self.cloud_server.get_service(self.cloud_service_id)
                     # Try a simple operation to verify service is working
-                    hello_world_result = await service.hello_world()
+                    
+                    hello_world_result = await asyncio.wait_for(service.hello_world(), timeout=10)
                     if hello_world_result != "Hello world":
                         logger.error(f"Service health check failed: {hello_world_result}")
                         raise Exception("Service not healthy")
                 else:
                     logger.info("Service ID not set, waiting for service registration")
+                
+                # Always check local service regardless of whether it's None
+                try:
+                    if self.local_service is None:
+                        logger.info("Local service connection lost, attempting to reconnect")
+                        await self.connect_to_local_service()
+                        if self.local_service is None:
+                            raise Exception("Failed to connect to local service")
                     
-                # Check local service connection
-                if self.local_service is None:
-                    logger.info("Local service connection lost, attempting to reconnect")
-                    await self.connect_to_local_service()
+                    #logger.info("Checking local service health with timeout, if timeout, local service is not healthy...")
+                    try:
+                        local_hello_world_result = await asyncio.wait_for(self.local_service.hello_world(), timeout=10)
+                    except asyncio.TimeoutError:
+                        logger.error("Local service health check timed out, assuming it's not healthy")
+                        raise Exception("Local service not healthy")
+                    
+                    #logger.info(f"Local service response: {local_hello_world_result}")
+                    
+                    if local_hello_world_result != "Hello world":
+                        logger.error(f"Local service health check failed: {local_hello_world_result}")
+                        raise Exception("Local service not healthy")
+                    
+                    #logger.info("Local service health check passed")
+                except Exception as e:
+                    logger.error(f"Local service health check failed: {e}")
+                    self.local_service = None  # Reset connection so it will reconnect next time
+                    raise Exception(f"Local service not healthy: {e}")
             except Exception as e:
                 logger.error(f"Service health check failed: {e}")
                 logger.info("Attempting to rerun setup...")
@@ -141,7 +165,7 @@ class MirrorRoboticArmService:
                         logger.error(f"Failed to rerun setup: {setup_error}")
                         await asyncio.sleep(30)  # Wait before retrying
             
-            await asyncio.sleep(30)  # Check every half minute
+            await asyncio.sleep(10)  # Check every half minute
 
     async def start_hypha_service(self, server):
         self.cloud_server = server
@@ -186,9 +210,6 @@ class MirrorRoboticArmService:
         id = svc.id.split(":")[1]
 
         logger.info(f"You can also test the service via the HTTP proxy: {self.cloud_server_url}/{server.config.workspace}/services/{id}")
-
-        # Start the health check task
-        asyncio.create_task(self.check_service_health())
 
     async def setup(self):
         # Connect to cloud workspace
@@ -243,7 +264,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to move sample from microscope1 to incubator: {e}")
-            return False
+            raise e
 
     async def move_sample_from_incubator_to_microscope1(self):
         """Mirror function for move_sample_from_incubator_to_microscope1"""
@@ -259,7 +280,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to move sample from incubator to microscope1: {e}")
-            return False
+            raise e
 
     async def grab_sample_from_microscope1(self):
         """Mirror function for grab_sample_from_microscope1"""
@@ -275,7 +296,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to grab sample from microscope1: {e}")
-            return False
+            raise e
 
     async def grab_sample_from_incubator(self):
         """Mirror function for grab_sample_from_incubator"""
@@ -291,7 +312,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to grab sample from incubator: {e}")
-            return False
+            raise e
 
     async def put_sample_on_microscope1(self):
         """Mirror function for put_sample_on_microscope1"""
@@ -307,7 +328,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to put sample on microscope1: {e}")
-            return False
+            raise e
 
     async def put_sample_on_incubator(self):
         """Mirror function for put_sample_on_incubator"""
@@ -323,7 +344,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to put sample on incubator: {e}")
-            return False
+            raise e
 
     async def transport_from_incubator_to_microscope1(self):
         """Mirror function for transport_from_incubator_to_microscope1"""
@@ -339,7 +360,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to transport from incubator to microscope1: {e}")
-            return False
+            raise e
 
     async def transport_from_microscope1_to_incubator(self):
         """Mirror function for transport_from_microscope1_to_incubator"""
@@ -355,7 +376,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to transport from microscope1 to incubator: {e}")
-            return False
+            raise e
 
     async def connect(self):
         """Mirror function for connect"""
@@ -371,7 +392,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to connect: {e}")
-            return False
+            raise e
 
     async def disconnect(self):
         """Mirror function for disconnect"""
@@ -387,7 +408,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to disconnect: {e}")
-            return False
+            raise e
 
     async def halt(self):
         """Mirror function for halt"""
@@ -403,7 +424,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to halt: {e}")
-            return False
+            raise e
 
     async def get_all_joints(self):
         """Mirror function for get_all_joints"""
@@ -419,7 +440,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get all joints: {e}")
-            return {}
+            raise e
 
     async def get_all_positions(self):
         """Mirror function for get_all_positions"""
@@ -435,7 +456,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get all positions: {e}")
-            return {}
+            raise e
 
     async def set_alarm(self, state=1):
         """Mirror function for set_alarm"""
@@ -451,7 +472,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to set alarm: {e}")
-            return False
+            raise e
 
     async def light_on(self):
         """Mirror function for light_on"""
@@ -467,7 +488,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to turn on light: {e}")
-            return False
+            raise e
 
     async def light_off(self):
         """Mirror function for light_off"""
@@ -483,7 +504,7 @@ class MirrorRoboticArmService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to turn off light: {e}")
-            return False
+            raise e
 
     async def get_actions(self):
         """Mirror function for get_actions"""
@@ -495,7 +516,7 @@ class MirrorRoboticArmService:
             return result
         except Exception as e:
             logger.error(f"Failed to get actions: {e}")
-            return {"actions": []}
+            raise e
 
     async def execute_action(self, action_id):
         """Mirror function for execute_action"""
@@ -507,7 +528,7 @@ class MirrorRoboticArmService:
             return result
         except Exception as e:
             logger.error(f"Failed to execute action: {e}")
-            return False
+            raise e
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -523,6 +544,8 @@ if __name__ == "__main__":
         try:
             mirror_service.setup_task = asyncio.create_task(mirror_service.setup())
             await mirror_service.setup_task
+            # Start the health check task after setup is complete
+            asyncio.create_task(mirror_service.check_service_health())
         except Exception:
             traceback.print_exc()
 

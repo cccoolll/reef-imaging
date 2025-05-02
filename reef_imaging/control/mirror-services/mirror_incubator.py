@@ -89,23 +89,41 @@ class MirrorIncubatorService:
 
     async def check_service_health(self):
         """Check if the service is healthy and rerun setup if needed"""
+        logger.info("Starting service health check task")
         while True:
             try:
                 # Try to get the service status
                 if self.cloud_service_id:
                     service = await self.cloud_server.get_service(self.cloud_service_id)
                     # Try a simple operation to verify service is working
-                    hello_world_result = await service.hello_world()
+                    hello_world_result = await asyncio.wait_for(service.hello_world(), timeout=10)
                     if hello_world_result != "Hello world":
                         logger.error(f"Service health check failed: {hello_world_result}")
                         raise Exception("Service not healthy")
                 else:
                     logger.info("Service ID not set, waiting for service registration")
                     
-                # Check local service connection
-                if self.local_service is None:
-                    logger.info("Local service connection lost, attempting to reconnect")
-                    await self.connect_to_local_service()
+                # Always check local service regardless of whether it's None
+                try:
+                    if self.local_service is None:
+                        logger.info("Local service connection lost, attempting to reconnect")
+                        await self.connect_to_local_service()
+                        if self.local_service is None:
+                            raise Exception("Failed to connect to local service")
+                    
+                    #logger.info("Checking local service health...")
+                    local_hello_world_result = await asyncio.wait_for(self.local_service.hello_world(), timeout=10)
+                    #logger.info(f"Local service response: {local_hello_world_result}")
+                    
+                    if local_hello_world_result != "Hello world":
+                        logger.error(f"Local service health check failed: {local_hello_world_result}")
+                        raise Exception("Local service not healthy")
+                    
+                    #logger.info("Local service health check passed")
+                except Exception as e:
+                    logger.error(f"Local service health check failed: {e}")
+                    self.local_service = None  # Reset connection so it will reconnect next time
+                    raise Exception(f"Local service not healthy: {e}")
             except Exception as e:
                 logger.error(f"Service health check failed: {e}")
                 logger.info("Attempting to rerun setup...")
@@ -136,7 +154,7 @@ class MirrorIncubatorService:
                         logger.error(f"Failed to rerun setup: {setup_error}")
                         await asyncio.sleep(30)  # Wait before retrying
             
-            await asyncio.sleep(30)  # Check every half minute
+            await asyncio.sleep(10)  # Check more frequently (was 30)
 
     async def start_hypha_service(self, server):
         self.cloud_server = server
@@ -174,8 +192,7 @@ class MirrorIncubatorService:
 
         logger.info(f"You can also test the service via the HTTP proxy: {self.cloud_server_url}/{server.config.workspace}/services/{id}")
 
-        # Start the health check task
-        asyncio.create_task(self.check_service_health())
+
 
     async def setup(self):
         # Connect to cloud workspace
@@ -230,7 +247,7 @@ class MirrorIncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to initialize: {e}")
-            return f"Failed to initialize: {e}"
+            raise e
 
     async def put_sample_from_transfer_station_to_slot(self, slot: int = 5):
         """Mirror function for put_sample_from_transfer_station_to_slot"""
@@ -246,7 +263,7 @@ class MirrorIncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to put sample from transfer station to slot: {e}")
-            return f"Failed to put sample from transfer station to slot: {e}"
+            raise e
 
     async def get_sample_from_slot_to_transfer_station(self, slot: int = 5):
         """Mirror function for get_sample_from_slot_to_transfer_station"""
@@ -262,7 +279,7 @@ class MirrorIncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get sample from slot to transfer station: {e}")
-            return f"Failed to get sample from slot to transfer station: {e}"
+            raise e
 
     async def get_status(self):
         """Mirror function for get_status"""
@@ -278,7 +295,7 @@ class MirrorIncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get status: {e}")
-            return {}
+            raise e
 
     async def is_busy(self):
         """Mirror function for is_busy"""
@@ -294,7 +311,7 @@ class MirrorIncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to check if busy: {e}")
-            return False
+            raise e
 
     async def reset_error_status(self):
         """Mirror function for reset_error_status"""
@@ -310,7 +327,7 @@ class MirrorIncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to reset error status: {e}")
-            return None
+            raise e
 
     async def get_sample_status(self, slot: Optional[int] = None):
         """Mirror function for get_sample_status"""
@@ -326,7 +343,7 @@ class MirrorIncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get sample status: {e}")
-            return {}
+            raise e
 
     async def get_temperature(self):
         """Mirror function for get_temperature"""
@@ -342,7 +359,7 @@ class MirrorIncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get temperature: {e}")
-            return None
+            raise e
 
     async def get_co2_level(self):
         """Mirror function for get_co2_level"""
@@ -358,7 +375,7 @@ class MirrorIncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get CO2 level: {e}")
-            return None
+            raise e
 
     async def get_slot_information(self, slot: int = 1):
         """Mirror function for get_slot_information"""
@@ -374,7 +391,7 @@ class MirrorIncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get slot information: {e}")
-            return None
+            raise e
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -390,6 +407,8 @@ if __name__ == "__main__":
         try:
             mirror_service.setup_task = asyncio.create_task(mirror_service.setup())
             await mirror_service.setup_task
+            # Start the health check task
+            asyncio.create_task(mirror_service.check_service_health())
         except Exception:
             traceback.print_exc()
 
