@@ -928,7 +928,7 @@ async def upload_zarr_example() -> None:
     ]
     
     uploader = ArtifactUploader(
-        artifact_alias="agent-lens/image-map-20250429-treatment",
+        artifact_alias="image-map-20250429-treatment",
         record_file="zarr_upload_record.json"
     )
     

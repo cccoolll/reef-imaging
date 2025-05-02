@@ -30,7 +30,7 @@ CHECK_INTERVAL = 60  # Check for new folders every 60 seconds
 client_id = "reef-client-stitch-uploader"
 # Load environment variables
 load_dotenv()
-ARTIFACT_ALIAS = "agent-lens/image-map-20250429-treatment"
+ARTIFACT_ALIAS = "image-map-20250429-treatment"
 # Timeout and retry settings
 CONNECTION_TIMEOUT = 60  # Timeout for connection operations in seconds
 OPERATION_TIMEOUT = 3600  # Timeout for Hypha operations in seconds (increased from 60)
@@ -283,85 +283,16 @@ async def upload_zarr_file(zarr_file: str) -> bool:
                  await connection.disconnect()
              return False
 
-        # Put dataset in staging mode
-        staging_success = False
-        retry_count = 0
-        
-        while not staging_success and retry_count < MAX_RETRIES:
-            try:
-                print(f"Putting dataset {ARTIFACT_ALIAS} in staging mode...")
-                # Use the artifact_manager from the uploader's connection
-                artifact_manager = connection.artifact_manager 
-                if not artifact_manager:
-                    raise ValueError("Artifact manager is not available on the connection.")
-
-                # Read the current manifest with timeout (if needed, otherwise just edit)
-                dataset_manifest = {
-                    "name": "Full zarr dataset 20250410",
-                    "description": "The Full zarr dataset for U2OS FUCCI Drug Treatment from 20250410",
-                }
-                
-                # Put the dataset in staging mode with timeout
-                await asyncio.wait_for(
-                    artifact_manager.edit(
-                        artifact_id=ARTIFACT_ALIAS,
-                        manifest=dataset_manifest,  # Preserve the same manifest
-                        version="stage"    # Put in staging mode
+        # Put the dataset in staging mode with timeout
+        await asyncio.wait_for(
+            connection.artifact_manager.edit(
+                artifact_id=ARTIFACT_ALIAS,
+                stage=True,
                     ),
                     timeout=OPERATION_TIMEOUT
                 )
-                
-                print("Dataset is now in staging mode")
-                staging_success = True
-                
-            except asyncio.TimeoutError:
-                retry_count += 1
-                print(f"Staging operation timed out (attempt {retry_count}/{MAX_RETRIES})")
-                
-                # Reset connection using the uploader's method
-                print("Attempting to reset connection via uploader...")
-                await connection.disconnect() # Disconnect first
-                if retry_count < MAX_RETRIES:
-                    connect_success = await uploader.connect_with_retry(client_id=client_id)
-                    if not connect_success:
-                        print("Failed to re-establish connection after timeout.")
-                        return False
-                    # Update connection object reference after successful reconnect
-                    connection = uploader.connection 
-                    if not connection or not connection.artifact_manager:
-                        print("Failed to get valid connection after reconnect.")
-                        return False
-                    await asyncio.sleep(5) # Wait a bit after reconnecting
-            
-            except Exception as e:
-                retry_count += 1
-                print(f"Error putting dataset in staging mode: {e} (attempt {retry_count}/{MAX_RETRIES})")
-                
-                if "not found" in str(e).lower():
-                    print("Dataset not found. It may need to be created first.")
-                    # Disconnect cleanly before returning
-                    if connection: await connection.disconnect()
-                    return False
-                
-                # Reset connection using the uploader's method
-                print("Attempting to reset connection via uploader due to error...")
-                if connection: await connection.disconnect() # Disconnect first
-                if retry_count < MAX_RETRIES:
-                    connect_success = await uploader.connect_with_retry(client_id=client_id)
-                    if not connect_success:
-                        print("Failed to re-establish connection after error.")
-                        return False
-                     # Update connection object reference after successful reconnect
-                    connection = uploader.connection
-                    if not connection or not connection.artifact_manager:
-                         print("Failed to get valid connection after error reconnect.")
-                         return False
-                    await asyncio.sleep(5) # Wait a bit after reconnecting
         
-        if not staging_success:
-            print("Failed to put dataset in staging mode after multiple attempts")
-            if connection: await connection.disconnect()
-            return False
+        print(f"Dataset {ARTIFACT_ALIAS} put in staging mode")
         
         # Get the channels from the zarr file (top-level directories in zarr)
         channels = [d for d in os.listdir(zarr_path) if os.path.isdir(os.path.join(zarr_path, d))]
@@ -383,63 +314,8 @@ async def upload_zarr_file(zarr_file: str) -> bool:
             return False
         
         # Commit the dataset
-        commit_success = False
-        commit_attempts = 0
-        
-        while not commit_success and commit_attempts < Config.MAX_COMMIT_ATTEMPTS:
-            try:
-                # Refresh connection using uploader's method before commit
-                print(f"Attempting to refresh connection via uploader before commit (attempt {commit_attempts + 1}/{Config.MAX_COMMIT_ATTEMPTS})...")
-                if connection: await connection.disconnect() # Ensure disconnected first
-                # Cancel any lingering connection task from the uploader itself
-                if uploader.connection_task and not uploader.connection_task.done():
-                    uploader.connection_task.cancel()
-                    try:
-                        await asyncio.wait_for(asyncio.shield(uploader.connection_task), timeout=1)
-                    except (asyncio.CancelledError, asyncio.TimeoutError):
-                        pass
-                    uploader.connection_task = None
+        await connection.artifact_manager.commit(artifact_id=ARTIFACT_ALIAS)
 
-                connect_success = await uploader.connect_with_retry(client_id=client_id)
-                if not connect_success:
-                    print("Failed to reconnect before commit")
-                    commit_attempts += 1
-                    await asyncio.sleep(min(Config.INITIAL_RETRY_DELAY * (2 ** commit_attempts), Config.MAX_RETRY_DELAY))
-                    continue
-                    
-                # Update connection object reference after successful reconnect
-                connection = uploader.connection
-                if not connection or not connection.artifact_manager:
-                    print("Failed to get valid connection for commit after reconnect.")
-                    commit_attempts += 1
-                    await asyncio.sleep(min(Config.INITIAL_RETRY_DELAY * (2 ** commit_attempts), Config.MAX_RETRY_DELAY))
-                    continue
-                
-                # Commit the dataset with timeout
-                print(f"Committing dataset {ARTIFACT_ALIAS}...")
-                await asyncio.wait_for(
-                    connection.artifact_manager.commit(ARTIFACT_ALIAS),
-                    timeout=Config.MAX_COMMIT_DELAY
-                )
-                print("Dataset committed successfully.")
-                commit_success = True
-                
-            except asyncio.TimeoutError:
-                commit_attempts += 1
-                print(f"Commit operation timed out (attempt {commit_attempts}/{Config.MAX_COMMIT_ATTEMPTS})")
-                if connection: await connection.disconnect()
-                await asyncio.sleep(min(Config.INITIAL_RETRY_DELAY * (2 ** commit_attempts), Config.MAX_RETRY_DELAY))
-                
-            except Exception as e:
-                commit_attempts += 1
-                print(f"Error committing dataset (attempt {commit_attempts}/{Config.MAX_COMMIT_ATTEMPTS}): {str(e)}")
-                if connection: await connection.disconnect()
-                await asyncio.sleep(min(Config.INITIAL_RETRY_DELAY * (2 ** commit_attempts), Config.MAX_RETRY_DELAY))
-        
-        if not commit_success:
-            print(f"WARNING: Failed to commit the dataset {ARTIFACT_ALIAS} after {Config.MAX_COMMIT_ATTEMPTS} attempts.")
-            if connection: await connection.disconnect()
-            return False
             
         return True
         
@@ -470,63 +346,47 @@ async def upload_zarr_file(zarr_file: str) -> bool:
 async def process_folder(folder_name: str) -> bool:
     folder_path = os.path.join(BASE_DIR, folder_name)
     
-    # Step 1: Check for .done file
+    # Step 1: Check for .done file to determine if stitching is needed
     folder_datetime = extract_datetime_from_folder(folder_name)
     zarr_filename = f"{folder_datetime}.zarr" if folder_datetime else f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.zarr"
+    zarr_path = os.path.join(STITCHED_DIR, zarr_filename)
     done_file_path = os.path.join(STITCHED_DIR, f"{zarr_filename}.done")
-    if os.path.exists(done_file_path):
-        print(f".done file found for {folder_name}, skipping stitching.")
-    else:
-        # Step 2: Stitch the folder
+    
+    # If .done exists but zarr file doesn't, we need to restitch
+    if os.path.exists(done_file_path) and not os.path.exists(zarr_path):
+        print(f".done file found but zarr file missing. Restitching {folder_name}.")
+        os.remove(done_file_path)  # Remove stale .done file
+    
+    # Stitch if needed
+    if not os.path.exists(done_file_path) or not os.path.exists(zarr_path):
         print(f"\nStarting stitching process for folder: {folder_name}")
         stitch_success = stitch_folder(folder_path)
         if not stitch_success:
             print(f"Failed to stitch folder: {folder_name}")
             return False
-    
-    # Step 3: Get the stitched zarr file
-    zarr_files = get_zarr_files()
-    if not zarr_files:
-        print(f"No zarr files were created from stitching folder: {folder_name}")
-        return False
-    
-    # Find the matching zarr file for this folder
-    folder_datetime = extract_datetime_from_folder(folder_name)
-    matching_zarr = None
-    
-    if folder_datetime:
-        # Match by datetime, ignore .zarr extension when comparing
-        matching_zarr = [f for f in zarr_files if folder_datetime in f.replace('.zarr', '')]
-        if not matching_zarr:
-            # If no exact match, use the most recently created zarr file
-            print(f"No matching zarr file found for datetime {folder_datetime}, using the first available.")
-            matching_zarr = [zarr_files[0]]
     else:
-        # If datetime can't be extracted, use the first zarr file
-        print(f"Could not extract datetime from folder name, using the first available zarr file.")
-        matching_zarr = [zarr_files[0]]
+        print(f".done file and zarr file found for {folder_name}, skipping stitching.")
     
-    if not matching_zarr:
-        print(f"No zarr file available to upload for folder: {folder_name}")
+    # Step 2: Verify zarr file exists
+    if not os.path.exists(zarr_path):
+        print(f"Zarr file {zarr_filename} not found after stitching. Something went wrong.")
         return False
     
-    zarr_file = matching_zarr[0]
-    print(f"Found matching zarr file: {zarr_file}")
-    
-    # Step 4: Upload the zarr file
-    print(f"Starting upload process for zarr file: {zarr_file}")
-    upload_success = await upload_zarr_file(zarr_file)
+    # Step 3: Upload the zarr file
+    print(f"Starting upload process for zarr file: {zarr_filename}")
+    upload_success = await upload_zarr_file(zarr_filename)
     if not upload_success:
-        print(f"Failed to upload zarr file: {zarr_file}")
+        print(f"Failed to upload zarr file: {zarr_filename}")
         return False
     
-    # Step 5: Clean up the zarr file
-    print(f"Cleaning up zarr file: {zarr_file}")
-    cleanup_zarr_file(zarr_file)
+    # Step 4: Record as processed
+    save_processed_folder(folder_name)
+    print(f"Successfully processed folder: {folder_name}")
     
-    # step 6, delete UPLOAD_RECORD_FILE
-    if os.path.exists(UPLOAD_RECORD_FILE):
-        os.remove(UPLOAD_RECORD_FILE)
+    # Step 5: Clean up the zarr file AFTER recording as processed
+    print(f"Cleaning up zarr file: {zarr_filename}")
+    cleanup_zarr_file(zarr_filename)
+    
     return True
 
 
