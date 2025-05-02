@@ -182,28 +182,11 @@ class ArtifactUploader:
                 print(f"Error creating zip file in background thread: {e}")
                 traceback.print_exc()
                 return False
-        
-        # Define a keepalive task
-        async def keepalive_task():
-            """Send periodic keepalive to maintain the connection"""
-            try:
-                while True:
-                    if self.connection and self.connection.artifact_manager:
-                        # Just check a simple property to keep the connection alive
-                        await self.connection.api.ping()
-                        print("Sent keepalive ping to maintain connection")
-                    await asyncio.sleep(30)  # Ping every 30 seconds
-            except asyncio.CancelledError:
-                # Task was cancelled, this is expected
-                pass
-            except Exception as e:
-                print(f"Error in keepalive task: {e}")
                 
         # Create a separate upload task
         async def zip_and_upload_task():
             try:
                 # Start the keepalive task
-                keepalive = asyncio.create_task(keepalive_task())
                 
                 try:
                     print(f"Starting zip file creation in background thread for {folder_path}...")
