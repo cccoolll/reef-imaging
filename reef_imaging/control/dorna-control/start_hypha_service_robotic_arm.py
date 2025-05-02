@@ -423,6 +423,8 @@ class RoboticArmService:
         Transport a sample from the incubator to microscope1
         Returns: bool
         """
+        if not self.connected:
+            self.connect()
         task_name = "transport_from_incubator_to_microscope1"
         self.task_status[task_name] = "started"
         self.set_motor(1)
@@ -442,6 +444,8 @@ class RoboticArmService:
         Transport a sample from microscope1 to the incubator
         Returns: bool
         """
+        if not self.connected:
+            self.connect()
         task_name = "transport_from_microscope1_to_incubator"
         self.task_status[task_name] = "started"
         self.set_motor(1)
@@ -483,6 +487,8 @@ class RoboticArmService:
         task_name = "set_alarm"
         self.task_status[task_name] = "started"
         try:
+            if not self.connected:
+                self.connect()
             self.robot.set_alarm(state)
             self.task_status[task_name] = "finished"
             return True
@@ -499,6 +505,8 @@ class RoboticArmService:
         task_name = "light_on"
         self.task_status[task_name] = "started"
         try:
+            if not self.connected:
+                self.connect()
             self.robot.set_output(7, 0)
             self.task_status[task_name] = "finished"
             return True
@@ -515,6 +523,8 @@ class RoboticArmService:
         task_name = "light_off"
         self.task_status[task_name] = "started"
         try:
+            if not self.connected:
+                self.connect()
             self.robot.set_output(7, 1)
             self.task_status[task_name] = "finished"
             return True
