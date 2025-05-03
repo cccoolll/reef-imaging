@@ -6,6 +6,7 @@ import json
 import shutil
 import re
 import random
+import multiprocessing
 from datetime import datetime
 from typing import List, Optional, Tuple
 from dotenv import load_dotenv
@@ -30,7 +31,7 @@ CHECK_INTERVAL = 60  # Check for new folders every 60 seconds
 client_id = "reef-client-stitch-uploader"
 # Load environment variables
 load_dotenv()
-ARTIFACT_ALIAS = "agent-lens/image-map-20250429-treatment"
+ARTIFACT_ALIAS = "agent-lens/image-map-20250429-treatment-zip"
 # Timeout and retry settings
 CONNECTION_TIMEOUT = 60  # Timeout for connection operations in seconds
 OPERATION_TIMEOUT = 3600  # Timeout for Hypha operations in seconds (increased from 60)
@@ -210,8 +211,80 @@ def stitch_folder(folder_path: str) -> bool:
         return False
 
 
+# Function to run in separate process for isolated network context
+def isolated_upload_process(zarr_path, channel, artifact_alias, upload_record_file, client_id, result_queue):
+    """Run the upload in a separate process to isolate network context"""
+    try:
+        # Set up a new asyncio event loop for this process
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        # Create a new uploader instance in this process
+        uploader = ArtifactUploader(
+            artifact_alias=artifact_alias,
+            record_file=upload_record_file,
+            client_id=f"{client_id}-subprocess-{os.getpid()}"
+        )
+        
+        # Execute the upload
+        success = loop.run_until_complete(process_channel_upload(zarr_path, channel, uploader))
+        
+        # Put result in queue for parent process
+        result_queue.put({"success": success, "channel": channel})
+        
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        result_queue.put({"success": False, "channel": channel, "error": str(e), "traceback": error_details})
+    finally:
+        # Clean up loop
+        loop.close()
+
+async def process_channel_upload(zarr_path, channel, uploader):
+    """Process the actual upload in the isolated process"""
+    # Get the base name for the relative path
+    zarr_file = os.path.basename(zarr_path)
+    base_name = zarr_file.replace('.zarr', '')
+    
+    # The full path to the channel in the zarr file
+    channel_path = os.path.join(zarr_path, channel)
+    
+    if not os.path.exists(channel_path):
+        print(f"Channel directory {channel_path} not found in zarr file")
+        return False
+    
+    # Set the relative path for upload
+    relative_path = f"{base_name}/{channel}.zip"
+    print(f"Uploading channel {channel} as {relative_path} in isolated process {os.getpid()}")
+    
+    # First establish connection
+    connect_success = await uploader.connect_with_retry()
+    if not connect_success:
+        print(f"Failed to establish connection to Hypha in isolated process")
+        return False
+    
+    # Use the zip_and_upload_folder method
+    try:
+        success = await uploader.zip_and_upload_folder(
+            folder_path=channel_path,
+            relative_path=relative_path,
+            delete_zip_after=True
+        )
+        
+        if success:
+            print(f"Successfully uploaded channel {channel} in isolated process")
+        else:
+            print(f"Failed to upload channel {channel} in isolated process")
+        
+        return success
+    finally:
+        # Always disconnect at the end
+        if uploader.connection:
+            await uploader.connection.disconnect()
+
+# Replace the existing upload_zarr_channel function with one that uses multiprocessing
 async def upload_zarr_channel(zarr_path: str, channel: str, uploader: ArtifactUploader) -> bool:
-    """Upload a single channel from a zarr file to the artifact manager."""
+    """Upload a single channel from a zarr file to the artifact manager using simplified approach."""
     try:
         # Get the base name for the relative path
         zarr_file = os.path.basename(zarr_path)
@@ -224,11 +297,11 @@ async def upload_zarr_channel(zarr_path: str, channel: str, uploader: ArtifactUp
             print(f"Channel directory {channel_path} not found in zarr file")
             return False
         
-        # Set the relative path for upload - this will determine how it's stored in the artifact
+        # Set the relative path for upload
         relative_path = f"{base_name}/{channel}.zip"
         print(f"Uploading channel {channel} as {relative_path}")
         
-        # Use the zip_and_upload_folder method from the uploader
+        # Use the simplified zip_and_upload_folder method
         success = await uploader.zip_and_upload_folder(
             folder_path=channel_path,
             relative_path=relative_path,
@@ -260,8 +333,7 @@ async def upload_zarr_file(zarr_file: str) -> bool:
     uploader = ArtifactUploader(
         artifact_alias=ARTIFACT_ALIAS,
         record_file=UPLOAD_RECORD_FILE,
-        client_id=client_id,
-        concurrency_limit=CONCURRENCY_LIMIT
+        client_id=client_id
     )
     
     # Use the uploader's internal connection management
@@ -297,8 +369,8 @@ async def upload_zarr_file(zarr_file: str) -> bool:
 
                 # Read the current manifest with timeout (if needed, otherwise just edit)
                 dataset_manifest = {
-                    "name": "Full zarr dataset 20250410",
-                    "description": "The Full zarr dataset for U2OS FUCCI Drug Treatment from 20250410",
+                    "name": "Full zarr dataset 20250429",
+                    "description": "The Full zarr dataset for U2OS FUCCI Drug Treatment from 20250429",
                 }
                 
                 # Put the dataset in staging mode with timeout
