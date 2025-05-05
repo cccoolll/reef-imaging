@@ -36,18 +36,17 @@ digraph ReefImagingUploadProcess {
         stitch_folder [label="Stitch folder\n(create zarr file)"];
         stitch_success [label="Stitching success?", shape=diamond];
         find_zarr [label="Find matching zarr file"];
-        upload_zarr [label="Upload zarr file"];
+        
+        // Connect to Hypha
+        connect_hypha_stitch [label="Connect to Hypha\nwith retry"];
+        
+        // Begin upload process
         staging_zarr [label="Put artifact in\nstaging mode"];
-        
-        // New nodes for channel-based upload
         get_channels [label="Get channels from zarr file"];
-        channel_loop [label="For each channel"];
-        zip_channel [label="Zip individual channel"];
-        upload_channel [label="Upload channel as\n{timestamp}/{channel}.zip"];
-        channel_success [label="All channels\nuploaded?", shape=diamond];
-        
+        channel_loop [label="Process each channel"];
+        zip_upload_channel [label="Zip and upload channel"];
         commit_zarr [label="Commit dataset"];
-        cleanup_zarr [label="Clean up zarr file"];
+        cleanup_zarr [label="Clean up zarr files"];
         stitch_record [label="Save record of\nprocessed folder"];
         stitch_next [label="Move to next folder", shape=oval];
         
@@ -57,81 +56,40 @@ digraph ReefImagingUploadProcess {
         stitch_folder -> stitch_success;
         stitch_success -> find_zarr [label="Yes"];
         stitch_success -> stitch_next [label="No", style=dashed, color=red];
-        find_zarr -> upload_zarr;
-        upload_zarr -> staging_zarr -> get_channels -> channel_loop;
-        channel_loop -> zip_channel -> upload_channel -> channel_loop [constraint=false, label="Next channel"];
-        channel_loop -> channel_success;
-        channel_success -> commit_zarr [label="Yes"];
-        channel_success -> stitch_next [label="No", style=dashed, color=red];
+        
+        find_zarr -> connect_hypha_stitch -> staging_zarr;
+        staging_zarr -> get_channels -> channel_loop;
+        channel_loop -> zip_upload_channel;
+        zip_upload_channel -> channel_loop [constraint=false, label="Next channel"];
+        channel_loop -> commit_zarr [label="All channels\nuploaded"];
         commit_zarr -> cleanup_zarr -> stitch_record -> stitch_next;
     }
     
-    // Hypha Connection Management
-    subgraph cluster_connection {
-        label="Hypha Connection Management";
-        style="rounded,filled";
-        fillcolor=lightgreen;
-        
-        connect [label="Attempt connection\nto Hypha"];
-        timeout [label="Connection\ntimeout?", shape=diamond];
-        error [label="Connection\nerror?", shape=diamond];
-        client_conflict [label="Client ID\nconflict?", shape=diamond];
-        retry_connect [label="Retry with\nexponential backoff"];
-        connected [label="Connection\nestablished"];
-        
-        connect -> timeout;
-        timeout -> retry_connect [label="Yes"];
-        timeout -> connected [label="No"];
-        
-        connect -> error;
-        error -> client_conflict [label="Yes"];
-        error -> connected [label="No"];
-        
-        client_conflict -> retry_connect [label="Yes\n(longer delay)"];
-        retry_connect -> connect;
-    }
-    
-    // Original Treatment Data Upload Process
+    // Treatment Data Upload Process
     subgraph cluster_treatment {
-        label="Original Treatment Data Upload Process";
+        label="Treatment Data Upload Process";
         style="rounded,filled";
         fillcolor=lightcyan;
         
         treatment_start [label="Treatment Upload\nProcess", shape=oval];
+        
+        // Connect to Hypha
+        connect_hypha_treatment [label="Connect to Hypha\nwith retry"];
+        
         treatment_staging [label="Put dataset in\nstaging mode"];
-        treatment_upload [label="Upload folder contents\nin batches"];
+        zip_upload_folder [label="Zip and upload folder"];
         treatment_commit [label="Commit dataset"];
         treatment_record [label="Save record of\nprocessed folder"];
         treatment_next [label="Move to next folder", shape=oval];
         
-        treatment_start -> treatment_staging -> treatment_upload -> treatment_commit -> treatment_record -> treatment_next;
-    }
-    
-    // Uploader process
-    subgraph cluster_uploader {
-        label="Uploader Process";
-        style="rounded,filled";
-        fillcolor=lightcoral;
-        
-        uploader_start [label="Start Uploading", shape=oval];
-        create_queue [label="Create File Queue"];
-        create_url_queue [label="Create URL Queue"];
-        get_presigned_urls [label="Get Presigned URLs"];
-        upload_files [label="Upload Files in Batches"];
-        retry_failed [label="Retry Failed Uploads"];
-        commit_dataset [label="Commit Dataset"];
-        uploader_end [label="End Uploading", shape=oval];
-        
-        uploader_start -> create_queue -> create_url_queue -> get_presigned_urls -> upload_files -> retry_failed -> commit_dataset -> uploader_end;
+        treatment_start -> connect_hypha_treatment -> treatment_staging;
+        treatment_staging -> zip_upload_folder -> treatment_commit;
+        treatment_commit -> treatment_record -> treatment_next;
     }
     
     // Connect the subgraphs
     user_input -> treatment_start [lhead=cluster_treatment];
     user_input -> stitch_start [lhead=cluster_stitch];
-    
-    // Connection is used by both processes
-    treatment_start -> connect [ltail=cluster_treatment, lhead=cluster_connection, style=dashed];
-    stitch_start -> connect [ltail=cluster_stitch, lhead=cluster_connection, style=dashed];
     
     // Demonstrate folder loop
     treatment_next -> treatment_start [label="More folders", constraint=false, style=dashed];
@@ -154,25 +112,9 @@ digraph ReefImagingUploadProcess {
     treatment_record [label="treatment_upload_record.json"];
     
     stitch_record -> stitch_upload_progress [style=dashed];
-    upload_channel -> zarr_upload_record [style=dashed];
+    zip_upload_channel -> zarr_upload_record [style=dashed];
     treatment_record -> treatment_progress [style=dashed];
-    treatment_upload -> treatment_record [style=dashed];
-    
-    // Subgraph for shared concepts between processes
-    subgraph cluster_shared {
-        label="Shared Components";
-        style="rounded,filled";
-        fillcolor=lavender;
-        
-        artifact_manager [label="Artifact Manager"];
-        hypha_connection [label="Hypha Connection"];
-        concurrency [label="Optimized\nConcurrency\nSettings"];
-        error_handling [label="Error Handling\nwith Retries"];
-        
-        artifact_manager -> hypha_connection [style=dotted];
-        hypha_connection -> concurrency [style=dotted];
-        hypha_connection -> error_handling [style=dotted];
-    }
+    zip_upload_folder -> treatment_record [style=dashed];
     
     // Legend
     subgraph cluster_legend {
@@ -192,75 +134,16 @@ digraph ReefImagingUploadProcess {
         data -> start_stop [style=invis];
     }
     
-    // Connect uploader process to existing processes
-    treatment_upload -> uploader_start [lhead=cluster_uploader, style=dashed];
-    upload_channel -> uploader_start [lhead=cluster_uploader, style=dashed];
-    
-    // Queue Management
-    subgraph cluster_queue {
-        label="Queue Management";
+    // Error Handling Notes
+    subgraph cluster_error_handling {
+        label="Error Handling";
         style="rounded,filled";
-        fillcolor=lightgoldenrodyellow;
+        fillcolor=lavender;
         
-        // Place URL Queue and workers on the left
-        subgraph cluster_url_side {
-            rank=same;
-            url_queue [label="URL Queue", shape=parallelogram];
-            
-            subgraph cluster_url_workers {
-                label="URL Queue Workers";
-                style="dotted";
-                fillcolor=lightyellow;
-                worker1 [label="URL Worker 1", shape=ellipse, style=filled, fillcolor=lightgrey];
-                worker2 [label="URL Worker ...", shape=ellipse, style=filled, fillcolor=lightgrey];
-                worker3 [label="URL Worker 2", shape=ellipse, style=filled, fillcolor=lightgrey];
-            }
-        }
+        err_connect [label="Connection Retries\n- Exponential backoff\n- Max retry attempts"];
+        err_staging [label="Staging Retries\n- Graceful reconnection"];
+        err_commit [label="Commit Retries\n- Connection refresh\n- Timeout handling"];
         
-        // Place Upload Queue and workers on the right
-        subgraph cluster_upload_side {
-            rank=same;
-            upload_queue [label="Upload Queue", shape=parallelogram];
-            
-            subgraph cluster_upload_workers {
-                label="Upload Queue Workers";
-                style="dotted";
-                fillcolor=lightyellow;
-                upload_worker1 [label="Upload Worker 1", shape=ellipse, style=filled, fillcolor=lightgrey];
-                upload_worker2 [label="Upload Worker ...", shape=ellipse, style=filled, fillcolor=lightgrey];
-                upload_worker3 [label="Upload Worker 2", shape=ellipse, style=filled, fillcolor=lightgrey];
-            }
-        }
-        
-        // Connections
-        create_url_queue -> url_queue [style=dotted];
-        get_presigned_urls -> url_queue;
-        create_queue -> upload_queue [style=dotted];
-        url_queue -> upload_queue;
-        upload_files -> upload_queue;
-        retry_failed -> upload_queue [style=dashed];
-        
-        // Connect workers to queues with cleaner layout
-        url_queue -> {worker1 worker2 worker3} [constraint=false];
-        upload_queue -> {upload_worker1 upload_worker2 upload_worker3} [constraint=false];
+        err_connect -> err_staging -> err_commit [style=invis];
     }
-    
-    // Demonstrate connection reset after upload failures
-    retry_failed -> connect [style=dashed, color=red, label="Reset Connection after failures"];
-    
-    // Add channel-specific notes
-    subgraph cluster_channels {
-        label="Channel-Based Upload Benefits";
-        style="rounded,filled";
-        fillcolor=thistle;
-        
-        channel_note1 [label="1. Improved fault tolerance", fillcolor=white];
-        channel_note2 [label="2. Optimized data retrieval", fillcolor=white];
-        channel_note3 [label="3. Parallel processing", fillcolor=white];
-        
-        channel_note1 -> channel_note2 -> channel_note3 [style=invis];
-    }
-    
-    // Connect the channel notes to the process
-    channel_loop -> cluster_channels [style=dashed, lhead=cluster_channels, constraint=false];
 } 
