@@ -169,7 +169,7 @@ class ArtifactUploader:
         def create_zip_file(source_path, target_zip_path):
             print(f"Creating zip file for {source_path} in background thread...")
             try:
-                with zipfile.ZipFile(target_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                with zipfile.ZipFile(target_zip_path, 'w', 0) as zipf:
                     for root, _, files in os.walk(source_path):
                         for file in files:
                             file_path = os.path.join(root, file)

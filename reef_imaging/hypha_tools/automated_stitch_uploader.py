@@ -599,6 +599,10 @@ async def process_folder(folder_name: str) -> bool:
     # step 6, delete UPLOAD_RECORD_FILE
     if os.path.exists(UPLOAD_RECORD_FILE):
         os.remove(UPLOAD_RECORD_FILE)
+    
+    # step 7, delete the .done file
+    if os.path.exists(done_file_path):
+        os.remove(done_file_path)
     return True
 
 
