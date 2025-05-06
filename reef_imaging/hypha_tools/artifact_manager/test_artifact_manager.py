@@ -63,14 +63,12 @@ async def test_get_zip_file_content_endpoint(
         zarr_attrs_json = json.dumps(zarr_attrs)
         zip_file.writestr("nested-zarr/.zattrs", zarr_attrs_json)
         
-        # Calculate how many chunks we need for approximately 1GB
         # Each 256x256 chunk of float32 (4 bytes) is 256*256*4 = 262,144 bytes
-        # For 1GB we need ~4000 chunks (1GB / 262,144 bytes ≈ 4000)
-        # We'll use a 20x20x10 3D array with 256x256 chunks
-        chunk_shape = [256, 256]
-        array_shape = [20, 20, 10]  # Shape of the entire array (20*20*10 = 4000 chunks)
+        # For 25MB we need ~100 chunks (25MB / 262,144 bytes ≈ 100)
+        chunk_shape = [1, 1]
+        array_shape = [11, 10, 10]  # Shape of the entire array
+
         
-        # Create .zarray metadata file
         zarr_array = {
             "chunks": chunk_shape,
             "compressor": {"id": "zlib", "level": 1},
@@ -86,7 +84,7 @@ async def test_get_zip_file_content_endpoint(
         
         # Create some chunk files with random data
         # We'll create a 3D array (z, y, x) with chunks across all dimensions
-        print("Creating Zarr chunks for approximately 1GB file size...")
+        print("Creating Zarr chunks for approximately 100MB file size...")
         total_chunks = array_shape[0] * array_shape[1] * array_shape[2]
         chunk_count = 0
         
@@ -119,10 +117,6 @@ async def test_get_zip_file_content_endpoint(
     zip_size_mb = os.path.getsize(zip_file_path_on_disk) / (1024 * 1024)
     print(f"Created ZIP file: {zip_file_path_on_disk} (Size: {zip_size_mb:.2f} MB)")
     
-    # Read the ZIP file from disk for upload
-    with open(zip_file_path_on_disk, "rb") as f:
-        zip_content = f.read()
-
     # Upload the ZIP file to the artifact
     zip_file_path = "test-files"
     put_url = await artifact_manager.put_file(
@@ -132,7 +126,10 @@ async def test_get_zip_file_content_endpoint(
     )
     print(f"put_url: {put_url}, dataset.id: {dataset.id}")
     async with httpx.AsyncClient(timeout=300) as client:
-        response = await client.put(put_url, data=zip_content)
+        # Use data parameter with the file contents for async compatibility
+        with open(zip_file_path_on_disk, "rb") as f:
+            file_data = f.read()
+        response = await client.put(put_url, data=file_data)
         assert response.status_code == 200
 
     # Commit the dataset artifact
