@@ -63,8 +63,7 @@ async def test_get_zip_file_content_endpoint(
         zarr_attrs_json = json.dumps(zarr_attrs)
         zip_file.writestr("nested-zarr/.zattrs", zarr_attrs_json)
         
-        # Each 256x256 chunk of float32 (4 bytes) is 256*256*4 = 262,144 bytes
-        # For 25MB we need ~100 chunks (25MB / 262,144 bytes ≈ 100)
+        # Create 1100 chunks of 1x1 to verify the file size's affect on the artifact manager
         chunk_shape = [1, 1]
         array_shape = [11, 10, 10]  # Shape of the entire array
 
