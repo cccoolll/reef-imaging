@@ -52,7 +52,7 @@ ILLUMINATE_CHANNELS = ['BF LED matrix full', 'Fluorescence 488 nm Ex', 'Fluoresc
 SCANNING_ZONE = [(1, 1), (6, 10)] # The outside rows and columns have no cells
 Nx = 2
 Ny = 2
-ACTION_ID = '20250429-scan-time-lapse'
+ACTION_ID = '20250506-scan-time-lapse'
 
 class OrchestrationSystem:
     def __init__(self, local=False):

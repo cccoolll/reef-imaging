@@ -2,7 +2,7 @@ import os
 import asyncio
 from typing import Dict, Any, Optional
 
-from core import HyphaConnection, Config
+from .core import HyphaConnection, Config
 
 class GalleryManager:
     """Manages galleries and datasets in Hypha"""
@@ -107,7 +107,7 @@ async def create_gallery_example() -> None:
         await gallery_manager.create_gallery(
             name="Image Map of U2OS FUCCI Drug Treatment",
             description="A collection for organizing imaging datasets acquired by microscopes",
-            alias="agent-lens/image-map-of-u2os-fucci-drug-treatment-zip",
+            alias="squid-control/image-map-of-u2os-fucci-drug-treatment-zip",
             permissions = {"*": "*", "@": "*", "misty-teeth-42051243": "*","google-oauth2|103047988474094226050": "*"}
         )
     finally:
@@ -121,8 +121,8 @@ async def create_dataset_example() -> None:
         await gallery_manager.create_dataset(
             name="20250429-treatment",
             description="The Image Map of U2OS FUCCI Drug Treatment from 20250429",
-            alias="agent-lens/image-map-20250429-treatment-zip",
-            parent_id="agent-lens/image-map-of-u2os-fucci-drug-treatment-zip",
+            alias="squid-control/image-map-20250429-treatment-zip",
+            parent_id="squid-control/image-map-of-u2os-fucci-drug-treatment-zip",
             version="stage",
             permissions = {"*": "*", "@": "*", "misty-teeth-42051243": "*","google-oauth2|103047988474094226050": "*"}
         )
@@ -132,7 +132,7 @@ async def create_dataset_example() -> None:
 async def commit_dataset_example() -> None:
     """Example of committing a dataset"""
     gallery_manager = GalleryManager()
-    await gallery_manager.commit_dataset(alias="agent-lens/image-map-20250429-treatment-zip")
+    await gallery_manager.commit_dataset(alias="squid-control/image-map-20250429-treatment-zip")
     await gallery_manager.connection.disconnect()
 
 async def delete_dataset_example() -> None:
@@ -143,7 +143,7 @@ async def delete_dataset_example() -> None:
     print("Dataset deleted.")
     await gallery_manager.connection.disconnect()
 
-async def reset_stats(artifact_id="agent-lens/image-map-u2os-fucci-drug-treatment"):
+async def reset_stats(artifact_id="squid-control/image-map-u2os-fucci-drug-treatment"):
     """Reset the stats of a dataset"""
     gallery_manager = GalleryManager()
     await gallery_manager.connection.connect(client_id=None)
@@ -152,4 +152,5 @@ async def reset_stats(artifact_id="agent-lens/image-map-u2os-fucci-drug-treatmen
     await gallery_manager.connection.disconnect()
 if __name__ == "__main__":
 
-    asyncio.run(commit_dataset_example())
+    asyncio.run(create_gallery_example())
+    asyncio.run(create_dataset_example())
