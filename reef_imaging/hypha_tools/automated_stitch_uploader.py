@@ -25,7 +25,8 @@ from artifact_manager.gallery_manager import GalleryManager
 # Constants
 BASE_DIR = "/media/reef/harddisk"
 EXPERIMENT_ID = "20250429-scan-time-lapse"
-STITCHED_DIR = "/media/reef/harddisk/test_stitch_zarr"
+# Replace hardcoded STITCHED_DIR with temp directory
+STITCHED_DIR = tempfile.mkdtemp(prefix="stitch_zarr_")
 STITCH_RECORD_FILE = "stitch_upload_progress.txt"
 UPLOAD_RECORD_FILE = "zarr_upload_record.json"
 CHECK_INTERVAL = 15  # Check for new files every 15 seconds
@@ -799,4 +800,9 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    try:
+        asyncio.run(main())
+    finally:
+        # Clean up temporary directory
+        if os.path.exists(STITCHED_DIR):
+            shutil.rmtree(STITCHED_DIR) 
