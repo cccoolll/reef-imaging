@@ -31,40 +31,12 @@ class Config:
 class UploadRecord:
     """Manages the record of uploaded files"""
     
-    def __init__(self, record_file: str):
-        self.record_file = record_file
+    def __init__(self):
         self.uploaded_files: Set[str] = set()
         self.last_update: Optional[str] = None
         self.total_files: int = 0
         self.completed_files: int = 0
-        self.load()
     
-    def load(self) -> None:
-        """Load the record of previously uploaded files"""
-        if os.path.exists(self.record_file):
-            with open(self.record_file, "r", encoding="utf-8") as f:
-                record = json.load(f)
-                self.uploaded_files = set(record.get("uploaded_files", []))
-                self.last_update = record.get("last_update")
-                self.total_files = record.get("total_files", 0)
-                self.completed_files = record.get("completed_files", 0)
-    
-    def save(self) -> None:
-        """Save the record of uploaded files"""
-        # Convert set to list for JSON serialization
-        record = {
-            "uploaded_files": list(self.uploaded_files),
-            "last_update": datetime.now().isoformat(),
-            "total_files": self.total_files,
-            "completed_files": self.completed_files
-        }
-        
-        with open(self.record_file, "w", encoding="utf-8") as f:
-            json.dump(record, f, indent=2)
-    
-    def is_uploaded(self, relative_path: str) -> bool:
-        """Check if a file has been uploaded"""
-        return relative_path in self.uploaded_files
     
     def mark_uploaded(self, relative_path: str) -> None:
         """Mark a file as uploaded"""

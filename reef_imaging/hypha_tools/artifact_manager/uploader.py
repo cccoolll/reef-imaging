@@ -18,12 +18,10 @@ class ArtifactUploader:
     
     def __init__(self, 
                  artifact_alias: str, 
-                 record_file: str,
                  connection: Optional[HyphaConnection] = None,
                  client_id: str = "reef-client"):
         """Initialize the uploader with the artifact alias and record file"""
         self.artifact_alias = artifact_alias
-        self.upload_record = UploadRecord(record_file)
         self.connection = connection or HyphaConnection()
         self.client_id = client_id
         self.connection_task = None  # Track connection task at class level
@@ -74,10 +72,7 @@ class ArtifactUploader:
     
     async def upload_single_file(self, local_file: str, relative_path: str) -> bool:
         """Upload a single file to the artifact manager using the direct approach from the tutorial."""
-        # Skip if file was already uploaded
-        if self.upload_record.is_uploaded(relative_path):
-            print(f"File {relative_path} already uploaded, skipping")
-            return True
+
 
         file_size = os.path.getsize(local_file)
         print(f"Starting upload of {relative_path} ({file_size/1024/1024:.2f} MB)")
@@ -120,9 +115,6 @@ class ArtifactUploader:
                 if not ok:
                     raise RuntimeError(f"File upload failed for {local_file}, status={status_code}")
                 
-                # Record successful upload
-                self.upload_record.mark_uploaded(relative_path)
-                print(f"Successfully uploaded {relative_path} ({self.upload_record.completed_files}/{self.upload_record.total_files})")
                 self.last_progress_time = time.time()
                 return True
 
@@ -138,8 +130,6 @@ class ArtifactUploader:
 
     async def upload_files(self, to_upload: List[Tuple[str, str]]) -> bool:
         """Upload multiple files, one at a time - simplified without queues or complex concurrency."""
-        # Set total files for progress tracking
-        self.upload_record.set_total_files(len(to_upload))
         
         # Process files sequentially
         success = True
@@ -254,7 +244,6 @@ class ArtifactUploader:
                         relative_path = os.path.join(base_name, rel_path)
                         to_upload.append((local_file, relative_path))
                 
-                self.upload_record.set_total_files(len(to_upload))
                 success = await self.upload_files(to_upload)
                 
                 if not success:
@@ -284,11 +273,7 @@ class ArtifactUploader:
                     relative_path = os.path.join(folder_name, rel_path)
                     to_upload.append((local_file, relative_path))
 
-        self.upload_record.set_total_files(len(to_upload))
         success = await self.upload_files(to_upload)
-
-        if success:
-            self.upload_record.save()
 
         return success
 
@@ -302,7 +287,6 @@ async def upload_zarr_example() -> None:
     
     uploader = ArtifactUploader(
         artifact_alias="agent-lens/image-map-20250429-treatment",
-        record_file="zarr_upload_record.json"
     )
     
     success = await uploader.upload_zarr_files(ORIGINAL_ZARR_PATHS)
@@ -324,7 +308,6 @@ async def upload_treatment_example() -> None:
     
     uploader = ArtifactUploader(
         artifact_alias="20250410-treatment",
-        record_file="treatment_upload_record.json"
     )
     
     success = await uploader.upload_treatment_data(SOURCE_DIRS)

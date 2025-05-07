@@ -28,7 +28,6 @@ EXPERIMENT_ID = "20250429-scan-time-lapse"
 # Replace hardcoded STITCHED_DIR with temp directory
 STITCHED_DIR = tempfile.mkdtemp(prefix="stitch_zarr_")
 STITCH_RECORD_FILE = "stitch_upload_progress.txt"
-UPLOAD_RECORD_FILE = "zarr_upload_record.json"
 CHECK_INTERVAL = 15  # Check for new files every 15 seconds
 STABILITY_WINDOW = 5  # Consider folder stable after 5 seconds of no changes
 client_id = "reef-client-stitch-uploader"
@@ -172,7 +171,6 @@ async def setup_hypha_connection() -> bool:
         # Initialize uploader with connection
         uploader = ArtifactUploader(
             artifact_alias="",  # Will be set per dataset
-            record_file=UPLOAD_RECORD_FILE,
             client_id=client_id
         )
         await uploader.connect_with_retry()
@@ -382,7 +380,7 @@ async def stitch_folder(folder_path: str) -> Tuple[bool, Optional[str], Optional
 
 
 # Function to run in separate process for isolated network context
-def isolated_upload_process(zarr_path, channel, artifact_alias, upload_record_file, client_id, result_queue):
+def isolated_upload_process(zarr_path, channel, artifact_alias, client_id, result_queue):
     """Run the upload in a separate process to isolate network context"""
     try:
         # Set up a new asyncio event loop for this process
@@ -392,7 +390,6 @@ def isolated_upload_process(zarr_path, channel, artifact_alias, upload_record_fi
         # Create a new uploader instance in this process
         uploader = ArtifactUploader(
             artifact_alias=artifact_alias,
-            record_file=upload_record_file,
             client_id=f"{client_id}-subprocess-{os.getpid()}"
         )
         
@@ -503,7 +500,6 @@ async def upload_zarr_file(zarr_file: str) -> bool:
     # Create uploader instance with optimized concurrency
     uploader = ArtifactUploader(
         artifact_alias=ARTIFACT_ALIAS,
-        record_file=UPLOAD_RECORD_FILE,
         client_id=client_id
     )
     
@@ -742,11 +738,8 @@ async def process_folder(folder_name: str) -> bool:
         # Clean up
         print(f"Cleaning up zarr file: {zarr_filename}")
         shutil.rmtree(zarr_path)
-        
-        # Delete upload record file
-        if os.path.exists(UPLOAD_RECORD_FILE):
-            os.remove(UPLOAD_RECORD_FILE)
-        
+        # Clean up tmp directory
+        shutil.rmtree(STITCHED_DIR)
         return True
         
     except Exception as e:
