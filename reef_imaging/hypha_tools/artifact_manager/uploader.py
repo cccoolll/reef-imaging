@@ -63,7 +63,13 @@ class ArtifactUploader:
         parts = folder_name.split('_')
         if len(parts) >= 3:
             # Format: 20250410-fucci-time-lapse-scan_2025-04-10_13-50-7.762411
-            return parts[1] + '_' + parts[2].split('.')[0]  # Returns: 2025-04-10_13-50-7
+            time_part = parts[2].split('.')[0]  # Get time part without microseconds
+            time_components = time_part.split('-')
+            if len(time_components) == 3:
+                # Pad single-digit seconds with leading zero
+                time_components[2] = time_components[2].zfill(2)
+                time_part = '-'.join(time_components)
+            return parts[1] + '_' + time_part  # Returns: 2025-04-10_13-50-02
         return folder_name  # Fallback to full folder name if format doesn't match
     
     async def upload_single_file(self, local_file: str, relative_path: str) -> bool:

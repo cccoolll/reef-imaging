@@ -123,11 +123,17 @@ def cleanup_zarr_file(zarr_file: str):
 
 def extract_datetime_from_folder(folder_name: str) -> Optional[str]:
     """Extract the datetime string from a folder name."""
-    # Look for timestamp in format YYYY-MM-DD_HH-MM-SS
-    pattern = r"(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})"
-    match = re.search(pattern, folder_name)
-    if match:
-        return match.group(1)
+    parts = folder_name.split('_')
+    if len(parts) >= 3:
+        # Format: 20250429-scan-time-lapse_2025-04-29_17-53-2.861421
+        date_part = parts[1]  # Extract date part: 2025-04-29
+        time_part = parts[2].split('.')[0]  # Extract time part without microseconds: 17-53-2
+        time_components = time_part.split('-')
+        if len(time_components) == 3:
+            # Pad single-digit seconds with leading zero
+            time_components[2] = time_components[2].zfill(2)
+            time_part = '-'.join(time_components)
+        return date_part + '_' + time_part
     return None
 
 
@@ -201,7 +207,7 @@ async def create_dataset_for_folder(folder_name: str) -> Optional[str]:
     """Create a dataset for a specific folder timestamp."""
     global gallery_manager
     
-    folder_datetime = extract_datetime_from_folder(folder_name)
+    folder_datetime = uploader.extract_datetime_from_folder(folder_name)
     if not folder_datetime:
         print(f"Could not extract datetime from folder name: {folder_name}")
         return None
