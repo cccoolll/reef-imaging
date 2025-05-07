@@ -14,7 +14,7 @@ load_dotenv()
 class Config:
     """Configuration settings for the artifact manager"""
     SERVER_URL = "https://hypha.aicell.io"
-    WORKSPACE_TOKEN = os.getenv("SQUID_WORKSPACE_TOKEN")
+    WORKSPACE_TOKEN = os.getenv("AGENT_LENS_WORKSPACE_TOKEN")
     CONCURRENCY_LIMIT = 25  # Max number of concurrent uploads (increased from 10)
     MAX_RETRIES = 300  # Maximum number of retry attempts
     MAX_RETRIES_PER_FILE = 10  # Maximum number of retry attempts per file
