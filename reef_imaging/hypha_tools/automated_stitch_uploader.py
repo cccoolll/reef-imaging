@@ -19,7 +19,7 @@ import tempfile
 # Import shared tools from artifact_manager
 from artifact_manager.core import Config, HyphaConnection
 from artifact_manager.uploader import ArtifactUploader
-from artifact_manager.stitch_manager import StitchManager, ImageFileParser
+from artifact_manager.stitch_manager import StitchManager, ImageFileParser, add_chunk_metadata
 from artifact_manager.gallery_manager import GalleryManager
 
 # Constants
@@ -30,7 +30,7 @@ STITCHED_DIR = tempfile.mkdtemp(prefix="stitch_zarr_")
 STITCH_RECORD_FILE = "stitch_upload_progress.txt"
 UPLOAD_RECORD_FILE = "zarr_upload_record.json"
 CHECK_INTERVAL = 15  # Check for new files every 15 seconds
-STABILITY_WINDOW = 10  # Consider folder stable after 15 seconds of no changes
+STABILITY_WINDOW = 5  # Consider folder stable after 5 seconds of no changes
 client_id = "reef-client-stitch-uploader"
 # Load environment variables
 load_dotenv()
@@ -207,7 +207,7 @@ async def create_dataset_for_folder(folder_name: str) -> Optional[str]:
     """Create a dataset for a specific folder timestamp."""
     global gallery_manager
     
-    folder_datetime = uploader.extract_datetime_from_folder(folder_name)
+    folder_datetime = extract_datetime_from_folder(folder_name)
     if not folder_datetime:
         print(f"Could not extract datetime from folder name: {folder_name}")
         return None
@@ -234,7 +234,7 @@ async def create_dataset_for_folder(folder_name: str) -> Optional[str]:
         return None
 
 
-async def stitch_folder(folder_path: str) -> Tuple[bool, Optional[str]]:
+async def stitch_folder(folder_path: str) -> Tuple[bool, Optional[str], Optional[Dict]]:
     """Implement stitching functionality using the StitchManager class."""
     try:
         # Extract folder name and create zarr filename
@@ -251,17 +251,17 @@ async def stitch_folder(folder_path: str) -> Tuple[bool, Optional[str]]:
         # Check inputs exist
         if not os.path.exists(image_folder):
             print(f"Image folder {image_folder} does not exist")
-            return False, None
+            return False, None, None
         if not os.path.exists(parameter_file):
             print(f"Parameter file {parameter_file} does not exist")
-            return False, None
+            return False, None, None
             
         # Load coordinates file
         if os.path.exists(coordinates_file):
             coordinates = pd.read_csv(coordinates_file)
         else:
             print(f"Coordinates file {coordinates_file} not found")
-            return False, None
+            return False, None, None
             
         # Stage limits
         stage_limits = {
@@ -277,7 +277,7 @@ async def stitch_folder(folder_path: str) -> Tuple[bool, Optional[str]]:
         image_info = image_parser.parse_image_filenames(image_folder)
         if not image_info:
             print("No image files found in the folder")
-            return False, None
+            return False, None, None
             
         channels = list(set(info["channel_name"] for info in image_info))
         print(f"Found {len(image_info)} images with {len(channels)} channels")
@@ -288,7 +288,7 @@ async def stitch_folder(folder_path: str) -> Tuple[bool, Optional[str]]:
         
         if not selected_channel:
             print("No matching channels found in the data")
-            return False, None
+            return False, None, None
         
         # Initialize stitch manager
         stitch_manager = StitchManager()
@@ -312,14 +312,73 @@ async def stitch_folder(folder_path: str) -> Tuple[bool, Optional[str]]:
             pyramid_levels=6
         )
         
+        # Generate chunk metadata
+        chunk_metadata = {}
+        
+        # Extract imaging parameters for metadata
+        with open(parameter_file, 'r') as f:
+            imaging_params = json.load(f)
+        
+        # Create metadata for each coordinate in the stitched image
+        for _, row in coordinates.iterrows():
+            region = row.get('region', 'unknown')
+            x_idx = int(row.get('i', 0))
+            y_idx = int(row.get('j', 0))
+            
+            # Physical coordinates
+            x_mm = float(row.get('x (mm)', 0))
+            y_mm = float(row.get('y (mm)', 0))
+            z_mm = float(row.get('z (mm)', 0))
+            
+            # Create a chunk identifier string based on the x,y,z indices
+            # Default to (0, z-idx, y-idx, x-idx) since zarr default dimension order is t,z,y,x
+            # For simplicity, we're using (y-idx, x-idx) as our 2D key
+            chunk_key = f"({y_idx}, {x_idx})"
+            
+            # Collect metadata for this chunk
+            chunk_metadata[chunk_key] = {
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "time": datetime.now().strftime("%H:%M:%S"),
+                "folder_name": folder_name,
+                "region": region,
+                "coordinates_grid": (x_idx, y_idx),  # Grid coordinates (i, j)
+                "location_mm": (x_mm, y_mm, z_mm),   # Physical stage position in mm
+                "acquisition_params": {
+                    "exposure_ms": imaging_params.get("exposure_ms", 0),
+                    "gain": imaging_params.get("gain", 0)
+                }
+            }
+        
+        zarr_path = os.path.join(STITCHED_DIR, zarr_filename)
+        
+        # Apply the chunk metadata to the zarr file
+        print("Adding chunk metadata to zarr file...")
+        metadata_success = add_chunk_metadata(zarr_path, chunk_metadata)
+        if not metadata_success:
+            print("Warning: Failed to add chunk metadata")
+        
+        # Add dataset-level metadata
+        dataset_metadata = {
+            "title": f"Image Map {folder_datetime}",
+            "description": f"Stitched image map from {folder_name}",
+            "date_created": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "software_version": "1.0.0",
+            "experiment_id": EXPERIMENT_ID,
+            "imaging_modality": "brightfield and fluorescence",
+            "channels": selected_channel
+        }
+        
+        # We can use the general dataset metadata function too
+        stitch_manager.add_dataset_metadata(zarr_path, dataset_metadata)
+        
         print(f"Stitching successfully completed, zarr file created: {zarr_filename}")
-        return True, zarr_filename
+        return True, zarr_filename, chunk_metadata
         
     except Exception as e:
         print(f"Error during stitching: {e}")
         import traceback
         traceback.print_exc()
-        return False, None
+        return False, None, None
 
 
 # Function to run in separate process for isolated network context
@@ -644,7 +703,7 @@ async def process_folder(folder_name: str) -> bool:
     
     # Stitch the folder
     print(f"\nStarting stitching process for folder: {folder_name}")
-    stitch_success, zarr_filename = await stitch_folder(folder_path)
+    stitch_success, zarr_filename, chunk_metadata = await stitch_folder(folder_path)
     if not stitch_success:
         print(f"Failed to stitch folder: {folder_name}")
         return False
