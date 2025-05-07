@@ -29,7 +29,7 @@ STITCHED_DIR = "/media/reef/harddisk/test_stitch_zarr"
 STITCH_RECORD_FILE = "stitch_upload_progress.txt"
 UPLOAD_RECORD_FILE = "zarr_upload_record.json"
 CHECK_INTERVAL = 15  # Check for new files every 15 seconds
-STABILITY_WINDOW = 15  # Consider folder stable after 15 seconds of no changes
+STABILITY_WINDOW = 10  # Consider folder stable after 15 seconds of no changes
 client_id = "reef-client-stitch-uploader"
 # Load environment variables
 load_dotenv()
@@ -130,14 +130,14 @@ def extract_datetime_from_folder(folder_name: str) -> Optional[str]:
     return None
 
 
-def is_folder_stable(folder_path: str) -> bool:
+async def is_folder_stable(folder_path: str) -> bool:
     """Check if a folder is stable (no changes for STABILITY_WINDOW seconds)."""
     try:
         # Get initial modification time
         initial_mtime = os.path.getmtime(folder_path)
         
         # Wait for stability window
-        time.sleep(STABILITY_WINDOW)
+        await asyncio.sleep(STABILITY_WINDOW)
         
         # Check if modification time has changed
         current_mtime = os.path.getmtime(folder_path)
@@ -227,7 +227,7 @@ async def create_dataset_for_folder(folder_name: str) -> Optional[str]:
         return None
 
 
-def stitch_folder(folder_path: str) -> Tuple[bool, Optional[str]]:
+async def stitch_folder(folder_path: str) -> Tuple[bool, Optional[str]]:
     """Implement stitching functionality using the StitchManager class."""
     try:
         # Extract folder name and create zarr filename
@@ -296,8 +296,9 @@ def stitch_folder(folder_path: str) -> Tuple[bool, Optional[str]]:
             pyramid_levels=6
         )
         
-        # Process images
-        stitch_manager.process_images(
+        # Process images in background thread
+        await asyncio.to_thread(
+            stitch_manager.process_images,
             image_info=image_info,
             coordinates=coordinates,
             selected_channel=selected_channel,
@@ -624,7 +625,7 @@ async def process_folder(folder_name: str) -> bool:
     
     # Wait for folder to be stable
     print(f"Waiting for folder {folder_name} to be stable...")
-    while not is_folder_stable(folder_path):
+    while not await is_folder_stable(folder_path):
         print(f"Folder {folder_name} is still being modified, waiting...")
         await asyncio.sleep(CHECK_INTERVAL)
     
@@ -636,7 +637,7 @@ async def process_folder(folder_name: str) -> bool:
     
     # Stitch the folder
     print(f"\nStarting stitching process for folder: {folder_name}")
-    stitch_success, zarr_filename = stitch_folder(folder_path)
+    stitch_success, zarr_filename = await stitch_folder(folder_path)
     if not stitch_success:
         print(f"Failed to stitch folder: {folder_name}")
         return False
