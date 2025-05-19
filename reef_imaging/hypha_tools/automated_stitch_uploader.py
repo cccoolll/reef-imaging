@@ -901,13 +901,6 @@ async def main():
             while current_idx < len(all_folders):
                 folder_to_process = all_folders[current_idx]
                 
-                # Check if we've reached the end folder
-                if end_folder and folder_to_process == end_folder:
-                    print(f"\nReached end folder: {end_folder}")
-                    if input("\nDo you want to continue monitoring for new folders? (y/n): ").lower() != 'y':
-                        return
-                    break
-                
                 # Skip if already processed
                 if folder_to_process in processed_folders:
                     print(f"Folder {folder_to_process} already processed, skipping.")
@@ -927,6 +920,13 @@ async def main():
                     # If failed, retry after a delay
                     print(f"Failed to process {folder_to_process}. Retrying in {CHECK_INTERVAL} seconds...")
                     await asyncio.sleep(CHECK_INTERVAL)
+                
+                # Check if we've reached the end folder AFTER processing it
+                if end_folder and folder_to_process == end_folder:
+                    print(f"\nReached end folder: {end_folder}")
+                    if input("\nDo you want to continue monitoring for new folders? (y/n): ").lower() != 'y':
+                        return
+                    break
             
             # If no end folder was specified, continue monitoring
             if not end_folder:
