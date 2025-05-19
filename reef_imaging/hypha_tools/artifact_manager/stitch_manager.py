@@ -223,7 +223,8 @@ class ZarrWriter:
                 shape=(self.canvas_height, self.canvas_width),
                 chunks=self.chunk_size,
                 dtype=np.uint8,
-                compressor=zarr.Blosc(cname="zstd", clevel=5, shuffle=zarr.Blosc.BITSHUFFLE)
+                compressor=zarr.Blosc(cname="zstd", clevel=5, shuffle=zarr.Blosc.BITSHUFFLE),
+                dimension_separator='/'
             )
 
             # Create pyramid levels
@@ -245,7 +246,8 @@ class ZarrWriter:
                     shape=level_shape,
                     chunks=level_chunks,
                     dtype=np.uint8,
-                    compressor=zarr.Blosc(cname="zstd", clevel=5, shuffle=zarr.Blosc.BITSHUFFLE)
+                    compressor=zarr.Blosc(cname="zstd", clevel=5, shuffle=zarr.Blosc.BITSHUFFLE),
+                    dimension_separator='/'
                 )
 
         self.root = root

@@ -24,7 +24,7 @@ from artifact_manager.gallery_manager import GalleryManager
 
 # Constants
 BASE_DIR = "/media/reef/harddisk"
-EXPERIMENT_ID = "20250429-scan-time-lapse"
+EXPERIMENT_ID = "20250506-scan-time-lapse"
 # Replace hardcoded STITCHED_DIR with temp directory
 STITCHED_DIR = tempfile.mkdtemp(prefix="stitch_zarr_")
 STITCH_RECORD_FILE = "stitch_upload_progress.txt"
@@ -33,7 +33,7 @@ STABILITY_WINDOW = 5  # Consider folder stable after 5 seconds of no changes
 client_id = "reef-client-stitch-uploader"
 # Load environment variables
 load_dotenv()
-ARTIFACT_ALIAS = "agent-lens/image-map-20250429-treatment-zip"
+ARTIFACT_ALIAS = "agent-lens/image-map-20250506-treatment-zip"
 # Timeout and retry settings
 CONNECTION_TIMEOUT = 60  # Timeout for connection operations in seconds
 OPERATION_TIMEOUT = 3600  # Timeout for Hypha operations in seconds (increased from 60)
@@ -124,7 +124,7 @@ def extract_datetime_from_folder(folder_name: str) -> Optional[str]:
     """Extract the datetime string from a folder name."""
     parts = folder_name.split('_')
     if len(parts) >= 3:
-        # Format: 20250429-scan-time-lapse_2025-04-29_17-53-2.861421
+        # Format: 20250506'-scan-time-lapse_2025-04-29_17-53-2.861421
         date_part = parts[1]  # Extract date part: 2025-04-29
         time_part = parts[2].split('.')[0]  # Extract time part without microseconds: 17-53-2
         time_components = time_part.split('-')
@@ -450,44 +450,76 @@ async def process_channel_upload(zarr_path, channel, uploader):
             await uploader.connection.disconnect()
 
 # Replace the existing upload_zarr_channel function with one that uses multiprocessing
-async def upload_zarr_channel(zarr_path: str, channel: str, dataset_alias: str) -> bool:
-    """Upload a single channel from a zarr file to the artifact manager."""
-    global uploader
-    
-    try:
-        # Update uploader's artifact alias
-        uploader.artifact_alias = dataset_alias
-        
-        # The full path to the channel in the zarr file
-        channel_path = os.path.join(zarr_path, channel)
-        
-        if not os.path.exists(channel_path):
-            print(f"Channel directory {channel_path} not found in zarr file")
-            return False
-        
-        # Set the relative path for upload
-        relative_path = f"{channel}.zip"
-        print(f"Uploading channel {channel} as {relative_path}")
-        
-        # Use the zip_and_upload_folder method
-        success = await uploader.zip_and_upload_folder(
-            folder_path=channel_path,
-            relative_path=relative_path,
-            delete_zip_after=True
-        )
-        
-        if success:
-            print(f"Successfully uploaded channel {channel}")
-        else:
-            print(f"Failed to upload channel {channel}")
-            
-        return success
-            
-    except Exception as e:
-        print(f"Error uploading channel {channel}: {e}")
-        import traceback
-        traceback.print_exc()
+async def upload_zarr_channel(zarr_path: str, channel_name: str, dataset_alias: str) -> bool:
+    """
+    Uploads contents of a Zarr channel group.
+    Specifically, for each scale array within the channel:
+    - Uploads scale's .zarray and .zattrs files.
+    - Zips and uploads each first-level chunk directory within the scale array.
+    Example upload paths:
+    - channel_name/scale_name/.zarray
+    - channel_name/scale_name/chunk_dir_name.zip
+    """
+    global uploader # This uploader instance is initialized in setup_hypha_connection and configured by process_folder
+    # uploader.artifact_alias should already be set by the caller (e.g., process_folder) to dataset_alias
+
+    channel_group_local_path = os.path.join(zarr_path, channel_name)
+
+    if not os.path.isdir(channel_group_local_path):
+        print(f"Channel group path {channel_group_local_path} not found for channel {channel_name}.")
         return False
+
+    # Iterate over scale arrays within the channel group (e.g., scale0, scale1)
+    for scale_array_name in os.listdir(channel_group_local_path): # e.g. "scale0", "scale1"
+        scale_array_local_path = os.path.join(channel_group_local_path, scale_array_name)
+
+        # Check if it's a Zarr array (must be a directory and contain .zarray)
+        if os.path.isdir(scale_array_local_path) and \
+           os.path.exists(os.path.join(scale_array_local_path, ".zarray")):
+            
+            print(f"    Processing scale array: {channel_name}/{scale_array_name}")
+
+            # Upload metadata files (.zarray, .zattrs, etc.) for this scale array
+            # Also, zip and upload chunk group directories
+            for item_in_scale_array in os.listdir(scale_array_local_path):
+                item_local_path = os.path.join(scale_array_local_path, item_in_scale_array)
+
+                if os.path.isfile(item_local_path):
+                    # Typically .zarray, .zattrs. Could be other metadata files.
+                    relative_upload_path = f"{channel_name}/{scale_array_name}/{item_in_scale_array}"
+                    print(f"      Uploading metadata file: {relative_upload_path}")
+                    success = await uploader.upload_single_file(
+                        local_file=item_local_path,
+                        relative_path=relative_upload_path
+                    )
+                    if not success:
+                        print(f"      Failed to upload metadata file {relative_upload_path}")
+                        return False
+                
+                elif os.path.isdir(item_local_path):
+                    # This is a chunk group directory within the scale array (e.g., "0", "1" for first dimension of chunks)
+                    chunk_group_dir_to_zip = item_local_path
+                    chunk_group_name = item_in_scale_array # e.g., "0"
+                    
+                    # Relative path for the zip file: channel_name/scale_array_name/chunk_group_name.zip
+                    zip_relative_upload_path = f"{channel_name}/{scale_array_name}/{chunk_group_name}.zip"
+                    
+                    print(f"      Zipping and uploading chunk group: {zip_relative_upload_path}")
+                    success = await uploader.zip_and_upload_folder(
+                        folder_path=chunk_group_dir_to_zip,
+                        relative_path=zip_relative_upload_path,
+                        delete_zip_after=True
+                    )
+                    if not success:
+                        print(f"      Failed to upload chunk group zip {zip_relative_upload_path}")
+                        return False
+            # Finished processing items in this scale_array_local_path
+        # else:
+            # This item within the channel group is not a Zarr array recognized by the presence of .zarray.
+            # It could be the .zgroup or .zattrs file for the channel group itself, which is handled by the calling function (process_folder).
+            pass
+            
+    return True # All processed successfully for this channel
 
 
 async def upload_zarr_file(zarr_file: str) -> bool:
@@ -536,8 +568,8 @@ async def upload_zarr_file(zarr_file: str) -> bool:
 
                 # Read the current manifest with timeout (if needed, otherwise just edit)
                 dataset_manifest = {
-                    "name": "Full zarr dataset 20250429",
-                    "description": "The Full zarr dataset for U2OS FUCCI Drug Treatment from 20250429",
+                    "name": "Full zarr dataset 20250506",
+                    "description": "The Full zarr dataset for U2OS FUCCI Drug Treatment from 20250506",
                 }
                 
                 # Put the dataset in staging mode with timeout
@@ -711,35 +743,87 @@ async def process_folder(folder_name: str) -> bool:
         return False
     
     try:
-        # Get channels from the zarr file
-        channels = [d for d in os.listdir(zarr_path) if os.path.isdir(os.path.join(zarr_path, d))]
-        print(f"Found channels in zarr file: {channels}")
+        # Ensure uploader is set for this dataset_alias (created by create_dataset_for_folder)
+        uploader.artifact_alias = dataset_alias
+
+        # 1. Upload root .zgroup for the dataset
+        root_zgroup_local_path = os.path.join(zarr_path, ".zgroup")
+        if os.path.exists(root_zgroup_local_path):
+            print(f"Uploading root .zgroup for dataset {dataset_alias}")
+            success = await uploader.upload_single_file(
+                local_file=root_zgroup_local_path,
+                relative_path=".zgroup" # Relative to dataset_alias
+            )
+            if not success:
+                print(f"Failed to upload root .zgroup for {dataset_alias}")
+                return False
+        else:
+            print(f"Warning: Root .zgroup not found at {root_zgroup_local_path}")
+
+        # Get channels from the zarr file (these are Zarr groups)
+        channel_names = []
+        if os.path.exists(zarr_path): # Ensure zarr_path exists before listing its contents
+            channel_names = [d for d in os.listdir(zarr_path) if os.path.isdir(os.path.join(zarr_path, d))]
         
-        # Upload each channel
-        all_success = True
-        for channel in channels:
-            print(f"Processing channel: {channel}")
-            channel_success = await upload_zarr_channel(zarr_path, channel, dataset_alias)
-            if not channel_success:
-                print(f"Failed to upload channel {channel}")
-                all_success = False
-                break
+        print(f"Found channels in zarr file {zarr_filename}: {channel_names}")
         
-        if not all_success:
-            print("Failed to upload all channels")
+        all_uploads_successful = True
+        for channel_name in channel_names:
+            print(f"Processing channel group: {channel_name} for dataset {dataset_alias}")
+
+            # 2a. Upload .zgroup for the channel group itself
+            channel_zgroup_local_path = os.path.join(zarr_path, channel_name, ".zgroup")
+            if os.path.exists(channel_zgroup_local_path):
+                relative_channel_zgroup_path = f"{channel_name}/.zgroup"
+                print(f"  Uploading .zgroup for channel {channel_name} to {relative_channel_zgroup_path}")
+                success = await uploader.upload_single_file(
+                    local_file=channel_zgroup_local_path,
+                    relative_path=relative_channel_zgroup_path
+                )
+                if not success:
+                    print(f"  Failed to upload .zgroup for channel {channel_name}")
+                    all_uploads_successful = False; break
+            else:
+                print(f"  Warning: .zgroup not found for channel {channel_name} at {channel_zgroup_local_path}")
+            
+            # 2a. Upload .zattrs for the channel group itself (if exists)
+            channel_zattrs_local_path = os.path.join(zarr_path, channel_name, ".zattrs")
+            if os.path.exists(channel_zattrs_local_path):
+                relative_channel_zattrs_path = f"{channel_name}/.zattrs"
+                print(f"  Uploading .zattrs for channel {channel_name} to {relative_channel_zattrs_path}")
+                success = await uploader.upload_single_file(
+                    local_file=channel_zattrs_local_path,
+                    relative_path=relative_channel_zattrs_path
+                )
+                if not success:
+                    print(f"  Failed to upload .zattrs for channel {channel_name}")
+                    all_uploads_successful = False; break
+            # else: Not all channel groups will have a .zattrs, so this is not necessarily a warning
+
+            if not all_uploads_successful: break
+
+            # 2b. Call specialized function to upload contents of this channel group (scales, chunks)
+            print(f"  Uploading data for channel {channel_name}...")
+            channel_content_success = await upload_zarr_channel(zarr_path, channel_name, dataset_alias)
+            if not channel_content_success:
+                print(f"  Failed to upload data contents for channel {channel_name}")
+                all_uploads_successful = False; break
+        
+        if not all_uploads_successful:
+            print(f"Failed to upload all parts of Zarr dataset {dataset_alias} for folder {folder_name}")
             return False
         
         # Commit the dataset
+        print(f"All uploads for {dataset_alias} successful. Committing dataset...")
         commit_success = await gallery_manager.commit_dataset(dataset_alias)
         if not commit_success:
             print(f"Failed to commit dataset {dataset_alias}")
             return False
         
-        # Clean up
-        print(f"Cleaning up zarr file: {zarr_filename}")
-        shutil.rmtree(zarr_path)
-        # Clean up tmp directory
-        shutil.rmtree(STITCHED_DIR)
+        # Clean up the specific zarr directory for this folder
+        print(f"Cleaning up zarr path: {zarr_path}")
+        if os.path.exists(zarr_path):
+            shutil.rmtree(zarr_path)
         return True
         
     except Exception as e:
