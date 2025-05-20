@@ -225,6 +225,13 @@ class OrchestrationSystem:
                 logger.error(f"Error decoding JSON from {CONFIG_FILE_PATH} for simulation. Will not update tasks from file this cycle.")
                 return # Don't proceed if config is corrupt
 
+        # Reset operational_state for all samples in the loaded raw_config_data
+        if raw_config_data and "samples" in raw_config_data and isinstance(raw_config_data["samples"], list):
+            logger.info("Resetting 'operational_state' for all samples in the loaded configuration file.")
+            for sample_entry in raw_config_data["samples"]:
+                if isinstance(sample_entry, dict): # Ensure sample_entry is a dict before trying to set a key
+                    sample_entry["operational_state"] = {}
+
         current_time = datetime.now()
 
         for sample_config_from_file in raw_config_data.get("samples", []):
