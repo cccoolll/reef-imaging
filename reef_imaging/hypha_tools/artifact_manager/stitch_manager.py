@@ -8,6 +8,7 @@ from tqdm import tqdm
 import json
 from typing import Dict, List, Tuple, Optional, Union, Any
 import shutil
+import re
 
 class ImagingParameters:
     """Class for handling imaging parameters"""
@@ -222,7 +223,8 @@ class ZarrWriter:
                 shape=(self.canvas_height, self.canvas_width),
                 chunks=self.chunk_size,
                 dtype=np.uint8,
-                compressor=zarr.Blosc(cname="zstd", clevel=5, shuffle=zarr.Blosc.BITSHUFFLE)
+                compressor=zarr.Blosc(cname="zstd", clevel=5, shuffle=zarr.Blosc.BITSHUFFLE),
+                dimension_separator='/'
             )
 
             # Create pyramid levels
@@ -244,7 +246,8 @@ class ZarrWriter:
                     shape=level_shape,
                     chunks=level_chunks,
                     dtype=np.uint8,
-                    compressor=zarr.Blosc(cname="zstd", clevel=5, shuffle=zarr.Blosc.BITSHUFFLE)
+                    compressor=zarr.Blosc(cname="zstd", clevel=5, shuffle=zarr.Blosc.BITSHUFFLE),
+                    dimension_separator='/'
                 )
 
         self.root = root
@@ -336,6 +339,80 @@ class ImageFileParser:
         return image_info
 
 
+def add_chunk_metadata(zarr_path: str, chunk_metadata: Dict[str, Dict[str, Any]]) -> bool:
+    """
+    Add per-chunk metadata to an existing OME-Zarr dataset.
+    
+    Args:
+        zarr_path: Path to the OME-Zarr dataset
+        chunk_metadata: Dictionary containing metadata for each chunk.
+                       Keys should be string representations of chunk coordinates (e.g., "(0, 0, 0)")
+                       Values should be dictionaries containing metadata fields
+    
+    Returns:
+        bool: True if metadata was added successfully, False otherwise
+    
+    Example:
+        >>> chunk_metadata = {
+        ...     "(0, 0, 0)": {"date": "2025-05-06", "sample": "A1", "location_mm": (10.5, 15.2), "coordinates": (0, 0), "notes": "Sample area 1"},
+        ...     "(0, 1, 0)": {"date": "2025-05-06", "sample": "A2", "location_mm": (10.5, 20.3), "coordinates": (0, 1), "notes": "Sample area 2"}
+        ... }
+        >>> add_chunk_metadata("/path/to/dataset.zarr", chunk_metadata)
+        True
+    """
+    try:
+        # Validate zarr path
+        if not os.path.exists(zarr_path) or not os.path.isdir(zarr_path):
+            print(f"Error: Invalid zarr path: {zarr_path}")
+            return False
+            
+        # Validate metadata format
+        for chunk_coords, metadata in chunk_metadata.items():
+            # Check if chunk coordinates format is valid (e.g., "(0, 0, 0)")
+            if not re.match(r"^\(\d+(?:,\s*\d+)*\)$", chunk_coords):
+                print(f"Error: Invalid chunk coordinate format: {chunk_coords}")
+                return False
+                
+            # Check if metadata is a dictionary
+            if not isinstance(metadata, dict):
+                print(f"Error: Metadata for chunk {chunk_coords} must be a dictionary")
+                return False
+
+        # Path to chunk metadata file
+        metadata_file = os.path.join(zarr_path, "chunk_metadata.json")
+        
+        # Load existing metadata if it exists
+        existing_metadata = {}
+        if os.path.exists(metadata_file):
+            try:
+                with open(metadata_file, 'r') as f:
+                    existing_metadata = json.load(f)
+                print(f"Found existing metadata for {len(existing_metadata)} chunks")
+            except json.JSONDecodeError:
+                print(f"Warning: Could not parse existing metadata file, creating new one")
+            except Exception as e:
+                print(f"Warning: Error reading existing metadata file: {e}")
+        
+        # Update metadata with new values
+        for chunk_coords, metadata in chunk_metadata.items():
+            if chunk_coords in existing_metadata:
+                existing_metadata[chunk_coords].update(metadata)
+            else:
+                existing_metadata[chunk_coords] = metadata
+                
+        # Write updated metadata back to file
+        with open(metadata_file, 'w') as f:
+            json.dump(existing_metadata, f, indent=2)
+            
+        print(f"Successfully added metadata for {len(chunk_metadata)} chunks to {metadata_file}")
+        return True
+        
+    except Exception as e:
+        print(f"Error adding chunk metadata: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+        
 class StitchManager:
     """Manages the image stitching process"""
     
@@ -561,6 +638,53 @@ class StitchManager:
                     self.zarr_writer.update_pyramid(channel, level, image, x_start, y_start)
 
                 del image
+
+    def add_dataset_metadata(self, zarr_path: str, metadata: Dict[str, Any]) -> bool:
+        """
+        Add general metadata to the root of an OME-Zarr dataset.
+        
+        Args:
+            zarr_path: Path to the OME-Zarr dataset
+            metadata: Dictionary containing dataset-level metadata
+            
+        Returns:
+            bool: True if metadata was added successfully, False otherwise
+        """
+        try:
+            # Validate zarr path
+            if not os.path.exists(zarr_path) or not os.path.isdir(zarr_path):
+                print(f"Error: Invalid zarr path: {zarr_path}")
+                return False
+                
+            # Path to dataset metadata file
+            metadata_file = os.path.join(zarr_path, "dataset_metadata.json")
+            
+            # Load existing metadata if it exists
+            existing_metadata = {}
+            if os.path.exists(metadata_file):
+                try:
+                    with open(metadata_file, 'r') as f:
+                        existing_metadata = json.load(f)
+                except json.JSONDecodeError:
+                    print(f"Warning: Could not parse existing metadata file, creating new one")
+                except Exception as e:
+                    print(f"Warning: Error reading existing metadata file: {e}")
+            
+            # Update metadata with new values
+            existing_metadata.update(metadata)
+                    
+            # Write updated metadata back to file
+            with open(metadata_file, 'w') as f:
+                json.dump(existing_metadata, f, indent=2)
+                
+            print(f"Successfully added dataset metadata to {metadata_file}")
+            return True
+            
+        except Exception as e:
+            print(f"Error adding dataset metadata: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
 
 
 def stitch_images_example() -> None:

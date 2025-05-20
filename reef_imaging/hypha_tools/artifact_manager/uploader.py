@@ -18,12 +18,10 @@ class ArtifactUploader:
     
     def __init__(self, 
                  artifact_alias: str, 
-                 record_file: str,
                  connection: Optional[HyphaConnection] = None,
                  client_id: str = "reef-client"):
         """Initialize the uploader with the artifact alias and record file"""
         self.artifact_alias = artifact_alias
-        self.upload_record = UploadRecord(record_file)
         self.connection = connection or HyphaConnection()
         self.client_id = client_id
         self.connection_task = None  # Track connection task at class level
@@ -63,15 +61,18 @@ class ArtifactUploader:
         parts = folder_name.split('_')
         if len(parts) >= 3:
             # Format: 20250410-fucci-time-lapse-scan_2025-04-10_13-50-7.762411
-            return parts[1] + '_' + parts[2].split('.')[0]  # Returns: 2025-04-10_13-50-7
+            time_part = parts[2].split('.')[0]  # Get time part without microseconds
+            time_components = time_part.split('-')
+            if len(time_components) == 3:
+                # Pad single-digit seconds with leading zero
+                time_components[2] = time_components[2].zfill(2)
+                time_part = '-'.join(time_components)
+            return parts[1] + '_' + time_part  # Returns: 2025-04-10_13-50-02
         return folder_name  # Fallback to full folder name if format doesn't match
     
     async def upload_single_file(self, local_file: str, relative_path: str) -> bool:
         """Upload a single file to the artifact manager using the direct approach from the tutorial."""
-        # Skip if file was already uploaded
-        if self.upload_record.is_uploaded(relative_path):
-            print(f"File {relative_path} already uploaded, skipping")
-            return True
+
 
         file_size = os.path.getsize(local_file)
         print(f"Starting upload of {relative_path} ({file_size/1024/1024:.2f} MB)")
@@ -114,9 +115,6 @@ class ArtifactUploader:
                 if not ok:
                     raise RuntimeError(f"File upload failed for {local_file}, status={status_code}")
                 
-                # Record successful upload
-                self.upload_record.mark_uploaded(relative_path)
-                print(f"Successfully uploaded {relative_path} ({self.upload_record.completed_files}/{self.upload_record.total_files})")
                 self.last_progress_time = time.time()
                 return True
 
@@ -132,8 +130,6 @@ class ArtifactUploader:
 
     async def upload_files(self, to_upload: List[Tuple[str, str]]) -> bool:
         """Upload multiple files, one at a time - simplified without queues or complex concurrency."""
-        # Set total files for progress tracking
-        self.upload_record.set_total_files(len(to_upload))
         
         # Process files sequentially
         success = True
@@ -169,7 +165,7 @@ class ArtifactUploader:
         def create_zip_file(source_path, target_zip_path):
             print(f"Creating zip file for {source_path} in background thread...")
             try:
-                with zipfile.ZipFile(target_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                with zipfile.ZipFile(target_zip_path, 'w', 0) as zipf:
                     for root, _, files in os.walk(source_path):
                         for file in files:
                             file_path = os.path.join(root, file)
@@ -182,56 +178,51 @@ class ArtifactUploader:
                 print(f"Error creating zip file in background thread: {e}")
                 traceback.print_exc()
                 return False
-                
-        # Create a separate upload task
-        async def zip_and_upload_task():
-            try:
-                try:
-                    print(f"Starting zip file creation in background thread for {folder_path}...")
-                    # Run zip creation in a separate thread
-                    zip_success = await asyncio.to_thread(create_zip_file, folder_path, temp_zip_path)
-                    
-                    if not zip_success:
-                        print(f"Failed to create zip file for {folder_path}")
-                        return False
-                    
-                    if not os.path.exists(temp_zip_path):
-                        print(f"Expected zip file {temp_zip_path} doesn't exist after thread completion")
-                        return False
-                    
-                    # Make sure we're connected
-                    connected = await self.ensure_connected()
-                    if not connected:
-                        print(f"Failed to connect, retrying...")
-                        await asyncio.sleep(5)
-                        connected = await self.ensure_connected()
-                        if not connected:
-                            print(f"Failed to establish connection after retry")
-                            return False
-                    
-                    # Upload the zip file
-                    print(f"Zip creation complete, now uploading {temp_zip_path} to {relative_path}...")
-                    success = await self.upload_single_file(temp_zip_path, relative_path)
-                    
-                    return success
-                finally:
-                    # Always clean up the keepalive task
-                    
-                    # Clean up the temporary zip file if requested and if it exists
-                    if delete_zip_after and os.path.exists(temp_zip_path):
-                        try:
-                            os.unlink(temp_zip_path)
-                            print(f"Deleted temporary zip file: {temp_zip_path}")
-                        except Exception as e:
-                            print(f"Warning: Could not delete temporary file {temp_zip_path}: {e}")
-                    
-            except Exception as e:
-                print(f"Error during zip and upload process: {e}")
-                traceback.print_exc()
-                return False
         
-        # Execute the task and wait for it to complete
-        return await zip_and_upload_task()
+        try:
+            # First ensure we have a connection before starting the zip process
+            connected = await self.ensure_connected()
+            if not connected:
+                print(f"Failed to establish initial connection")
+                return False
+
+            # Start the zip process in a separate thread
+            print(f"Starting zip file creation in background thread for {folder_path}...")
+            zip_success = await asyncio.to_thread(create_zip_file, folder_path, temp_zip_path)
+            
+            if not zip_success:
+                print(f"Failed to create zip file for {folder_path}")
+                return False
+            
+            if not os.path.exists(temp_zip_path):
+                print(f"Expected zip file {temp_zip_path} doesn't exist after thread completion")
+                return False
+            
+            # Ensure connection is still alive after zipping
+            connected = await self.ensure_connected()
+            if not connected:
+                print(f"Failed to maintain connection after zipping")
+                return False
+            
+            # Upload the zip file
+            print(f"Zip creation complete, now uploading {temp_zip_path} to {relative_path}...")
+            success = await self.upload_single_file(temp_zip_path, relative_path)
+            
+            return success
+            
+        except Exception as e:
+            print(f"Error during zip and upload process: {e}")
+            traceback.print_exc()
+            return False
+            
+        finally:
+            # Clean up the temporary zip file if requested and if it exists
+            if delete_zip_after and os.path.exists(temp_zip_path):
+                try:
+                    os.unlink(temp_zip_path)
+                    print(f"Deleted temporary zip file: {temp_zip_path}")
+                except Exception as e:
+                    print(f"Warning: Could not delete temporary file {temp_zip_path}: {e}")
 
     async def upload_zarr_files(self, file_paths: List[str]) -> bool:
         """Upload zarr files to the artifact manager - simplified."""
@@ -253,7 +244,6 @@ class ArtifactUploader:
                         relative_path = os.path.join(base_name, rel_path)
                         to_upload.append((local_file, relative_path))
                 
-                self.upload_record.set_total_files(len(to_upload))
                 success = await self.upload_files(to_upload)
                 
                 if not success:
@@ -283,11 +273,7 @@ class ArtifactUploader:
                     relative_path = os.path.join(folder_name, rel_path)
                     to_upload.append((local_file, relative_path))
 
-        self.upload_record.set_total_files(len(to_upload))
         success = await self.upload_files(to_upload)
-
-        if success:
-            self.upload_record.save()
 
         return success
 
@@ -301,7 +287,6 @@ async def upload_zarr_example() -> None:
     
     uploader = ArtifactUploader(
         artifact_alias="agent-lens/image-map-20250429-treatment",
-        record_file="zarr_upload_record.json"
     )
     
     success = await uploader.upload_zarr_files(ORIGINAL_ZARR_PATHS)
@@ -323,7 +308,6 @@ async def upload_treatment_example() -> None:
     
     uploader = ArtifactUploader(
         artifact_alias="20250410-treatment",
-        record_file="treatment_upload_record.json"
     )
     
     success = await uploader.upload_treatment_data(SOURCE_DIRS)
