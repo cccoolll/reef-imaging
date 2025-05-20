@@ -3,6 +3,7 @@ import time
 import base64
 from IPython.display import Image, display
 from hypha_rpc import connect_to_server, login
+from hypha_rpc.utils.schema import schema_function
 import os
 import dotenv
 import logging
@@ -168,6 +169,16 @@ class OrchestrationSystem:
         self.local = local # local flag might not mean much without real connections
         self.server_url = "mock_server_url" # Not used for connections
         
+        # Configuration for orchestrator's own Hypha service
+        self.orchestrator_hypha_server_url = "http://localhost:9527" # Default
+        if not local and os.environ.get("ORCHESTRATOR_HYPHA_SERVER_URL"):
+            self.orchestrator_hypha_server_url = os.environ["ORCHESTRATOR_HYPHA_SERVER_URL"]
+        elif local and os.environ.get("ORCHESTRATOR_HYPHA_SERVER_URL_LOCAL"):
+             self.orchestrator_hypha_server_url = os.environ["ORCHESTRATOR_HYPHA_SERVER_URL_LOCAL"]
+        
+        self.orchestrator_hypha_service_id = "orchestrator-manager-simulation"
+        self.orchestrator_hypha_server_connection = None
+
         # Instantiate MOCK services
         loop = asyncio.get_event_loop()
         self.incubator = MockIncubator(SIM_INCUBATOR_ID, loop)
@@ -187,6 +198,202 @@ class OrchestrationSystem:
         self.health_check_tasks = {}
         self.active_task_name = None
         self._config_lock = asyncio.Lock() # Lock for reading/writing config file
+
+    async def _register_self_as_hypha_service(self):
+        logger.info(f"Registering orchestrator as a Hypha service with ID '{self.orchestrator_hypha_service_id}' on server '{self.orchestrator_hypha_server_url}'")
+        try:
+            token = None
+            if self.local:
+                token = os.environ.get("REEF_LOCAL_TOKEN")
+            else:
+                token = os.environ.get("ORCHESTRATOR_WORKSPACE_TOKEN", os.environ.get("REEF_WORKSPACE_TOKEN"))
+
+            server_config = {"server_url": self.orchestrator_hypha_server_url, "ping_interval": None}
+            if token:
+                server_config["token"] = token
+            self.orchestrator_hypha_server_connection = await connect_to_server(server_config)
+            logger.info(f"Successfully connected to Hypha server: {self.orchestrator_hypha_server_url}")
+
+            service_api = {
+                "name": "Orchestrator Manager (Simulation)",
+                "id": self.orchestrator_hypha_service_id,
+                "config": {
+                    "visibility": "public", 
+                    "run_in_executor": True 
+                },
+                "hello_orchestrator": self.hello_orchestrator,
+                "add_imaging_task": self.add_imaging_task,
+                "delete_imaging_task": self.delete_imaging_task,
+                "get_all_imaging_tasks": self.get_all_imaging_tasks,
+            }
+            
+            registered_service = await self.orchestrator_hypha_server_connection.register_service(service_api)
+            logger.info(f"Orchestrator management service registered successfully. Service ID: {registered_service.id}")
+            
+            try: # Log proxy URL for easy testing
+                ws = self.orchestrator_hypha_server_connection.config.workspace or "public" # Adjust if workspace is known
+                sid_full = registered_service.id
+                if ":" in sid_full:
+                    sid = sid_full.split(":")[-1]
+                else: # if id is already the short form
+                    sid = sid_full
+
+                proxy_url_base = self.orchestrator_hypha_server_url.replace("ws://", "http://").replace("wss://", "https://")
+                logger.info(f"Test with hello_orchestrator: {proxy_url_base}/{ws}/services/{self.orchestrator_hypha_service_id}/hello_orchestrator or {proxy_url_base}/{ws}/services/{sid}/hello_orchestrator")
+            except Exception as e:
+                logger.debug(f"Could not construct proxy URL for testing: {e}")
+
+        except Exception as e:
+            logger.error(f"Failed to register orchestrator as a Hypha service: {e}")
+            # Depending on criticality, might re-raise or set a flag
+
+    @schema_function(skip_self=True)
+    async def hello_orchestrator(self):
+        """Returns a hello message from the orchestrator."""
+        logger.info("hello_orchestrator service method called.")
+        return "Hello from the Simulated Orchestrator!"
+
+    @schema_function(skip_self=True)
+    async def add_imaging_task(self, task_definition: dict):
+        """Adds a new imaging task to config_simulation.json or updates it if name exists."""
+        logger.info(f"Attempting to add/update imaging task: {task_definition.get('name')}")
+        if not isinstance(task_definition, dict) or "name" not in task_definition or "settings" not in task_definition:
+            msg = "Invalid task definition: must be a dict with 'name' and 'settings'."
+            logger.error(msg)
+            return {"success": False, "message": msg}
+
+        task_name = task_definition["name"]
+        new_settings = task_definition["settings"]
+
+        required_settings = ["incubator_slot", "time_start_imaging", "time_end_imaging", "imaging_interval", "allocated_microscope"]
+        for req_field in required_settings:
+            if req_field not in new_settings:
+                msg = f"Missing required field '{req_field}' in settings for task '{task_name}'."
+                logger.error(msg)
+                return {"success": False, "message": msg}
+        
+        # Validate time formats (basic check)
+        try:
+            datetime.fromisoformat(new_settings["time_start_imaging"].replace('Z', ''))
+            datetime.fromisoformat(new_settings["time_end_imaging"].replace('Z', ''))
+        except ValueError as ve:
+            msg = f"Invalid ISO format for time_start_imaging or time_end_imaging in task '{task_name}': {ve}"
+            logger.error(msg)
+            return {"success": False, "message": msg}
+
+
+        async with self._config_lock:
+            try:
+                config_data = {"samples": []}
+                try:
+                    with open(CONFIG_FILE_PATH, 'r') as f:
+                        config_data = json.load(f)
+                except FileNotFoundError:
+                    logger.warning(f"{CONFIG_FILE_PATH} not found. Will create a new one.")
+                except json.JSONDecodeError:
+                    logger.warning(f"{CONFIG_FILE_PATH} is corrupted. Will create a new one.")
+                
+                if "samples" not in config_data or not isinstance(config_data["samples"], list):
+                     config_data["samples"] = []
+
+                task_exists_at_index = -1
+                for i, existing_task in enumerate(config_data["samples"]):
+                    if existing_task.get("name") == task_name:
+                        task_exists_at_index = i
+                        break
+                
+                # Prepare the operational_state. Ensure next_run_time_utc uses the provided start time.
+                # The _load_and_update_tasks will later convert this string to datetime object.
+                op_state = {
+                    "status": "pending",
+                    "next_run_time_utc": new_settings["time_start_imaging"], 
+                    "retries": 0,
+                    "last_updated_by_orchestrator": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+                }
+
+                if task_exists_at_index != -1:
+                    logger.info(f"Task '{task_name}' already exists. Updating its settings and operational_state.")
+                    config_data["samples"][task_exists_at_index]["settings"] = new_settings
+                    config_data["samples"][task_exists_at_index]["operational_state"] = op_state
+                else:
+                    logger.info(f"Adding new task '{task_name}'.")
+                    new_task_entry = {
+                        "name": task_name,
+                        "settings": new_settings,
+                        "operational_state": op_state
+                    }
+                    config_data["samples"].append(new_task_entry)
+
+                with open(CONFIG_FILE_PATH, 'w') as f:
+                    json.dump(config_data, f, indent=4)
+                logger.info(f"Task '{task_name}' processed (added/updated) in {CONFIG_FILE_PATH}.")
+
+            except Exception as e:
+                logger.error(f"Failed to add/update imaging task '{task_name}' in config: {e}", exc_info=True)
+                return {"success": False, "message": f"Error processing task: {str(e)}"}
+
+        await self._load_and_update_tasks() # Refresh orchestrator's internal task list
+        return {"success": True, "message": f"Task '{task_name}' added/updated successfully."}
+
+    @schema_function(skip_self=True)
+    async def delete_imaging_task(self, task_name: str):
+        """Deletes an imaging task from the simulation configuration."""
+        logger.info(f"Attempting to delete imaging task: {task_name}")
+        if not task_name:
+            return {"success": False, "message": "Task name cannot be empty."}
+
+        async with self._config_lock:
+            try:
+                config_data = {"samples": []}
+                try:
+                    with open(CONFIG_FILE_PATH, 'r') as f:
+                        config_data = json.load(f)
+                except (FileNotFoundError, json.JSONDecodeError):
+                    logger.warning(f"{CONFIG_FILE_PATH} not found or corrupted. Cannot delete task.")
+                    return {"success": False, "message": f"{CONFIG_FILE_PATH} not found or corrupted."}
+
+                if "samples" not in config_data or not isinstance(config_data["samples"], list):
+                    logger.warning(f"No 'samples' list in {CONFIG_FILE_PATH}. Cannot delete task.")
+                    return {"success": False, "message": "No 'samples' list in configuration."}
+
+                original_count = len(config_data["samples"])
+                config_data["samples"] = [task for task in config_data["samples"] if task.get("name") != task_name]
+                
+                if len(config_data["samples"]) == original_count:
+                    logger.warning(f"Task '{task_name}' not found in {CONFIG_FILE_PATH}. No deletion occurred.")
+                    return {"success": False, "message": f"Task '{task_name}' not found."}
+
+                with open(CONFIG_FILE_PATH, 'w') as f:
+                    json.dump(config_data, f, indent=4)
+                logger.info(f"Task '{task_name}' deleted from {CONFIG_FILE_PATH}.")
+
+            except Exception as e:
+                logger.error(f"Failed to delete imaging task '{task_name}' from config: {e}", exc_info=True)
+                return {"success": False, "message": f"Error deleting task: {str(e)}"}
+        
+        await self._load_and_update_tasks() # Refresh orchestrator's internal task list
+        return {"success": True, "message": f"Task '{task_name}' deleted successfully."}
+
+    @schema_function(skip_self=True)
+    async def get_all_imaging_tasks(self):
+        """Retrieves all imaging task configurations from config_simulation.json."""
+        logger.debug(f"Attempting to read all imaging tasks from {CONFIG_FILE_PATH}")
+        # Using a read lock isn't strictly necessary if writes are well-protected,
+        # but can prevent reading a partially written file if a write operation was huge and slow (not the case here).
+        async with self._config_lock:
+            try:
+                with open(CONFIG_FILE_PATH, 'r') as f:
+                    config_data = json.load(f)
+                return config_data.get("samples", []) # Return the list of samples
+            except FileNotFoundError:
+                logger.warning(f"{CONFIG_FILE_PATH} not found when trying to get all tasks.")
+                return [] 
+            except json.JSONDecodeError:
+                logger.error(f"Error decoding JSON from {CONFIG_FILE_PATH} when getting all tasks.")
+                return {"error": "Failed to decode configuration file.", "success": False}
+            except Exception as e:
+                logger.error(f"Failed to get all imaging tasks: {e}", exc_info=True)
+                return {"error": str(e), "success": False}
 
     async def _start_health_check(self, service_type, service_instance):
         if service_type in self.health_check_tasks and not self.health_check_tasks[service_type].done():
@@ -895,13 +1102,22 @@ async def main():
     orchestrator = OrchestrationSystem(local=args.local)
     # await orchestrator.setup_connections() # setup_connections is now called within run_time_lapse per task
     try:
+        await orchestrator._register_self_as_hypha_service() # Register orchestrator's own Hypha service
         await orchestrator.run_time_lapse() # Removed round_time
     except KeyboardInterrupt:
         logger.info("Simulated Orchestrator shutting down (KeyboardInterrupt)...")
     finally:
         logger.info("Simulated Orchestrator performing cleanup...")
         if orchestrator:
-            await orchestrator.disconnect_services()
+            if orchestrator.orchestrator_hypha_server_connection:
+                try:
+                    # Ideally, unregister service if Hypha API supports it easily, or just disconnect.
+                    # server.unregister_service(self.orchestrator_hypha_service_id) # Pseudocode
+                    await orchestrator.orchestrator_hypha_server_connection.disconnect()
+                    logger.info("Disconnected from Hypha server for orchestrator's own service.")
+                except Exception as e:
+                    logger.error(f"Error disconnecting orchestrator's Hypha service: {e}")
+            await orchestrator.disconnect_services() # This disconnects mock services
         logger.info("Simulated Orchestrator cleanup complete.")
 
 if __name__ == '__main__':
