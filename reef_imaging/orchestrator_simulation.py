@@ -576,9 +576,6 @@ class OrchestrationSystem:
         output_config_data = {"samples": []}
         
         async with self._config_lock: # Ensure read-modify-write is atomic if multiple sources modify
-            # It's safer to re-read the file structure if other fields outside 'samples' might exist
-            # and need to be preserved, but for this simulation, we'll assume 'samples' is the main one.
-            # If the file was missing, raw_config_data might be a default structure.
             try:
                 with open(CONFIG_FILE_PATH, 'r') as f_read:
                     existing_data = json.load(f_read)
@@ -814,18 +811,6 @@ class OrchestrationSystem:
                         # The mock method itself handles setting status to "running" and then "finished"/"failed"
                         # and simulates duration.
                         method_to_call = getattr(service, method_name)
-                        # We expect the mock method to internally manage its task status (not_started -> running -> finished/failed)
-                        # and to simulate its execution.
-                        # For call_service_with_retries, we are primarily interested in the final outcome for this attempt.
-                        # The mock's _simulate_method_call is a bit simplified; a more robust mock might
-                        # require an explicit 'start_task' and then polling 'get_task_status'.
-                        # For now, we assume the call to the mock method blocks until it's "done" (finished/failed).
-                        
-                        # The _simulate_method_call in mocks now directly sets status to 'running', then 'finished' or 'failed'.
-                        # So, we call it, and then check status.
-                        
-                        # Start the task (which internally sets to 'running')
-                        # This call will block until the mock method's internal async sleep is done
                         await asyncio.wait_for(method_to_call(*args, **kwargs), timeout=timeout + 1) # Ensure mock's internal sleep is less than this
                         
                         # After the call, check status again (it should be finished or failed)
@@ -834,17 +819,8 @@ class OrchestrationSystem:
 
                     except asyncio.TimeoutError:
                         logger.warning(f"Sim Operation {method_name} (mock call) timed out. Mock task status: {await service.get_task_status(method_name)}")
-                        # If it times out, the mock service might still be 'running' or stuck.
-                        # For this simulation, we'll treat timeout as a failure for this attempt.
-                        # In a real scenario, we'd continue polling. Here, the mock is simplified.
                         self._tasks_status[method_name] = "failed" # Force fail on timeout for sim
                         status = "failed" 
-                        # Continue to the status checking logic below, which will see 'failed'
-
-                # This loop is for polling, but our current mock methods are synchronous-like within the await.
-                # So, after the method_to_call returns, status should already be 'finished' or 'failed'.
-                # This loop might be redundant if the mock method directly returns final status or throws error.
-                # Let's adapt. If status after call is 'running', then poll. Otherwise, use that status.
 
                 if status == "running": # If mock is more complex and needs polling after start
                     polling_attempts = 0
