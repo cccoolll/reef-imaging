@@ -168,13 +168,17 @@ class OrchestrationSystem:
     def __init__(self, local=False):
         self.local = local # local flag might not mean much without real connections
         self.server_url = "mock_server_url" # Not used for connections
-        
-        # Configuration for orchestrator's own Hypha service
-        self.orchestrator_hypha_server_url = "http://localhost:9527" # Default
-        if not local and os.environ.get("ORCHESTRATOR_HYPHA_SERVER_URL"):
-            self.orchestrator_hypha_server_url = os.environ["ORCHESTRATOR_HYPHA_SERVER_URL"]
-        elif local and os.environ.get("ORCHESTRATOR_HYPHA_SERVER_URL_LOCAL"):
-             self.orchestrator_hypha_server_url = os.environ["ORCHESTRATOR_HYPHA_SERVER_URL_LOCAL"]
+        self.local=local
+        self.token = None
+        self.workspace=None
+        if self.local:
+            self.token = os.environ.get("REEF_LOCAL_TOKEN")
+            self.orchestrator_hypha_server_url = "http://localhost:9527" # Default
+            self.workspace=os.environ.get("REEF_LOCAL_WORKSPACE")
+        else:
+            self.token = os.environ.get("REEF_WORKSPACE_TOKEN")
+            self.orchestrator_hypha_server_url = "https://hypha.aicell.io"
+            self.workspace="reef-imaging"
         
         self.orchestrator_hypha_service_id = "orchestrator-manager-simulation"
         self.orchestrator_hypha_server_connection = None
@@ -208,7 +212,7 @@ class OrchestrationSystem:
             else:
                 token = os.environ.get("ORCHESTRATOR_WORKSPACE_TOKEN", os.environ.get("REEF_WORKSPACE_TOKEN"))
 
-            server_config = {"server_url": self.orchestrator_hypha_server_url, "ping_interval": None}
+            server_config = {"server_url": self.orchestrator_hypha_server_url, "ping_interval": None, "workspace": self.workspace}
             if token:
                 server_config["token"] = token
             self.orchestrator_hypha_server_connection = await connect_to_server(server_config)
@@ -219,7 +223,7 @@ class OrchestrationSystem:
                 "id": self.orchestrator_hypha_service_id,
                 "config": {
                     "visibility": "public", 
-                    "run_in_executor": True 
+                    "run_in_executor": True,
                 },
                 "hello_orchestrator": self.hello_orchestrator,
                 "add_imaging_task": self.add_imaging_task,
