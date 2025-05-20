@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 import argparse
 import json
 import random # For simulating occasional failures
+import copy # Added import
 
 # Set up logging
 def setup_logging(log_file="orchestrator_simulation.log", max_bytes=10*1024*1024, backup_count=5):
@@ -224,7 +225,7 @@ class OrchestrationSystem:
                 logger.error(f"Error decoding JSON from {CONFIG_FILE_PATH} for simulation. Will not update tasks from file this cycle.")
                 return # Don't proceed if config is corrupt
 
-        current_time = datetime.now(timezone.utc)
+        current_time = datetime.now()
 
         for sample_config_from_file in raw_config_data.get("samples", []):
             task_name = sample_config_from_file.get("name")
@@ -239,14 +240,14 @@ class OrchestrationSystem:
                 time_end_imaging_str = settings["time_end_imaging"]
 
                 if time_start_imaging_str.endswith('Z'):
-                    time_start_imaging = datetime.fromisoformat(time_start_imaging_str[:-1] + '+00:00')
-                else: # Assume local time if no 'Z'
-                    time_start_imaging = datetime.fromisoformat(time_start_imaging_str).astimezone(timezone.utc)
+                    time_start_imaging = datetime.fromisoformat(time_start_imaging_str[:-1])
+                else:
+                    time_start_imaging = datetime.fromisoformat(time_start_imaging_str)
                 
                 if time_end_imaging_str.endswith('Z'):
-                    time_end_imaging = datetime.fromisoformat(time_end_imaging_str[:-1] + '+00:00')
-                else: # Assume local time if no 'Z'
-                    time_end_imaging = datetime.fromisoformat(time_end_imaging_str).astimezone(timezone.utc)
+                    time_end_imaging = datetime.fromisoformat(time_end_imaging_str[:-1])
+                else:
+                    time_end_imaging = datetime.fromisoformat(time_end_imaging_str)
 
                 parsed_settings_config = {
                     "name": task_name, # Keep name here for easier access
@@ -312,7 +313,8 @@ class OrchestrationSystem:
                     "config": current_settings_config, # This is the "settings" part
                     "status": persisted_status,
                     "next_run_time": next_run_time_init,
-                    "retries": persisted_retries
+                    "retries": persisted_retries,
+                    "_raw_settings_from_input": copy.deepcopy(settings) # Store raw settings using deepcopy
                 }
                 a_task_state_changed_for_write = True # New task, state needs to be written
 
@@ -330,12 +332,8 @@ class OrchestrationSystem:
                     self.tasks[task_name]["config"] = current_settings_config
                     a_task_state_changed_for_write = True # Config part changed
 
-                # For existing tasks, their operational state (status, next_run_time, retries)
-                # is managed by the run_time_lapse loop. _load_and_update_tasks generally shouldn't
-                # override these unless explicitly intended for a reset or initial load.
-                # The logic for 'pending' or 'error' state tasks whose start time is past
-                # to set next_run_time = current_time is handled below and in the main loop.
-                # We just ensure the 'config' part is up-to-date here.
+                # Always update raw settings to reflect the latest from the file if settings were processed
+                self.tasks[task_name]["_raw_settings_from_input"] = copy.deepcopy(settings) # Use deepcopy
 
             # Consistently apply rule: if a task is pending/error and its start time is past, make it run now.
             task_state_dict = self.tasks[task_name]
@@ -383,35 +381,35 @@ class OrchestrationSystem:
                 # task_data_internal["status"], ["next_run_time"], ["retries"] are operational
                 
                 # Convert datetime and timedelta back to strings for JSON
-                next_run_time_str = task_data_internal["next_run_time"].strftime('%Y-%m-%dT%H:%M:%SZ')
+                next_run_time_str = task_data_internal["next_run_time"].strftime('%Y-%m-%dT%H:%M:%S')
                 
                 # Original settings from task_data_internal["config"] also need string conversion for time/timedelta if they were modified
                 # But "config" from self.tasks should already have datetime objects correctly
                 
                 # Reconstruct the "settings" part for JSON output, converting datetime/timedelta
-                settings_for_json = {}
-                for key, val in task_data_internal["config"].items():
-                    if isinstance(val, datetime):
-                        # Store original settings times as they were (local or UTC with Z)
-                        # This requires knowing original format or always storing as ISO UTC.
-                        # For simplicity, let's store them as ISO UTC strings with 'Z'.
-                        settings_for_json[key] = val.strftime('%Y-%m-%dT%H:%M:%SZ')
-                    elif isinstance(val, timedelta):
-                        settings_for_json[key] = int(val.total_seconds())
-                    else:
-                        settings_for_json[key] = val
-                # Remove the 'name' from settings_for_json as it's a top-level key for the sample
-                if "name" in settings_for_json : del settings_for_json["name"]
+                settings_to_write = task_data_internal.get("_raw_settings_from_input")
+                if settings_to_write is None:
+                    # Fallback or error: For now, reconstruct if raw is missing (should not happen in normal flow)
+                    logger.warning(f"Task '{task_name}': _raw_settings_from_input not found. Reconstructing settings for JSON output. Style might not be preserved.")
+                    settings_to_write = {}
+                    for key, val in task_data_internal["config"].items():
+                        if key == "name": continue # 'name' is not part of the settings dict itself
+                        if isinstance(val, datetime):
+                            settings_to_write[key] = val.strftime('%Y-%m-%dT%H:%M:%SZ')
+                        elif isinstance(val, timedelta):
+                            settings_to_write[key] = int(val.total_seconds())
+                        else:
+                            settings_to_write[key] = val
 
 
                 sample_entry = {
                     "name": task_name,
-                    "settings": settings_for_json, # Use the string-converted settings
+                    "settings": settings_to_write, # Use the raw settings as read from input
                     "operational_state": {
                         "status": task_data_internal["status"],
-                        "next_run_time_utc": next_run_time_str, # Always store as UTC string
+                        "next_run_time_utc": next_run_time_str,  # Store as local time string
                         "retries": task_data_internal["retries"],
-                        "last_updated_by_orchestrator": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+                        "last_updated_by_orchestrator": datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
                     }
                 }
                 output_config_data["samples"].append(sample_entry)
@@ -700,10 +698,10 @@ class OrchestrationSystem:
         self.sample_on_microscope_flag = False
         return True
 
-    async def run_cycle(self, task_config): # Parameterized
+    async def run_cycle(self, task_config):
         task_name = task_config["name"]
         incubator_slot = task_config["incubator_slot"]
-        action_id = f"SIM_{task_name.replace(' ', '_')}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%Z')}"
+        action_id = f"SIM_{task_name.replace(' ', '_')}-{datetime.now().strftime('%Y%m%dT%H%M%S')}"
         logger.info(f"Sim: Starting cycle for task: {task_name} with action_id: {action_id}")
 
         if not self.incubator or not self.microscope or not self.robotic_arm:
@@ -764,7 +762,7 @@ class OrchestrationSystem:
         last_config_read_time = 0
 
         while True:
-            current_time = datetime.now(timezone.utc)
+            current_time = datetime.now()
             logger.debug(f"Sim: run_time_lapse loop. Current time: {current_time.isoformat()}")
 
             if (asyncio.get_event_loop().time() - last_config_read_time) > CONFIG_READ_INTERVAL:
