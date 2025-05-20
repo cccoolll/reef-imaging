@@ -5,9 +5,9 @@
             "settings": {
                 "incubator_slot": 3,
                 "allocated_microscope": "microscope-control-squid-1",
-                "time_added": "2025-04-04T12:00:00Z",
-                "time_start_imaging": "2025-04-04T14:00:00Z",
-                "time_end_imaging": "2025-04-14T12:00:00Z",
+                "time_added": "2025-04-04T12:00:00",
+                "time_start_imaging": "2025-04-04T14:00:00",
+                "time_end_imaging": "2025-04-14T12:00:00",
                 "imaging_interval": 3600,
                 "imaging_zone": [[0,0],[7,11]],
                 "Nx": 3,
@@ -17,33 +17,5 @@
                 "do_reflection_af": true
             }
         }
-    ],
-    "microscopes": [
-        {
-            "name": "Microscope1",
-            "settings": {
-                "id": "microscope-control-squid-1",
-                "objective": "20x"
-            }
-        },
-        {
-            "name": "Microscope2",
-            "settings": {
-                "id": "microscope-control-squid-2",
-                "objective": "20x"
-            }
-        }
-    ],
-    "incubator": {
-        "name": "cytomat",
-        "settings": {
-            "id": "incubator-control"
-        }
-    },
-    "robotic_arm": {
-        "name": "robotic_arm",
-        "settings": {
-            "id": "robotic-arm-control"
-        }
-    }
+    ]
 }
