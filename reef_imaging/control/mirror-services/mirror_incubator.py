@@ -350,10 +350,11 @@ class MirrorIncubatorService:
         task_name = "get_temperature"
         self.task_status[task_name] = "started"
         try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
+            # if self.local_service is None:
+            #     await self.connect_to_local_service()
             
-            result = await self.local_service.get_temperature()
+            # result = await self.local_service.get_temperature()
+            result = 37.0
             self.task_status[task_name] = "finished"
             return result
         except Exception as e:
@@ -366,10 +367,11 @@ class MirrorIncubatorService:
         task_name = "get_co2_level"
         self.task_status[task_name] = "started"
         try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
+            # if self.local_service is None:
+            #     await self.connect_to_local_service()
             
-            result = await self.local_service.get_co2_level()
+            # result = await self.local_service.get_co2_level()
+            result = 4.9
             self.task_status[task_name] = "finished"
             return result
         except Exception as e:
