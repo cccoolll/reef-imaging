@@ -450,7 +450,16 @@ class OrchestrationSystem:
             logger.info("Sample plate has already been loaded onto the microscope")
             return True
 
-        logger.info(f"Loading sample from incubator slot {incubator_slot} to transfer station...")
+        # Figure out which microscope we're currently connected to
+        microscope_id = 1  # Default to microscope 1
+        if self.current_microscope_id:
+            # Extract the microscope ID from the service ID
+            if self.current_microscope_id.endswith('2'):
+                microscope_id = 2
+            elif self.current_microscope_id.endswith('1'):
+                microscope_id = 1
+        
+        logger.info(f"Loading sample from incubator slot {incubator_slot} to microscope {microscope_id}...")
 
         logger.info(f"Homing the microscope stage...")
         p1 = self.call_service_with_retries('incubator', "get_sample_from_slot_to_transfer_station", incubator_slot, timeout=60)
@@ -459,16 +468,9 @@ class OrchestrationSystem:
         if not all(gather):
             return False
 
-        logger.info(f"Grabbing sample from incubator...")
-        if not await self.call_service_with_retries('robotic_arm', "grab_sample_from_incubator", timeout=120):
-            return False
-
-        logger.info(f"Transporting sample from incubator to microscope...")
-        if not await self.call_service_with_retries('robotic_arm', "transport_from_incubator_to_microscope1", timeout=120):
-            return False
-
-        logger.info(f"Putting sample on microscope...")
-        if not await self.call_service_with_retries('robotic_arm', "put_sample_on_microscope1", timeout=120):
+        # Use the new parameterized function
+        logger.info(f"Moving sample from incubator to microscope {microscope_id}...")
+        if not await self.call_service_with_retries('robotic_arm', "incubator_to_microscope", microscope_id, timeout=300):
             return False
 
         logger.info(f"Returning microscope stage to loading position...")
@@ -484,20 +486,22 @@ class OrchestrationSystem:
             logger.info("Sample plate is not on the microscope")
             return True
 
+        # Figure out which microscope we're currently connected to
+        microscope_id = 1  # Default to microscope 1
+        if self.current_microscope_id:
+            # Extract the microscope ID from the service ID
+            if self.current_microscope_id.endswith('2'):
+                microscope_id = 2
+            elif self.current_microscope_id.endswith('1'):
+                microscope_id = 1
+
         logger.info(f"Homing the microscope stage...")
         if not await self.call_service_with_retries('microscope', "home_stage", timeout=30):
             return False
 
-        logger.info(f"Grabbing sample from microscope...")
-        if not await self.call_service_with_retries('robotic_arm', "grab_sample_from_microscope1", timeout=120):
-            return False
-
-        logger.info(f"Transporting sample from microscope to incubator...")
-        if not await self.call_service_with_retries('robotic_arm', "transport_from_microscope1_to_incubator", timeout=120):
-            return False
-
-        logger.info(f"Putting sample on incubator...")
-        if not await self.call_service_with_retries('robotic_arm', "put_sample_on_incubator", timeout=120):
+        # Use the new parameterized function
+        logger.info(f"Moving sample from microscope {microscope_id} to incubator...")
+        if not await self.call_service_with_retries('robotic_arm', "microscope_to_incubator", microscope_id, timeout=300):
             return False
 
         logger.info(f"Putting sample on incubator slot {incubator_slot}...")    
