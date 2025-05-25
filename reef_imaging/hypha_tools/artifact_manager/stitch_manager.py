@@ -53,7 +53,7 @@ class ImageProcessor:
     """Class for processing and manipulating images"""
     
     @staticmethod
-    def rotate_flip_image(image, angle=0, flip=True):
+    def rotate_flip_image(image, angle=0, flip=False):
         """Rotate an image by a specified angle and flip if required."""
         # If no rotation, just do the flip if needed
         if angle == 0:
