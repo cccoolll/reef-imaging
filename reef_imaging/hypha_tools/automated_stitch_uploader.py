@@ -23,8 +23,8 @@ from artifact_manager.stitch_manager import StitchManager, ImageFileParser, add_
 from artifact_manager.gallery_manager import GalleryManager
 
 # Constants
-BASE_DIR = "/media/reef/harddisk"
-EXPERIMENT_ID = "20250506-scan-time-lapse"
+BASE_DIR = "/home/tao/europa_disk"
+EXPERIMENT_ID = "hpa-sample"
 # Replace hardcoded STITCHED_DIR with temp directory
 STITCHED_DIR = tempfile.mkdtemp(prefix="stitch_zarr_")
 STITCH_RECORD_FILE = "stitch_upload_progress.txt"
@@ -33,7 +33,7 @@ STABILITY_WINDOW = 5  # Consider folder stable after 5 seconds of no changes
 client_id = "reef-client-stitch-uploader"
 # Load environment variables
 load_dotenv()
-ARTIFACT_ALIAS = "agent-lens/image-map-20250506-treatment-zip"
+ARTIFACT_ALIAS = "agent-lens/hpa-sample"
 # Timeout and retry settings
 CONNECTION_TIMEOUT = 60  # Timeout for connection operations in seconds
 OPERATION_TIMEOUT = 3600  # Timeout for Hypha operations in seconds (increased from 60)
@@ -124,7 +124,7 @@ def extract_datetime_from_folder(folder_name: str) -> Optional[str]:
     """Extract the datetime string from a folder name."""
     parts = folder_name.split('_')
     if len(parts) >= 3:
-        # Format: 20250506'-scan-time-lapse_2025-04-29_17-53-2.861421
+        # Format: 20250429'-scan-time-lapse_2025-04-29_17-53-2.861421
         date_part = parts[1]  # Extract date part: 2025-04-29
         time_part = parts[2].split('.')[0]  # Extract time part without microseconds: 17-53-2
         time_components = time_part.split('-')
@@ -279,7 +279,7 @@ async def stitch_folder(folder_path: str) -> Tuple[bool, Optional[str], Optional
             
         channels = list(set(info["channel_name"] for info in image_info))
         print(f"Found {len(image_info)} images with {len(channels)} channels")
-        selected_channel = ['Fluorescence_561_nm_Ex', 'Fluorescence_488_nm_Ex', 'BF_LED_matrix_full']
+        selected_channel = ['Fluorescence_561_nm_Ex', 'Fluorescence_488_nm_Ex', 'BF_LED_matrix_full', 'Fluorescence_405_nm_Ex','Fluorescence_638_nm_Ex']
         # Filter selected channels to only include ones that are present
         selected_channel = [c for c in selected_channel if c in channels]
         print(f"Selected channels: {selected_channel}")
@@ -320,18 +320,18 @@ async def stitch_folder(folder_path: str) -> Tuple[bool, Optional[str], Optional
         # Create metadata for each coordinate in the stitched image
         for _, row in coordinates.iterrows():
             region = row.get('region', 'unknown')
-            x_idx = int(row.get('i', 0))
-            y_idx = int(row.get('j', 0))
+            # Use new column names from coordinates.csv
+            fov = int(row.get('fov', 0)) 
+            z_level = int(row.get('z_level', 0))
             
             # Physical coordinates
             x_mm = float(row.get('x (mm)', 0))
             y_mm = float(row.get('y (mm)', 0))
-            z_mm = float(row.get('z (mm)', 0))
+            # z (um) is the column name in CSV, ensure consistency if it's z_mm elsewhere
+            z_phys_um = float(row.get('z (um)', 0)) 
             
-            # Create a chunk identifier string based on the x,y,z indices
-            # Default to (0, z-idx, y-idx, x-idx) since zarr default dimension order is t,z,y,x
-            # For simplicity, we're using (y-idx, x-idx) as our 2D key
-            chunk_key = f"({y_idx}, {x_idx})"
+            # Create a chunk identifier string based on fov and z_level
+            chunk_key = f"({fov}, {z_level})" # Using fov and z_level for the key
             
             # Collect metadata for this chunk
             chunk_metadata[chunk_key] = {
@@ -339,8 +339,8 @@ async def stitch_folder(folder_path: str) -> Tuple[bool, Optional[str], Optional
                 "time": datetime.now().strftime("%H:%M:%S"),
                 "folder_name": folder_name,
                 "region": region,
-                "coordinates_grid": (x_idx, y_idx),  # Grid coordinates (i, j)
-                "location_mm": (x_mm, y_mm, z_mm),   # Physical stage position in mm
+                "coordinates_grid": (fov, z_level),  # Grid coordinates (fov, z_level)
+                "location_mm": (x_mm, y_mm, z_phys_um / 1000.0), # Store z as mm if others are mm
                 "acquisition_params": {
                     "exposure_ms": imaging_params.get("exposure_ms", 0),
                     "gain": imaging_params.get("gain", 0)
@@ -568,8 +568,8 @@ async def upload_zarr_file(zarr_file: str) -> bool:
 
                 # Read the current manifest with timeout (if needed, otherwise just edit)
                 dataset_manifest = {
-                    "name": "Full zarr dataset 20250506",
-                    "description": "The Full zarr dataset for U2OS FUCCI Drug Treatment from 20250506",
+                    "name": "Full zarr dataset 20250429",
+                    "description": "The Full zarr dataset for U2OS FUCCI Drug Treatment from 20250429",
                 }
                 
                 # Put the dataset in staging mode with timeout

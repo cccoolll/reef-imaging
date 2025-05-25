@@ -315,27 +315,34 @@ class ImageFileParser:
         image_info = []
 
         for image_file in image_files:
-            # Split only for the first 4 parts (region, x, y, z)
-            prefix_parts = image_file.split('_', 4)  # Split into max 5 parts
-            if len(prefix_parts) >= 5:
-                region, x_idx, y_idx, z_idx = prefix_parts[:4]
-                # Get the channel name by removing the extension
-                channel_name = prefix_parts[4].rsplit('.', 1)[0]
+            # New filename style: Region_FOVidx_Zidx_ChannelName.bmp
+            # Example: A3_0_0_BF_LED_matrix_full.bmp
+            prefix_parts = image_file.split('_', 3)  # Split into Region, FOV, Z, Channel
+            if len(prefix_parts) >= 4: # Ensure Region, FOV, Z, and Channel parts exist
+                region = prefix_parts[0]
+                try:
+                    fov_idx = int(prefix_parts[1])
+                    z_idx = int(prefix_parts[2]) # Assuming z_idx is also an integer
+                except ValueError:
+                    print(f"Warning: Could not parse FOV/Z index from filename: {image_file}. Skipping.")
+                    continue
+                
+                channel_name = prefix_parts[3].rsplit('.', 1)[0]
 
-                # Don't try to convert z_idx to int since it might be 'focus' or other non-numeric value
                 image_info.append({
                     "filepath": os.path.join(image_folder, image_file),
                     "region": region,
-                    "x_idx": int(x_idx),
-                    "y_idx": int(y_idx),
-                    "z_idx": z_idx,  # Keep as string, no conversion to int
+                    "fov_idx": fov_idx, # New field for FOV index
+                    "z_idx": z_idx,    # Z index (was string, now int based on example A3_0_0)
                     "channel_name": channel_name
                 })
+            else:
+                print(f"Warning: Filename {image_file} does not match expected format Region_FOV_Z_Channel. Skipping.")
 
-        # Sort images according to the grid pattern described in stitch.py:
-        # Upper left is (I,0), upper right (I,J), bottom left (0,0), bottom right (0,J)
-        # This means I increases as you go up, J increases as you go right
-        image_info.sort(key=lambda x: (-x["x_idx"], x["y_idx"]))
+
+        # Sort images: primary key fov_idx, secondary key z_idx.
+        # This is an assumption; user might need to specify a different order if required.
+        image_info.sort(key=lambda x: (x["fov_idx"], x["z_idx"]))
         return image_info
 
 
@@ -507,20 +514,22 @@ class StitchManager:
         canvas_width = self.datasets[selected_channel[0]]["scale0"].shape[1]
         canvas_height = self.datasets[selected_channel[0]]["scale0"].shape[0]
         
-        # Process images by position (same x,y,region) together
+        # Process images by position (region, fov_idx, z_idx) together
         position_groups = {}
         
         for info in image_info:
-            position_key = (info["region"], info["x_idx"], info["y_idx"])
+            # Use fov_idx and z_idx from parsed image filenames
+            position_key = (info["region"], info["fov_idx"], info["z_idx"])
             if position_key not in position_groups:
                 position_groups[position_key] = []
             position_groups[position_key].append(info)
         
-        # Sort position keys according to the grid pattern
+        # Sort position keys: region (alphabetical), fov_idx (decreasing), z_idx (ascending)
+        # This mimics the previous sort: region, -x_idx (fov_idx), y_idx (z_idx)
         sorted_positions = sorted(position_groups.keys(), key=lambda pos: (
             pos[0],   # region
-            -pos[1],  # i decreasing
-            pos[2]    # j ascending
+            -pos[1],  # fov_idx decreasing
+            pos[2]    # z_idx ascending
         ))
         
         # Find the first image to determine tile dimensions
@@ -542,14 +551,16 @@ class StitchManager:
         
         # Process all positions
         for position in tqdm(sorted_positions, desc="Processing positions"):
-            region, x_idx, y_idx = position
+            region, fov_idx, z_idx = position # Unpack according to new position_key
 
-            # Get coordinates for this position
-            matching_rows = coordinates[(coordinates["region"] == region) & 
-                                      (coordinates["i"] == x_idx) & 
-                                      (coordinates["j"] == y_idx)]
+            # Get coordinates for this position using new column names from coordinates.csv
+            matching_rows = coordinates[(
+                (coordinates["region"] == region) & 
+                (coordinates["fov"] == fov_idx) &       # Use 'fov' column from CSV
+                (coordinates["z_level"] == z_idx)     # Use 'z_level' column from CSV
+            )]
             if matching_rows.empty:
-                print(f"Warning: No coordinates found for position {position}")
+                print(f"Warning: No coordinates found for position {position} (region={region}, fov={fov_idx}, z_level={z_idx})")
                 continue
                 
             coord_row = matching_rows.iloc[0]
