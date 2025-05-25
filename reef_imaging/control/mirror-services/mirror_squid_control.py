@@ -319,7 +319,7 @@ class MirrorMicroscopeService:
             logger.error(f"Failed to update parameters: {e}")
             raise e
 
-    async def one_new_frame(self, exposure_time=100, channel=0, intensity=50, context=None):
+    async def one_new_frame(self, context=None):
         """Mirror function to one_new_frame on local service"""
         task_name = "one_new_frame"
         self.task_status[task_name] = "started"
@@ -327,7 +327,7 @@ class MirrorMicroscopeService:
             if self.local_service is None:
                 await self.connect_to_local_service()
             
-            result = await self.local_service.one_new_frame(exposure_time, channel, intensity)
+            result = await self.local_service.one_new_frame()
             self.task_status[task_name] = "finished"
             return result
         except Exception as e:
@@ -440,7 +440,7 @@ class MirrorMicroscopeService:
             logger.error(f"Failed to set illumination: {e}")
             raise e
 
-    async def set_camera_exposure(self, exposure_time=100, context=None):
+    async def set_camera_exposure(self, channel=0, exposure_time=100, context=None):
         """Mirror function to set_camera_exposure on local service"""
         task_name = "set_camera_exposure"
         self.task_status[task_name] = "started"
@@ -448,7 +448,7 @@ class MirrorMicroscopeService:
             if self.local_service is None:
                 await self.connect_to_local_service()
             
-            result = await self.local_service.set_camera_exposure(exposure_time)
+            result = await self.local_service.set_camera_exposure(channel, exposure_time)
             self.task_status[task_name] = "finished"
             return result
         except Exception as e:

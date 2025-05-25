@@ -24,7 +24,7 @@ from artifact_manager.gallery_manager import GalleryManager
 
 # Constants
 BASE_DIR = "/media/reef/harddisk"
-EXPERIMENT_ID = "20250506-scan-time-lapse"
+EXPERIMENT_ID = "20250429-scan-time-lapse"
 # Replace hardcoded STITCHED_DIR with temp directory
 STITCHED_DIR = tempfile.mkdtemp(prefix="stitch_zarr_")
 STITCH_RECORD_FILE = "stitch_upload_progress.txt"
@@ -33,7 +33,7 @@ STABILITY_WINDOW = 5  # Consider folder stable after 5 seconds of no changes
 client_id = "reef-client-stitch-uploader"
 # Load environment variables
 load_dotenv()
-ARTIFACT_ALIAS = "agent-lens/image-map-20250506-treatment-zip"
+ARTIFACT_ALIAS = "agent-lens/image-map-20250429-treatment-zip"
 # Timeout and retry settings
 CONNECTION_TIMEOUT = 60  # Timeout for connection operations in seconds
 OPERATION_TIMEOUT = 3600  # Timeout for Hypha operations in seconds (increased from 60)
@@ -124,7 +124,7 @@ def extract_datetime_from_folder(folder_name: str) -> Optional[str]:
     """Extract the datetime string from a folder name."""
     parts = folder_name.split('_')
     if len(parts) >= 3:
-        # Format: 20250506'-scan-time-lapse_2025-04-29_17-53-2.861421
+        # Format: 20250429'-scan-time-lapse_2025-04-29_17-53-2.861421
         date_part = parts[1]  # Extract date part: 2025-04-29
         time_part = parts[2].split('.')[0]  # Extract time part without microseconds: 17-53-2
         time_components = time_part.split('-')
@@ -568,8 +568,8 @@ async def upload_zarr_file(zarr_file: str) -> bool:
 
                 # Read the current manifest with timeout (if needed, otherwise just edit)
                 dataset_manifest = {
-                    "name": "Full zarr dataset 20250506",
-                    "description": "The Full zarr dataset for U2OS FUCCI Drug Treatment from 20250506",
+                    "name": "Full zarr dataset 20250429",
+                    "description": "The Full zarr dataset for U2OS FUCCI Drug Treatment from 20250429",
                 }
                 
                 # Put the dataset in staging mode with timeout
