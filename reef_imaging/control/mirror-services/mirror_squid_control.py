@@ -55,8 +55,8 @@ class MicroscopeVideoTrack(MediaStreamTrack):
         self.running = True
         self.start_time = None
         self.fps = 3 # Target FPS for WebRTC stream
-        self.frame_width = 2048
-        self.frame_height = 2048
+        self.frame_width = 720
+        self.frame_height = 720
         logger.info("MicroscopeVideoTrack initialized with local_service")
 
     def draw_crosshair(self, img, center_x, center_y, size=20, color=[255, 255, 255]):
@@ -390,7 +390,9 @@ class MirrorMicroscopeService:
         await self.connect_to_local_service()
         time.sleep(1)
         # Start the WebRTC service
-        await self.start_webrtc_service(server, "microscope-video-track-1")
+        self.webrtc_service_id = f"video-track-{self.local_service_id}"
+        logger.info(f"Starting WebRTC service with id: {self.webrtc_service_id}")
+        await self.start_webrtc_service(server, self.webrtc_service_id)
 
     def hello_world(self):
         """Hello world"""
