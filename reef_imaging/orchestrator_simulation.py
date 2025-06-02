@@ -488,7 +488,6 @@ class OrchestrationSystem:
                     logger.info(f"Health check for {service_type} (sim) cancelled.")
 
     async def _load_and_update_tasks(self):
-        logger.info(f"Loading and updating tasks from {CONFIG_FILE_PATH} (sim)")
         new_task_configs = {}
         raw_config_data = None 
 
@@ -656,7 +655,6 @@ class OrchestrationSystem:
 
     async def _write_tasks_to_config(self):
         """Writes the current state of all tasks back to the configuration file."""
-        logger.debug(f"Attempting to write tasks state to {CONFIG_FILE_PATH}")
         
         output_config_data = {"samples": []}
         
@@ -828,6 +826,10 @@ class OrchestrationSystem:
             logger.info(f"Sim: Clearing robotic_arm mock instance.")
             # await self.robotic_arm.disconnect()
             self.robotic_arm = None
+        elif service_type == 'orchestrator' and self.orchestrator:
+            logger.info(f"Sim: Clearing orchestrator mock instance.")
+            # await self.orchestrator.disconnect()
+            self.orchestrator = None
         logger.info(f"Simulated {service_type} service instance cleared/mock-disconnected.")
     
     async def reconnect_single_service(self, service_type):
@@ -851,6 +853,7 @@ class OrchestrationSystem:
             self.robotic_arm = MockRoboticArm(self.sim_robotic_arm_id, loop)
             logger.info(f"Simulated Robotic Arm re-initialized.")
             await self._start_health_check('robotic_arm', self.robotic_arm)
+        
         else:
             logger.error(f"Sim: Unknown service type '{service_type}' for reconnect.")
 
