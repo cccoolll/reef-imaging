@@ -9,19 +9,19 @@ import dotenv
 import logging
 import sys
 import logging.handlers
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 import argparse
 import json
 import random # For simulating occasional failures
 import copy # Added import
 
 # Set up logging
-def setup_logging(log_file="orchestrator_simulation.log", max_bytes=10*1024*1024, backup_count=5):
+def setup_logging(log_file="orchestrator_simulation.log", max_bytes=20*1024*1024, backup_count=3):
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.DEBUG)
 
-    # Rotating file handler with 10MB limit
+    # Rotating file handler with limit
     file_handler = logging.handlers.RotatingFileHandler(log_file, maxBytes=max_bytes, backupCount=backup_count)
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
@@ -47,9 +47,24 @@ SIM_ROBOTIC_ARM_ID = "robotic-arm-control-simulation"
 
 CONFIG_FILE_PATH = "config_simulation.json" # Using a separate config for simulation
 CONFIG_READ_INTERVAL = 10 # Seconds, faster for simulation
-MAX_CYCLE_RETRIES = 2 # Fewer retries for faster sim testing
-CYCLE_RETRY_DELAY = timedelta(seconds=10) # Shorter for simulation testing
 ORCHESTRATOR_LOOP_SLEEP = 5 # Seconds, faster for simulation
+
+# Custom exceptions for better error handling
+class ServiceConnectionError(Exception):
+    """Raised when service connection fails"""
+    pass
+
+class ServiceOperationError(Exception):
+    """Raised when service operation fails"""
+    pass
+
+class MicroscopeNotAvailableError(Exception):
+    """Raised when microscope is not available"""
+    pass
+
+class TransportOperationError(Exception):
+    """Raised when transport operation fails"""
+    pass
 
 # --- Mock Hypha Services ---
 class MockHyphaService:
@@ -57,7 +72,6 @@ class MockHyphaService:
         self.id = service_id
         self.service_type = service_type
         self._loop = loop
-        self._tasks_status = {}
         self._method_call_counts = {}
         logger.info(f"MockHyphaService {self.id} ({self.service_type}) initialized.")
 
@@ -66,85 +80,55 @@ class MockHyphaService:
         await asyncio.sleep(0.01) # Simulate network delay
         return "Hello world"
 
-    async def get_all_task_status(self):
-        logger.debug(f"Mock {self.id}: get_all_task_status() called. Current: {self._tasks_status}")
-        await asyncio.sleep(0.01)
-        return self._tasks_status.copy()
-
-    async def get_task_status(self, task_name):
-        status = self._tasks_status.get(task_name, "not_started")
-        logger.debug(f"Mock {self.id}: get_task_status({task_name}) -> {status}")
-        await asyncio.sleep(0.01)
-        return status
-
-    async def reset_task_status(self, task_name):
-        if task_name in self._tasks_status:
-            logger.info(f"Mock {self.id}: reset_task_status({task_name}) from {self._tasks_status[task_name]}")
-            del self._tasks_status[task_name]
-        else:
-            logger.debug(f"Mock {self.id}: reset_task_status({task_name}) - no active status to reset.")
-        await asyncio.sleep(0.01)
-        return True
-        
-    async def reset_all_task_status(self):
-        logger.info(f"Mock {self.id}: reset_all_task_status(). Current: {self._tasks_status}")
-        self._tasks_status.clear()
-        await asyncio.sleep(0.01)
-        return True
-
     async def disconnect(self):
         logger.info(f"MockHyphaService {self.id} ({self.service_type}): disconnect() called.")
         await asyncio.sleep(0.01)
-        return True
 
-    async def _simulate_method_call(self, method_name, duration=0.5, fail_sometimes=False, fail_rate=0.1):
+    async def _simulate_method_call(self, method_name, duration=0.5, fail_sometimes=False, fail_rate=0.0):
         self._method_call_counts[method_name] = self._method_call_counts.get(method_name, 0) + 1
         logger.info(f"Mock {self.id}: Starting method {method_name} (Call #{self._method_call_counts[method_name]})")
-        self._tasks_status[method_name] = "running"
         await asyncio.sleep(duration / 2) # Halfway through
         
-        # Simulate occasional failure
+        # Simulate occasional failures
         if fail_sometimes and random.random() < fail_rate:
-            logger.warning(f"Mock {self.id}: Simulating FAILURE for method {method_name}")
-            self._tasks_status[method_name] = "failed"
-            return False # Indicate failure to caller if needed by call_service_with_retries logic
-
+            error_msg = f"Mock {self.id}: Method {method_name} simulated failure"
+            logger.error(error_msg)
+            raise ServiceOperationError(error_msg)
+        
         logger.info(f"Mock {self.id}: Finishing method {method_name}")
         await asyncio.sleep(duration / 2) # Remaining duration
-        self._tasks_status[method_name] = "finished"
-        return True
 
 class MockIncubator(MockHyphaService):
     def __init__(self, service_id, loop):
         super().__init__(service_id, "incubator", loop)
 
     async def get_sample_from_slot_to_transfer_station(self, slot, **kwargs):
-        return await self._simulate_method_call("get_sample_from_slot_to_transfer_station", duration=1)
+        await self._simulate_method_call("get_sample_from_slot_to_transfer_station", duration=1)
 
     async def put_sample_from_transfer_station_to_slot(self, slot, **kwargs):
-        return await self._simulate_method_call("put_sample_from_transfer_station_to_slot", duration=1)
+        await self._simulate_method_call("put_sample_from_transfer_station_to_slot", duration=1)
 
 class MockRoboticArm(MockHyphaService):
     def __init__(self, service_id, loop):
         super().__init__(service_id, "robotic_arm", loop)
 
     async def grab_sample_from_incubator(self, **kwargs):
-        return await self._simulate_method_call("grab_sample_from_incubator", duration=0.5)
+        await self._simulate_method_call("grab_sample_from_incubator", duration=0.5)
 
     async def transport_from_incubator_to_microscope1(self, **kwargs):
-        return await self._simulate_method_call("transport_from_incubator_to_microscope1", duration=1)
+        await self._simulate_method_call("transport_from_incubator_to_microscope1", duration=1)
 
     async def put_sample_on_microscope1(self, **kwargs):
-        return await self._simulate_method_call("put_sample_on_microscope1", duration=0.5)
+        await self._simulate_method_call("put_sample_on_microscope1", duration=0.5)
 
     async def grab_sample_from_microscope1(self, **kwargs):
-        return await self._simulate_method_call("grab_sample_from_microscope1", duration=0.5)
+        await self._simulate_method_call("grab_sample_from_microscope1", duration=0.5)
 
     async def transport_from_microscope1_to_incubator(self, **kwargs):
-        return await self._simulate_method_call("transport_from_microscope1_to_incubator", duration=1)
+        await self._simulate_method_call("transport_from_microscope1_to_incubator", duration=1)
 
     async def put_sample_on_incubator(self, **kwargs):
-        return await self._simulate_method_call("put_sample_on_incubator", duration=0.5)
+        await self._simulate_method_call("put_sample_on_incubator", duration=0.5)
 
 
 class MockMicroscope(MockHyphaService):
@@ -152,104 +136,153 @@ class MockMicroscope(MockHyphaService):
         super().__init__(service_id, "microscope", loop)
 
     async def home_stage(self, **kwargs):
-        return await self._simulate_method_call("home_stage", duration=0.3)
+        await self._simulate_method_call("home_stage", duration=0.3)
 
     async def return_stage(self, **kwargs):
-        return await self._simulate_method_call("return_stage", duration=0.3)
+        await self._simulate_method_call("return_stage", duration=0.3)
 
     async def scan_well_plate_simulated(self, illuminate_channels, do_reflection_af, scanning_zone, Nx, Ny, action_ID, **kwargs):
         logger.info(f"Mock {self.id}: scan_well_plate_simulated called with action_ID: {action_ID}, channels: {illuminate_channels}, zone: {scanning_zone}, Nx: {Nx}, Ny: {Ny}, AF: {do_reflection_af}")
         # Simulate a longer scan, maybe with a chance of failure
-        return await self._simulate_method_call("scan_well_plate_simulated", duration=2, fail_sometimes=True, fail_rate=0.05) # 5% chance of scan failure
+        await self._simulate_method_call("scan_well_plate_simulated", duration=2, fail_sometimes=True, fail_rate=0.05) # 5% chance of scan failure
 
 # --- End Mock Hypha Services ---
 
 class OrchestrationSystem:
-    def __init__(self, local=False):
-        self.local = local # local flag might not mean much without real connections
-        self.server_url = "mock_server_url" # Not used for connections
-        self.local=local
-        self.token = None
-        self.workspace=None
-        if self.local:
-            self.token = os.environ.get("REEF_LOCAL_TOKEN")
-            self.orchestrator_hypha_server_url = "http://localhost:9527" # Default
-            self.workspace=os.environ.get("REEF_LOCAL_WORKSPACE")
-        else:
-            self.token = os.environ.get("REEF_WORKSPACE_TOKEN")
-            self.orchestrator_hypha_server_url = "https://hypha.aicell.io"
-            self.workspace="reef-imaging"
+    def __init__(self):
+        # Orchestrator's own Hypha service registration details (always production-like)
+        self.orchestrator_hypha_server_url = "https://hypha.aicell.io"
+        self.workspace = "reef-imaging" # Default workspace for aicell.io
+        self.token_for_orchestrator_registration = os.environ.get("REEF_WORKSPACE_TOKEN")
         
         self.orchestrator_hypha_service_id = "orchestrator-manager-simulation"
         self.orchestrator_hypha_server_connection = None
 
-        # Instantiate MOCK services
+        # Mock services (do not connect via Hypha in this simulation)
+        # Their URLs/tokens like REEF_LOCAL_TOKEN would be relevant if they were real Hypha services
+        # For now, their configuration is just their simulated IDs.
         loop = asyncio.get_event_loop()
         self.incubator = MockIncubator(SIM_INCUBATOR_ID, loop)
-        # Microscope is instantiated on demand based on task, but we can have a placeholder or default
-        self.microscope = None # Will be a MockMicroscope instance
+        self.microscope = None 
         self.robotic_arm = MockRoboticArm(SIM_ROBOTIC_ARM_ID, loop)
         
         self.sample_on_microscope_flag = False
-
-        self.sim_incubator_id = SIM_INCUBATOR_ID # Retain for clarity if needed
-        self.sim_robotic_arm_id = SIM_ROBOTIC_ARM_ID # Retain for clarity
-
-        self.current_microscope_id = None # Logical ID of the microscope for the current task
-        self.current_mock_microscope_instance = None # Stores the active MockMicroscope
-        
+        self.sim_incubator_id = SIM_INCUBATOR_ID 
+        self.sim_robotic_arm_id = SIM_ROBOTIC_ARM_ID 
+        self.current_microscope_id = None 
+        self.current_mock_microscope_instance = None 
         self.tasks = {}
         self.health_check_tasks = {}
         self.active_task_name = None
-        self._config_lock = asyncio.Lock() # Lock for reading/writing config file
+        self._config_lock = asyncio.Lock() 
+
+        # Transport Queue and Worker Task
+        self.transport_queue = asyncio.Queue()
+        self._transport_worker_task = None # Will be created in _register_self_as_hypha_service
+
+    async def _transport_worker_loop(self):
+        logger.info("Transport worker loop started.")
+        while True:
+            try:
+                # Get a transport task from the queue
+                # Task details could be a dict: e.g., {"action": "load", "incubator_slot": 1, "future": future_obj}
+                task_details = await self.transport_queue.get()
+                logger.info(f"Transport worker picked up task: {task_details.get('action')} for slot {task_details.get('incubator_slot')}")
+                
+                action = task_details.get("action")
+                incubator_slot = task_details.get("incubator_slot")
+                future_to_resolve = task_details.get("future")
+                
+                try:
+                    if action == "load":
+                        # Ensure microscope is set up for the task if this worker needs to know about it
+                        # For now, assuming setup_connections is handled by the main run_cycle or similar trigger.
+                        # If transport worker needs to select/ensure microscope, that logic would go here or be passed in task_details.
+                        if not self.microscope: # Basic check, might need more sophisticated microscope management
+                             raise MicroscopeNotAvailableError("Microscope not available for load operation")
+                        await self._execute_load_operation(incubator_slot)
+                        if future_to_resolve: future_to_resolve.set_result(True)
+                    elif action == "unload":
+                        if not self.microscope: # Basic check
+                             raise MicroscopeNotAvailableError("Microscope not available for unload operation")
+                        await self._execute_unload_operation(incubator_slot)
+                        if future_to_resolve: future_to_resolve.set_result(True)
+                    else:
+                        error_msg = f"Unknown transport action: {action}"
+                        logger.warning(f"Transport worker received unknown action: {action}")
+                        if future_to_resolve: future_to_resolve.set_exception(ValueError(error_msg))
+
+                except Exception as e:
+                    logger.error(f"Transport worker failed for {action} on slot {incubator_slot}: {e}")
+                    if future_to_resolve and not future_to_resolve.done():
+                        future_to_resolve.set_exception(e)
+                
+                self.transport_queue.task_done()
+                logger.info(f"Transport task {action} for slot {incubator_slot} completed")
+
+            except asyncio.CancelledError:
+                logger.info("Transport worker loop cancelled.")
+                break
+            except Exception as e:
+                logger.error(f"Exception in transport worker loop: {e}", exc_info=True)
+                # Continue to prevent worker death
+
+    async def _start_transport_worker(self):
+        if self._transport_worker_task is None or self._transport_worker_task.done():
+            self._transport_worker_task = asyncio.create_task(self._transport_worker_loop())
+            logger.info("Transport worker task created and started.")
+        else:
+            logger.info("Transport worker task already running.")
+
+    async def _stop_transport_worker(self):
+        if self._transport_worker_task and not self._transport_worker_task.done():
+            logger.info("Stopping transport worker task...")
+            self.transport_queue.put_nowait(None) # Send a sentinel to potentially break the loop cleanly if needed
+            self._transport_worker_task.cancel()
+            try:
+                await self._transport_worker_task
+            except asyncio.CancelledError:
+                logger.info("Transport worker task successfully cancelled.")
+            self._transport_worker_task = None
+        else:
+            logger.info("Transport worker task not running or already stopped.")
 
     async def _register_self_as_hypha_service(self):
-        logger.info(f"Registering orchestrator as a Hypha service with ID '{self.orchestrator_hypha_service_id}' on server '{self.orchestrator_hypha_server_url}'")
-        try:
-            token = None
-            if self.local:
-                token = os.environ.get("REEF_LOCAL_TOKEN")
-            else:
-                token = os.environ.get("ORCHESTRATOR_WORKSPACE_TOKEN", os.environ.get("REEF_WORKSPACE_TOKEN"))
+        logger.info(f"Registering orchestrator as a Hypha service with ID '{self.orchestrator_hypha_service_id}' on server '{self.orchestrator_hypha_server_url}' in workspace '{self.workspace}'")
+        if not self.token_for_orchestrator_registration:
+            logger.error("REEF_WORKSPACE_TOKEN is not set in environment. Cannot register orchestrator service.")
+            return
 
-            server_config = {"server_url": self.orchestrator_hypha_server_url, "ping_interval": None, "workspace": self.workspace}
-            if token:
-                server_config["token"] = token
-            self.orchestrator_hypha_server_connection = await connect_to_server(server_config)
-            logger.info(f"Successfully connected to Hypha server: {self.orchestrator_hypha_server_url}")
+        server_config_for_registration = {
+            "server_url": self.orchestrator_hypha_server_url,
+            "ping_interval": None,
+            "workspace": self.workspace,
+            "token": self.token_for_orchestrator_registration
+        }
+        
+        self.orchestrator_hypha_server_connection = await connect_to_server(server_config_for_registration)
+        logger.info(f"Successfully connected to Hypha server: {self.orchestrator_hypha_server_url} for orchestrator registration")
 
-            service_api = {
-                "name": "Orchestrator Manager (Simulation)",
-                "id": self.orchestrator_hypha_service_id,
-                "config": {
-                    "visibility": "public", 
-                    "run_in_executor": True,
-                },
-                "hello_orchestrator": self.hello_orchestrator,
-                "add_imaging_task": self.add_imaging_task,
-                "delete_imaging_task": self.delete_imaging_task,
-                "get_all_imaging_tasks": self.get_all_imaging_tasks,
-            }
-            
-            registered_service = await self.orchestrator_hypha_server_connection.register_service(service_api)
-            logger.info(f"Orchestrator management service registered successfully. Service ID: {registered_service.id}")
-            
-            try: # Log proxy URL for easy testing
-                ws = self.orchestrator_hypha_server_connection.config.workspace or "public" # Adjust if workspace is known
-                sid_full = registered_service.id
-                if ":" in sid_full:
-                    sid = sid_full.split(":")[-1]
-                else: # if id is already the short form
-                    sid = sid_full
-
-                proxy_url_base = self.orchestrator_hypha_server_url.replace("ws://", "http://").replace("wss://", "https://")
-                logger.info(f"Test with hello_orchestrator: {proxy_url_base}/{ws}/services/{self.orchestrator_hypha_service_id}/hello_orchestrator or {proxy_url_base}/{ws}/services/{sid}/hello_orchestrator")
-            except Exception as e:
-                logger.debug(f"Could not construct proxy URL for testing: {e}")
-
-        except Exception as e:
-            logger.error(f"Failed to register orchestrator as a Hypha service: {e}")
-            # Depending on criticality, might re-raise or set a flag
+        service_api = {
+            "name": "Orchestrator Manager (Simulation)",
+            "id": self.orchestrator_hypha_service_id,
+            "config": {
+                "visibility": "public", 
+                "run_in_executor": True,
+            },
+            "hello_orchestrator": self.hello_orchestrator,
+            "add_imaging_task": self.add_imaging_task,
+            "delete_imaging_task": self.delete_imaging_task,
+            "get_all_imaging_tasks": self.get_all_imaging_tasks,
+            "load_plate_from_incubator_to_microscope": self.load_plate_from_incubator_to_microscope, # Will be changed to queue task
+            "unload_plate_from_microscope": self.unload_plate_from_microscope, # Will be changed to queue task
+        }
+        
+        registered_service = await self.orchestrator_hypha_server_connection.register_service(service_api)
+        logger.info(f"Orchestrator management service registered successfully. Service ID: {registered_service.id}")
+        
+        # Start the transport worker after successful registration
+        await self._start_transport_worker()
 
     @schema_function(skip_self=True)
     async def hello_orchestrator(self):
@@ -276,27 +309,27 @@ class OrchestrationSystem:
                 logger.error(msg)
                 return {"success": False, "message": msg}
         
-        # Validate pending_time_points format and content
         if not isinstance(new_settings["pending_time_points"], list):
             msg = f"'pending_time_points' must be a list for task '{task_name}'."
             logger.error(msg)
             return {"success": False, "message": msg}
 
-        parsed_pending_time_points = []
-        if not new_settings["pending_time_points"]: # Empty list is acceptable, means task is defined but has no work yet
+        parsed_pending_time_points_str = []
+        if not new_settings["pending_time_points"]:
             logger.warning(f"Task '{task_name}' has an empty 'pending_time_points' list.")
         
         for tp_str in new_settings["pending_time_points"]:
             try:
-                # Basic ISO format validation for strings
-                datetime.fromisoformat(tp_str.replace('Z', ''))
-                parsed_pending_time_points.append(tp_str) # Keep as string for now, will be parsed by _load_and_update_tasks
+                datetime.fromisoformat(tp_str) # Validate naive ISO format
+                if 'Z' in tp_str or '+' in tp_str.split('T')[-1]: # Basic check for unwanted timezone indicators
+                    raise ValueError("Time point string should be naive local time.")
+                parsed_pending_time_points_str.append(tp_str)
             except ValueError as ve:
-                msg = f"Invalid ISO format for a time point in 'pending_time_points' for task '{task_name}': {tp_str} ({ve})"
+                msg = f"Invalid naive ISO format for a time point in 'pending_time_points' for task '{task_name}': {tp_str} ({ve})"
                 logger.error(msg)
                 return {"success": False, "message": msg}
         
-        # Ensure imaged_time_points exists and is a list, even if empty, if not provided.
+        # Ensure "imaged_time_points" exists and is a list, defaulting to empty if not provided
         if "imaged_time_points" not in new_settings:
             new_settings["imaged_time_points"] = []
         elif not isinstance(new_settings["imaged_time_points"], list):
@@ -304,12 +337,26 @@ class OrchestrationSystem:
             logger.error(msg)
             return {"success": False, "message": msg}
         
-        # Ensure imaging_started and imaging_completed flags exist, default to false
-        if "imaging_started" not in new_settings:
-            new_settings["imaging_started"] = False
-        if "imaging_completed" not in new_settings:
-            new_settings["imaging_completed"] = False
+        for tp_str in new_settings["imaged_time_points"]: # Also validate imaged if provided
+            try:
+                datetime.fromisoformat(tp_str)
+                if 'Z' in tp_str or '+' in tp_str.split('T')[-1]:
+                     raise ValueError("Time point string should be naive local time.")
+            except ValueError as ve:
+                msg = f"Invalid naive ISO format for a time point in 'imaged_time_points' for task '{task_name}': {tp_str} ({ve})"
+                logger.error(msg)
+                return {"success": False, "message": msg}
 
+        # Determine status and flags based on the new/updated time points
+        has_pending = bool(parsed_pending_time_points_str)
+        has_imaged = bool(new_settings.get("imaged_time_points", []))
+
+        current_status = "pending"
+        if not has_pending:
+            current_status = "completed"
+        
+        new_settings["imaging_completed"] = not has_pending
+        new_settings["imaging_started"] = has_imaged or (not has_pending and has_imaged)
 
         async with self._config_lock:
             try:
@@ -331,30 +378,10 @@ class OrchestrationSystem:
                         task_exists_at_index = i
                         break
                 
-                # Determine next_run_time_utc from the earliest pending time point
-                next_run_from_pending = None
-                if parsed_pending_time_points:
-                    # Sort string time points to find the earliest one
-                    sorted_pending_tp_strings = sorted(parsed_pending_time_points)
-                    next_run_from_pending = sorted_pending_tp_strings[0]
-
                 op_state = {
-                    "status": "pending",
-                    # Use the earliest pending time point or None if list is empty
-                    "next_run_time_utc": next_run_from_pending if next_run_from_pending else datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-                    "retries": 0,
-                    "last_updated_by_orchestrator": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+                    "status": current_status,
+                    "last_updated_by_orchestrator": datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
                 }
-                if not next_run_from_pending:
-                    op_state["status"] = "idle_no_pending_points" # Or "completed" if appropriate from start
-                    if not new_settings.get("imaged_time_points"): # if no imaged points either
-                        op_state["status"] = "completed" # Task is added with no work.
-                        new_settings["imaging_completed"] = True # Reflect this in settings
-                    else: # Has imaged points, but no pending ones
-                        op_state["status"] = "completed"
-                        new_settings["imaging_started"] = True
-                        new_settings["imaging_completed"] = True
-
 
                 if task_exists_at_index != -1:
                     logger.info(f"Task '{task_name}' already exists. Updating its settings and operational_state.")
@@ -463,23 +490,20 @@ class OrchestrationSystem:
     async def _load_and_update_tasks(self):
         logger.info(f"Loading and updating tasks from {CONFIG_FILE_PATH} (sim)")
         new_task_configs = {}
-        raw_config_data = None # To store the full structure for writing back
+        raw_config_data = None 
 
         async with self._config_lock:
             try:
                 with open(CONFIG_FILE_PATH, 'r') as f:
-                    raw_config_data = json.load(f) # Load the raw structure
+                    raw_config_data = json.load(f) 
             except FileNotFoundError:
                 logger.error(f"Configuration file {CONFIG_FILE_PATH} not found for simulation.")
-                raw_config_data = {"samples": []} # Create a default structure if not found
+                raw_config_data = {"samples": []} 
             except json.JSONDecodeError:
                 logger.error(f"Error decoding JSON from {CONFIG_FILE_PATH} for simulation. Will not update tasks from file this cycle.")
-                return # Don't proceed if config is corrupt
+                return 
 
-        # Reset operational_state for all samples in the loaded raw_config_data is NO LONGER DONE HERE.
-        # Operational state should be respected unless specifically reset by an API call or internal logic.
-
-        current_time_utc = datetime.now(timezone.utc)
+        current_time_naive = datetime.now() # Used for intelligent flag setting, not scheduling here
 
         for sample_config_from_file in raw_config_data.get("samples", []):
             task_name = sample_config_from_file.get("name")
@@ -490,26 +514,25 @@ class OrchestrationSystem:
                 continue
 
             try:
-                # Parse pending_time_points and imaged_time_points
                 pending_datetimes = []
                 for tp_str in settings.get("pending_time_points", []):
-                    dt_obj = datetime.fromisoformat(tp_str.replace('Z', '') + '+00:00') if tp_str.endswith('Z') else datetime.fromisoformat(tp_str).replace(tzinfo=timezone.utc)
+                    dt_obj = datetime.fromisoformat(tp_str) # Expects naive ISO string
                     pending_datetimes.append(dt_obj)
-                pending_datetimes.sort() # Ensure they are in chronological order
+                pending_datetimes.sort() 
 
                 imaged_datetimes = []
                 for tp_str in settings.get("imaged_time_points", []):
-                    dt_obj = datetime.fromisoformat(tp_str.replace('Z', '') + '+00:00') if tp_str.endswith('Z') else datetime.fromisoformat(tp_str).replace(tzinfo=timezone.utc)
+                    dt_obj = datetime.fromisoformat(tp_str) # Expects naive ISO string
                     imaged_datetimes.append(dt_obj)
                 imaged_datetimes.sort()
                 
-                # Update imaging_started and imaging_completed flags based on parsed time points
-                # These flags in settings are now more like status indicators derived from time points
-                settings["imaging_started"] = bool(imaged_datetimes or (pending_datetimes and min(pending_datetimes) < current_time_utc) )
-                settings["imaging_completed"] = not pending_datetimes and bool(imaged_datetimes) # Completed if no pending and some imaged
-                if not pending_datetimes and not imaged_datetimes: # No work defined at all
-                    settings["imaging_started"] = False
-                    settings["imaging_completed"] = True 
+                # Determine flags based on actual datetime lists
+                has_pending = bool(pending_datetimes)
+                has_imaged = bool(imaged_datetimes)
+
+                # These flags in settings are for what's WRITTEN to config, orchestrator uses internal datetime lists primarily.
+                settings["imaging_completed"] = not has_pending
+                settings["imaging_started"] = has_imaged or (not has_pending and has_imaged) # Started if imaged, or completed & imaged
 
                 parsed_settings_config = {
                     "name": task_name,
@@ -520,19 +543,18 @@ class OrchestrationSystem:
                     "Ny": settings["Ny"],
                     "illuminate_channels": settings["illuminate_channels"],
                     "do_reflection_af": settings["do_reflection_af"],
-                    # Store the parsed datetime objects for internal use
                     "pending_datetimes": pending_datetimes, 
                     "imaged_datetimes": imaged_datetimes,
-                    # Also keep the flags for easier access if needed, though they can be derived
-                    "imaging_started_flag": settings["imaging_started"],
+                    # The flags below are derived for internal logic if needed, but primary truth is pending/imaged_datetimes counts
+                    "imaging_started_flag": settings["imaging_started"], 
                     "imaging_completed_flag": settings["imaging_completed"]
                 }
                 new_task_configs[task_name] = parsed_settings_config
             except KeyError as e:
                 logger.error(f"Missing key {e} in simulation configuration settings for sample {task_name}. Skipping.")
                 continue
-            except ValueError as e:
-                logger.error(f"Error parsing simulation configuration settings for sample {task_name}: {e}. Skipping.")
+            except ValueError as e: # Catch errors from datetime.fromisoformat if string is not naive or malformed
+                logger.error(f"Error parsing time strings (ensure they are naive local time) for sample {task_name}: {e}. Skipping.")
                 continue
         
         tasks_to_remove = [name for name in self.tasks if name not in new_task_configs]
@@ -551,86 +573,83 @@ class OrchestrationSystem:
                     operational_state_from_file = sample_in_file.get("operational_state", {})
                     break
             
-            next_run_time_from_pending = current_settings_config["pending_datetimes"][0] if current_settings_config["pending_datetimes"] else None
+            persisted_status = operational_state_from_file.get("status", "pending")
+            persisted_retries = operational_state_from_file.get("retries", 0)
+
+            # Determine actual status based on current pending_datetimes
+            current_actual_status = persisted_status
+            if not current_settings_config["pending_datetimes"]:
+                current_actual_status = "completed"
+            elif persisted_status == "completed" and current_settings_config["pending_datetimes"]:
+                 # If file said completed, but now there are pending points (e.g. user added them)
+                 current_actual_status = "pending" # Reset to pending
+                 persisted_retries = 0 # Reset retries as well
+                 logger.info(f"Task '{task_name}' was completed but now has pending points. Resetting status to pending and retries to 0.")
+                 a_task_state_changed_for_write = True
 
             if task_name not in self.tasks:
                 logger.info(f"New sim task added: {task_name}")
-                persisted_status = operational_state_from_file.get("status", "pending")
-                persisted_retries = operational_state_from_file.get("retries", 0)
-                persisted_next_run_str = operational_state_from_file.get("next_run_time_utc")
-                
-                next_run_time_init = next_run_time_from_pending
-                if persisted_next_run_str and not next_run_time_init: # No pending points, but had a persisted run time
-                    try:
-                        dt_val = datetime.fromisoformat(persisted_next_run_str.replace('Z', '') + '+00:00') if persisted_next_run_str.endswith('Z') else datetime.fromisoformat(persisted_next_run_str).replace(tzinfo=timezone.utc)
-                        # If this persisted time makes sense (e.g., for retries or before all pending points were known), use it.
-                        # However, if there are no pending_datetimes, next_run_time_init should remain None or be set to a far future time.
-                        # For now, if next_run_time_from_pending is None, this persisted one is likely outdated or refers to a past state.
-                        if not next_run_time_from_pending: # Only use if no pending points define a clear next run
-                             logger.debug(f"Task '{task_name}': No pending points, but loaded persisted next_run_time_utc '{persisted_next_run_str}'. This might be stale.")
-                             # next_run_time_init remains None if no pending points.
-                        # If we decide to use it: next_run_time_init = dt_val 
-                    except ValueError:
-                        logger.warning(f"Task '{task_name}': Could not parse persisted next_run_time_utc '{persisted_next_run_str}'. Using earliest pending point or None.")
-                elif next_run_time_init is None: # No pending points and no useful persisted run time string
-                     logger.info(f"Task '{task_name}' has no pending time points. Will not schedule for run unless points are added.")
-                     persisted_status = "idle_no_pending_points" if not current_settings_config["imaging_completed_flag"] else "completed"
-
                 self.tasks[task_name] = {
                     "config": current_settings_config, 
-                    "status": persisted_status,
-                    "next_run_time": next_run_time_init, # This is now a datetime object or None
+                    "status": current_actual_status,
                     "retries": persisted_retries,
-                    "_raw_settings_from_input": copy.deepcopy(sample_config_from_file.get("settings", {})) # Store raw settings
+                    "_raw_settings_from_input": copy.deepcopy(sample_config_from_file.get("settings", {})),
+                    "_next_retry_allowed_time": None # Initialize internal retry timestamp
                 }
-                a_task_state_changed_for_write = True
+                a_task_state_changed_for_write = True # Status might have been determined above
 
-                # If an initial next_run_time is set and is past, adjust it (only if task not completed/error)
-                if self.tasks[task_name]["next_run_time"] and \
-                   self.tasks[task_name]["next_run_time"] < current_time_utc and \
-                   self.tasks[task_name]["status"] not in ["completed", "error_max_retries", "idle_no_pending_points"]:
-                    logger.debug(f"New/Loaded task {task_name} (status {self.tasks[task_name]['status']}) earliest pending time {self.tasks[task_name]['next_run_time']} is past. Setting next_run_time to current_time_utc {current_time_utc}")
-                    self.tasks[task_name]["next_run_time"] = current_time_utc
-            else:
-                # Task exists, update its 'config' part if changed
-                # Deep comparison might be needed if lists of datetimes are involved in config
-                if self.tasks[task_name]["config"]["pending_datetimes"] != current_settings_config["pending_datetimes"] or \
-                   self.tasks[task_name]["config"]["imaged_datetimes"] != current_settings_config["imaged_datetimes"] or \
-                   any(self.tasks[task_name]["config"].get(k) != current_settings_config.get(k) for k in ["incubator_slot", "allocated_microscope", "imaging_zone", "Nx", "Ny"]):
-                    logger.info(f"Configuration settings or time points for sim task {task_name} updated.")
-                    self.tasks[task_name]["config"] = current_settings_config
-                    # If pending points changed, recalculate next_run_time
-                    new_next_run_from_pending = current_settings_config["pending_datetimes"][0] if current_settings_config["pending_datetimes"] else None
-                    if self.tasks[task_name]["next_run_time"] != new_next_run_from_pending:
-                        logger.info(f"Task '{task_name}' next_run_time updated due to config change from {self.tasks[task_name]['next_run_time']} to {new_next_run_from_pending}")
-                        self.tasks[task_name]["next_run_time"] = new_next_run_from_pending
-                        # If this new next_run_time is past, adjust to current_time_utc if task is active
-                        if new_next_run_from_pending and new_next_run_from_pending < current_time_utc and self.tasks[task_name]["status"] not in ["completed", "error_max_retries", "idle_no_pending_points"]:
-                            self.tasks[task_name]["next_run_time"] = current_time_utc
-                            logger.info(f"Task '{task_name}' new next_run_time was past, adjusted to current UTC.")
+            else: # Task already exists, update it
+                existing_task_data = self.tasks[task_name]
+                # Check for config changes that might warrant a state reset
+                config_changed_significantly = (
+                    existing_task_data["config"]["pending_datetimes"] != current_settings_config["pending_datetimes"] or
+                    existing_task_data["config"]["imaged_datetimes"] != current_settings_config["imaged_datetimes"] or
+                    any(existing_task_data["config"].get(k) != current_settings_config.get(k) 
+                        for k in ["incubator_slot", "allocated_microscope", "imaging_zone", "Nx", "Ny"])
+                )
 
-                    a_task_state_changed_for_write = True 
+                existing_task_data["config"] = current_settings_config # Always update config
+                existing_task_data["_raw_settings_from_input"] = copy.deepcopy(sample_config_from_file.get("settings", {}))
+                a_task_state_changed_for_write = True # Assume config change implies write needed
 
-                self.tasks[task_name]["_raw_settings_from_input"] = copy.deepcopy(sample_config_from_file.get("settings", {}))
+                if existing_task_data["status"] != current_actual_status:
+                    logger.info(f"Task '{task_name}' status changing from '{existing_task_data['status']}' to '{current_actual_status}' due to config load/re-evaluation.")
+                    existing_task_data["status"] = current_actual_status
+                    # If status changed (e.g. from error to pending due to new points), reset retry time
+                    if current_actual_status == "pending":
+                        existing_task_data["retries"] = 0 # Reset retries if config change made it pending again
+                        existing_task_data["_next_retry_allowed_time"] = None
+                
+                if persisted_retries != existing_task_data["retries"]:
+                    # This case should be rare if retries are reset above correctly
+                    # but handles if config file had different retries for some reason
+                    existing_task_data["retries"] = persisted_retries
+                    logger.info(f"Task '{task_name}' retries updated from file to {persisted_retries}")
 
-            # Adjust status if no pending points and task was not already completed/error
-            task_state_dict = self.tasks[task_name]
-            if not task_state_dict["config"]["pending_datetimes"] and task_state_dict["status"] not in ["completed", "error_max_retries"]:
-                new_status = "completed" if task_state_dict["config"]["imaged_datetimes"] else "idle_no_pending_points" # if imaged some, it's done. If not, it's idle.
-                if task_state_dict["status"] != new_status:
-                    logger.info(f"Task '{task_name}' has no pending time points. Updating status from '{task_state_dict['status']}' to '{new_status}'.")
-                    task_state_dict["status"] = new_status
-                    task_state_dict["next_run_time"] = None # No more runs
-                    a_task_state_changed_for_write = True
+                if config_changed_significantly and existing_task_data["status"] not in ["pending", "completed"]:
+                    # If config changed and task was in an error/retry state, 
+                    # and status hasn't already been reset to pending/completed by logic above,
+                    # it might need re-evaluation. If new pending points exist, status should become pending.
+                    if current_settings_config["pending_datetimes"]:
+                        if existing_task_data["status"] != "pending":
+                            logger.info(f"Task '{task_name}' had significant config changes while in status '{existing_task_data['status']}'. Resetting to pending as new points exist.")
+                            existing_task_data["status"] = "pending"
+                            existing_task_data["retries"] = 0
+                            existing_task_data["_next_retry_allowed_time"] = None
+                    elif not existing_task_data["config"]["imaged_datetimes"]:
+                        # No pending, no imaged, but config changed? Should be completed. Or if no pending but imaged.
+                         if existing_task_data["status"] != "completed":
+                            logger.info(f"Task '{task_name}' had significant config changes. No pending points. Marking completed.")
+                            existing_task_data["status"] = "completed"
+                            existing_task_data["_next_retry_allowed_time"] = None 
             
-            # If a task is pending/error and its next_run_time (from earliest pending) is past, make it run now.
-            current_task_status = task_state_dict["status"]
-            task_next_run = task_state_dict["next_run_time"]
-            if task_next_run and task_next_run <= current_time_utc and current_task_status not in ["completed", "error_max_retries", "active", "waiting_for_next_run", "idle_no_pending_points"]:
-                 if task_state_dict["next_run_time"] != current_time_utc: # Avoid redundant logging/writes
-                    logger.info(f"Task '{task_name}' (status: {current_task_status}) re-evaluated by load_tasks. Earliest pending time {task_next_run.isoformat()} is past or now. Overriding next_run_time to current_time_utc {current_time_utc.isoformat()}.")
-                    task_state_dict["next_run_time"] = current_time_utc
-                    a_task_state_changed_for_write = True
+            # Final status check: if a task somehow ends up with status != completed but no pending_datetimes, fix it.
+            task_state_dict = self.tasks[task_name]
+            if not task_state_dict["config"]["pending_datetimes"] and task_state_dict["status"] != "completed":
+                logger.warning(f"Task '{task_name}' has status '{task_state_dict['status']}' but no pending time points. Forcing to 'completed'.")
+                task_state_dict["status"] = "completed"
+                task_state_dict["_next_retry_allowed_time"] = None # No retries for completed tasks
+                a_task_state_changed_for_write = True
 
         if a_task_state_changed_for_write or tasks_to_remove:
             await self._write_tasks_to_config()
@@ -655,42 +674,27 @@ class OrchestrationSystem:
                 settings_to_write = copy.deepcopy(task_data_internal.get("_raw_settings_from_input", {}))
                 current_internal_config = task_data_internal["config"]
 
-                # Update pending_time_points and imaged_time_points in settings_to_write from internal datetimes
                 settings_to_write["pending_time_points"] = sorted([
-                    dt.strftime('%Y-%m-%dT%H:%M:%SZ') for dt in current_internal_config.get("pending_datetimes", [])
+                    dt.strftime('%Y-%m-%dT%H:%M:%S') for dt in current_internal_config.get("pending_datetimes", [])
                 ])
                 settings_to_write["imaged_time_points"] = sorted([
-                    dt.strftime('%Y-%m-%dT%H:%M:%SZ') for dt in current_internal_config.get("imaged_datetimes", [])
+                    dt.strftime('%Y-%m-%dT%H:%M:%S') for dt in current_internal_config.get("imaged_datetimes", [])
                 ])
 
-                # Update imaging_started and imaging_completed flags based on the current state of time points
                 has_pending = bool(current_internal_config.get("pending_datetimes"))
                 has_imaged = bool(current_internal_config.get("imaged_datetimes"))
                 
-                settings_to_write["imaging_started"] = has_imaged or (has_pending and task_data_internal["status"] != "pending") # Considered started if any TP imaged, or if first TP is being processed
-                if not has_pending and not has_imaged: # No points defined at all
-                    settings_to_write["imaging_started"] = False 
-                    settings_to_write["imaging_completed"] = True
-                elif not has_pending and has_imaged: # All pending are done, some were imaged
-                    settings_to_write["imaging_started"] = True
-                    settings_to_write["imaging_completed"] = True
-                else: # Still pending points, or pending but none imaged yet
-                    settings_to_write["imaging_completed"] = False
-                    if not has_imaged and task_data_internal["status"] == "pending": # Not yet started imaging the first point
-                         settings_to_write["imaging_started"] = False
-
-
-                # Operational state serialization
-                next_run_time_str = task_data_internal["next_run_time"].strftime('%Y-%m-%dT%H:%M:%SZ') if task_data_internal.get("next_run_time") else None
+                # Update these flags based on the current truth (pending/imaged datetimes)
+                settings_to_write["imaging_completed"] = not has_pending
+                settings_to_write["imaging_started"] = has_imaged or (not has_pending and has_imaged)
                 
                 sample_entry = {
                     "name": task_name,
                     "settings": settings_to_write, 
                     "operational_state": {
                         "status": task_data_internal["status"],
-                        "next_run_time_utc": next_run_time_str, 
                         "retries": task_data_internal["retries"],
-                        "last_updated_by_orchestrator": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+                        "last_updated_by_orchestrator": datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
                     }
                 }
                 output_config_data["samples"].append(sample_entry)
@@ -702,7 +706,7 @@ class OrchestrationSystem:
             except IOError as e:
                 logger.error(f"Error writing tasks state to {CONFIG_FILE_PATH}: {e}")
                 
-    async def _update_task_state_and_write_config(self, task_name, status=None, next_run_time=None, increment_retries=False, current_tp_to_move_to_imaged: datetime = None):
+    async def _update_task_state_and_write_config(self, task_name, status=None, current_tp_to_move_to_imaged: datetime = None):
         """Helper to update task state (including time points) and write to config."""
         if task_name not in self.tasks:
             logger.warning(f"_update_task_state_and_write_config: Task {task_name} not found.")
@@ -710,68 +714,33 @@ class OrchestrationSystem:
 
         changed = False
         task_state = self.tasks[task_name]
-        task_config_internal = task_state["config"] # This holds pending_datetimes, imaged_datetimes
+        task_config_internal = task_state["config"]
 
         if status and task_state["status"] != status:
             logger.info(f"Task '{task_name}' status changing from '{task_state['status']}' to '{status}'")
             task_state["status"] = status
             changed = True
         
-        # Handle moving a time point from pending to imaged
         if current_tp_to_move_to_imaged:
             if current_tp_to_move_to_imaged in task_config_internal["pending_datetimes"]:
                 task_config_internal["pending_datetimes"].remove(current_tp_to_move_to_imaged)
                 task_config_internal["imaged_datetimes"].append(current_tp_to_move_to_imaged)
-                task_config_internal["imaged_datetimes"].sort() # Keep it sorted
+                task_config_internal["imaged_datetimes"].sort() 
                 logger.info(f"Moved time point {current_tp_to_move_to_imaged.isoformat()} to imaged for task '{task_name}'.")
                 changed = True
-                
-                # After moving, if pending_datetimes is now empty, the task might be completed.
-                if not task_config_internal["pending_datetimes"]:
-                    logger.info(f"Task '{task_name}' has no more pending time points after imaging {current_tp_to_move_to_imaged.isoformat()}.")
-                    if task_state["status"] != "completed":
-                        logger.info(f"Marking task '{task_name}' as completed.")
-                        task_state["status"] = "completed"
-                    next_run_time = None # No more runs for this task
-                # else, next_run_time will be updated below from the new earliest pending point
             else:
                 logger.warning(f"Time point {current_tp_to_move_to_imaged.isoformat()} not found in pending_datetimes for task '{task_name}'. Cannot move.")
 
-        # If status is changing to something that implies a run (e.g. waiting_for_next_run) or TP moved,
-        # or if next_run_time is explicitly provided, update it.
-        # The new next_run_time should be the earliest of the remaining pending_datetimes.
-        if next_run_time is not Ellipsis: # Use Ellipsis to signal explicit None vs. recalculate
-            if current_tp_to_move_to_imaged and not task_config_internal["pending_datetimes"]:
-                # This case is handled above, task becomes completed, next_run_time is None
-                pass 
-            elif next_run_time is not None: # Explicitly set next_run_time (e.g. for retries)
-                if task_state["next_run_time"] != next_run_time:
-                    logger.info(f"Task '{task_name}' next_run_time explicitly changing from '{task_state.get('next_run_time')}' to '{next_run_time.isoformat() if next_run_time else 'None'}'")
-                    task_state["next_run_time"] = next_run_time
-            elif task_config_internal["pending_datetimes"]: # Recalculate from pending points
-                new_next_run_from_pending = task_config_internal["pending_datetimes"][0]
-                if task_state["next_run_time"] != new_next_run_from_pending:
-                    logger.info(f"Task '{task_name}' next_run_time recalculated to '{new_next_run_from_pending.isoformat()}' from pending points.")
-                    task_state["next_run_time"] = new_next_run_from_pending
-            elif not task_config_internal["pending_datetimes"] and task_state["status"] != "completed":
-                 # No pending points, not completed (e.g. error, idle). Set next_run_time to None if it wasn't already.
-                 if task_state["next_run_time"] is not None:
-                    logger.info(f"Task '{task_name}' has no pending points and status is {task_state['status']}. Setting next_run_time to None.")
-                    task_state["next_run_time"] = None
-                    changed = True
-            # if next_run_time is None (explicitly passed) and task status is not completed, it will be set.
-            # This also covers the case where task became completed and next_run_time was set to None above.
-            elif next_run_time is None and task_state["next_run_time"] is not None: # Explicitly clearing next_run_time
-                 logger.info(f"Task '{task_name}' next_run_time explicitly set to None.")
-                 task_state["next_run_time"] = None
-                 changed = True
-
-        if increment_retries:
-            task_state["retries"] += 1
-            logger.info(f"Task '{task_name}' retries incremented to {task_state['retries']}")
+        # Update status based on pending points
+        if not task_config_internal["pending_datetimes"]: 
+            if task_state["status"] != "completed":
+                logger.info(f"Task '{task_name}' has no more pending time points. Marking as completed.")
+                task_state["status"] = "completed"
+                changed = True
+        elif status == "completed" and task_config_internal["pending_datetimes"]:
+            logger.warning(f"Task '{task_name}' set to completed, but still has pending points. Reverting to pending.")
+            task_state["status"] = "pending"
             changed = True
-        elif "retries" not in task_state : # ensure retries is initialized if not present
-             task_state["retries"] = 0
 
         if changed:
             await self._write_tasks_to_config()
@@ -816,9 +785,9 @@ class OrchestrationSystem:
                 logger.info(f"No target sim microscope specified. Disconnecting current: {self.current_microscope_id}.")
                 await self.disconnect_single_service('microscope')
         
-        # Return true if essential mock services seem to be there.
-        # The 'microscope' part is more about whether the *intended* mock is set.
-        return bool(self.incubator and self.robotic_arm)
+        # Verify essential mock services are available
+        if not self.incubator or not self.robotic_arm:
+            raise ServiceConnectionError("Essential mock services (incubator or robotic arm) not available")
 
     async def check_service_health(self, service, service_type_str):
         """Check if the service is healthy and reset if needed (simulated)"""
@@ -826,22 +795,20 @@ class OrchestrationSystem:
             
         while True:
             try:
-                task_statuses = await service.get_all_task_status()
-                if any(status == "failed" for status in task_statuses.values()):
-                    logger.error(f"{service_name} (sim) has failed tasks: {task_statuses}")
-                    logger.warning("Simulated service has failed tasks. Attempting reset.")
-                    raise Exception("Service not healthy (simulated task failure)")
-
                 hello_world_result = await service.hello_world()
                 if hello_world_result != "Hello world":
-                    logger.error(f"{service_name} (sim) hello_world check failed: {hello_world_result}")
-                    raise Exception("Simulated service not healthy (hello_world failed)")
+                    error_msg = f"{service_name} (sim) hello_world check failed: {hello_world_result}"
+                    logger.error(error_msg)
+                    raise ServiceConnectionError(error_msg)
                 logger.debug(f"Health check passed for {service_name} (sim)")
             except Exception as e:
                 logger.error(f"{service_name} (sim) health check failed: {e}")
                 logger.info(f"Attempting to reset simulated {service_type_str} service...")
-                await self.disconnect_single_service(service_type_str)
-                await self.reconnect_single_service(service_type_str) # Pass the type string
+                try:
+                    await self.disconnect_single_service(service_type_str)
+                    await self.reconnect_single_service(service_type_str) # Pass the type string
+                except Exception as reconnect_error:
+                    logger.error(f"Failed to reconnect {service_type_str}: {reconnect_error}")
             await asyncio.sleep(30)
 
     async def disconnect_single_service(self, service_type):
@@ -899,109 +866,75 @@ class OrchestrationSystem:
             await self.disconnect_single_service(stype)
         logger.info("Disconnect process completed for all simulated services.")
 
-    async def call_service_with_retries(self, service_type, method_name, *args, max_retries=3, timeout=10, **kwargs): # Shorter retries/timeout for sim
-        retries = 0
-        while retries < max_retries:
-            service = None
-            if service_type == 'incubator': service = self.incubator
-            elif service_type == 'microscope': service = self.microscope
-            elif service_type == 'robotic_arm': service = self.robotic_arm
-            
-            if not service:
-                logger.error(f"Sim Service {service_type} is not available. Retrying... ({retries + 1}/{max_retries})")
-                retries += 1
-                await asyncio.sleep(timeout / 2) 
-                continue
-            try:
-                status = await service.get_task_status(method_name)
-                logger.info(f"Sim Task {method_name} status: {status}")
-                if status == "failed":
-                    logger.error(f"Sim Task {method_name} failed. Stopping execution for this call.")
-                    await service.reset_task_status(method_name) # Reset for next sim attempt
-                    return False
+    async def load_plate_from_incubator_to_microscope(self, incubator_slot: int):
+        logger.info(f"API call: Queuing load_plate_from_incubator_to_microscope for slot {incubator_slot}")
+        # In a real scenario with Hypha, this method might need to be non-async if Hypha handles the async call wrapper.
+        # For now, keeping it async to create and use asyncio.Future.
+        op_future = asyncio.get_event_loop().create_future()
+        await self.transport_queue.put({
+            "action": "load",
+            "incubator_slot": incubator_slot,
+            "future": op_future
+        })
+        # The Hypha caller will get this immediate response.
+        # The actual result of the transport will be in op_future, if awaited internally or exposed via another method.
+        return {"success": True, "message": f"Load task for slot {incubator_slot} queued."}
 
-                if status == "not_started":
-                    logger.info(f"Sim Starting the task {method_name} by calling mock...")
-                    try:
-                        # The mock method itself handles setting status to "running" and then "finished"/"failed"
-                        # and simulates duration.
-                        method_to_call = getattr(service, method_name)
-                        await asyncio.wait_for(method_to_call(*args, **kwargs), timeout=timeout + 1) # Ensure mock's internal sleep is less than this
-                        
-                        # After the call, check status again (it should be finished or failed)
-                        status = await service.get_task_status(method_name) 
-                        logger.info(f"Sim Task {method_name} status after mock call: {status}")
-
-                    except asyncio.TimeoutError:
-                        logger.warning(f"Sim Operation {method_name} (mock call) timed out. Mock task status: {await service.get_task_status(method_name)}")
-                        self._tasks_status[method_name] = "failed" # Force fail on timeout for sim
-                        status = "failed" 
-
-                if status == "running": # If mock is more complex and needs polling after start
-                    polling_attempts = 0
-                    max_polling_attempts = timeout # Poll for roughly the timeout duration
-                    while polling_attempts < max_polling_attempts :
-                        status = await service.get_task_status(method_name)
-                        logger.info(f"Sim Polling Task {method_name} status: {status}")
-                        if status == "finished" or status == "failed":
-                            break
-                        await asyncio.sleep(1) 
-                        polling_attempts +=1
-                    if status == "running": # Still running after polling
-                        logger.warning(f"Sim Task {method_name} still 'running' after polling. Treating as failed for this attempt.")
-                        status = "failed" # Force fail
-
-                if status == "finished":
-                    logger.info(f"Sim Task {method_name} completed successfully (as per mock).")
-                    await service.reset_task_status(method_name) 
-                    return True
-                elif status == "failed":
-                    logger.error(f"Sim Task {method_name} failed (as per mock).")
-                    await service.reset_task_status(method_name) 
-                    return False
-                # else: status might be 'not_started' if something went wrong before mock was called, or unexpected status
-                # This path should ideally not be hit if mock call was attempted.
-
-            except Exception as e:
-                logger.error(f"Sim Error in call_service_with_retries for {method_name}: {e}. Retrying... ({retries + 1}/{max_retries})")
-            retries += 1
-            await asyncio.sleep(timeout / 2) 
-        logger.error(f"Sim Max retries reached for task {method_name}.")
-        return False
-
-    async def load_plate_from_incubator_to_microscope(self, incubator_slot): # Parameterized
+    async def _execute_load_operation(self, incubator_slot): 
         if self.sample_on_microscope_flag:
-            logger.info("Sim: Sample plate already on microscope")
-            return True
-        logger.info(f"Sim: Loading sample from incubator slot {incubator_slot}...")
-        p1 = self.call_service_with_retries('incubator', "get_sample_from_slot_to_transfer_station", incubator_slot, timeout=10)
-        p2 = self.call_service_with_retries('microscope', "home_stage", timeout=5)
-        gather = await asyncio.gather(p1, p2)
-        if not all(gather): return False
-        if not await self.call_service_with_retries('robotic_arm', "grab_sample_from_incubator", timeout=10): return False
-        if not await self.call_service_with_retries('robotic_arm', "transport_from_incubator_to_microscope1", timeout=10): return False
-        if not await self.call_service_with_retries('robotic_arm', "put_sample_on_microscope1", timeout=10): return False
-        if not await self.call_service_with_retries('microscope', "return_stage", timeout=5): return False
-        logger.info("Sim: Sample loaded onto microscope.")
-        self.sample_on_microscope_flag = True
-        return True
+            logger.info("Sim (Execute Load): Sample plate already on microscope")
+            return # Success case - no need to load again
+            
+        logger.info(f"Sim (Execute Load): Loading sample from incubator slot {incubator_slot}...")
+        
+        try:
+            await self.incubator.get_sample_from_slot_to_transfer_station(incubator_slot)
+            await self.microscope.home_stage()
+            await self.robotic_arm.grab_sample_from_incubator()
+            await self.robotic_arm.transport_from_incubator_to_microscope1()
+            await self.robotic_arm.put_sample_on_microscope1()
+            await self.microscope.return_stage()
+            
+            logger.info("Sim (Execute Load): Sample loaded onto microscope.")
+            self.sample_on_microscope_flag = True
+            
+        except Exception as e:
+            error_msg = f"Failed to load sample from slot {incubator_slot}: {e}"
+            logger.error(f"Sim (Execute Load): {error_msg}")
+            raise TransportOperationError(error_msg) from e
 
-    async def unload_plate_from_microscope(self, incubator_slot): # Parameterized
+    async def unload_plate_from_microscope(self, incubator_slot: int):
+        logger.info(f"API call: Queuing unload_plate_from_microscope for slot {incubator_slot}")
+        op_future = asyncio.get_event_loop().create_future()
+        await self.transport_queue.put({
+            "action": "unload",
+            "incubator_slot": incubator_slot,
+            "future": op_future
+        })
+        return {"success": True, "message": f"Unload task for slot {incubator_slot} queued."}
+
+    async def _execute_unload_operation(self, incubator_slot):
         if not self.sample_on_microscope_flag:
-            logger.info("Sim: Sample plate not on microscope")
-            return True
-        logger.info(f"Sim: Unloading sample to incubator slot {incubator_slot}...")
-        if not await self.call_service_with_retries('microscope', "home_stage", timeout=5): return False
-        if not await self.call_service_with_retries('robotic_arm', "grab_sample_from_microscope1", timeout=10): return False
-        if not await self.call_service_with_retries('robotic_arm', "transport_from_microscope1_to_incubator", timeout=10): return False
-        if not await self.call_service_with_retries('robotic_arm', "put_sample_on_incubator", timeout=10): return False
-        p1 = self.call_service_with_retries('incubator', "put_sample_from_transfer_station_to_slot", incubator_slot, timeout=10)
-        p2 = self.call_service_with_retries('microscope', "return_stage", timeout=5)
-        gather = await asyncio.gather(p1, p2)
-        if not all(gather): return False
-        logger.info("Sim: Sample unloaded from microscope.")
-        self.sample_on_microscope_flag = False
-        return True
+            logger.info("Sim (Execute Unload): Sample plate not on microscope")
+            return # Success case - nothing to unload
+            
+        logger.info(f"Sim (Execute Unload): Unloading sample to incubator slot {incubator_slot}...")
+
+        try:
+            await self.microscope.home_stage()
+            await self.robotic_arm.grab_sample_from_microscope1()
+            await self.robotic_arm.transport_from_microscope1_to_incubator()
+            await self.robotic_arm.put_sample_on_incubator()
+            await self.incubator.put_sample_from_transfer_station_to_slot(incubator_slot)
+            await self.microscope.return_stage()
+            
+            logger.info("Sim (Execute Unload): Sample unloaded from microscope.")
+            self.sample_on_microscope_flag = False
+            
+        except Exception as e:
+            error_msg = f"Failed to unload sample to slot {incubator_slot}: {e}"
+            logger.error(f"Sim (Execute Unload): {error_msg}")
+            raise TransportOperationError(error_msg) from e
 
     async def run_cycle(self, task_config):
         task_name = task_config["name"]
@@ -1009,194 +942,186 @@ class OrchestrationSystem:
         action_id = f"SIM_{task_name.replace(' ', '_')}-{datetime.now().strftime('%Y%m%dT%H%M%S')}"
         logger.info(f"Sim: Starting cycle for task: {task_name} with action_id: {action_id}")
 
+        # Verify services are available
         if not self.incubator or not self.microscope or not self.robotic_arm:
             logger.error(f"Sim: Services not available for task {task_name}. Attempting reconnect.")
-            # setup_connections should be called by run_time_lapse before run_cycle
-            # This is an additional check.
-            if not await self.setup_connections(target_microscope_id_from_task=task_config["allocated_microscope"]):
-                 logger.error(f"Sim: Failed to re-establish service connections for task {task_name}. Cycle aborted.")
-                 return False
+            try:
+                await self.setup_connections(target_microscope_id_from_task=task_config["allocated_microscope"])
+            except Exception as e:
+                error_msg = f"Failed to re-establish service connections for task {task_name}: {e}"
+                logger.error(f"Sim: {error_msg}")
+                raise ServiceConnectionError(error_msg) from e
+                
             if not self.microscope:
-                 logger.error(f"Sim: Microscope {task_config['allocated_microscope']} still not available. Cycle aborted.")
-                 return False
-
-        try: # Resetting service states for simulation
-            logger.info(f"Sim: Resetting task statuses on services for task {task_name}...")
-            if self.microscope: await self.microscope.reset_all_task_status()
-            if self.incubator: await self.incubator.reset_all_task_status()
-            if self.robotic_arm: await self.robotic_arm.reset_all_task_status()
-        except Exception as e:
-            logger.warning(f"Sim: Error resetting task statuses: {e}")
+                error_msg = f"Microscope {task_config['allocated_microscope']} still not available after reconnection"
+                logger.error(f"Sim: {error_msg}")
+                raise MicroscopeNotAvailableError(error_msg)
 
         self.sample_on_microscope_flag = False 
 
-        if not await self.load_plate_from_incubator_to_microscope(incubator_slot=incubator_slot):
-            logger.error(f"Sim: Failed to load sample for task {task_name}")
-            return False
-        
-        # Using parameters from task_config for scan_well_plate_simulated
-        # The simulated method itself might not use all of them, but we pass them for consistency.
-        scan_successful = await self.call_service_with_retries(
-            'microscope',
-            "scan_well_plate_simulated", # Ensure this method exists on the simulated microscope service
-            illuminate_channels=task_config["illuminate_channels"],
-            do_reflection_af=task_config["do_reflection_af"],
-            scanning_zone=task_config["imaging_zone"],
-            Nx=task_config["Nx"],
-            Ny=task_config["Ny"],
-            action_ID=action_id, # Pass the generated action_id
-            timeout=60 # Simulated scan timeout
-        )
+        try:
+            # For internal run_cycle, we call the execute methods directly for now.
+            # If run_cycle should also queue, these calls would change to self.load_plate_... and await future.
+            await self._execute_load_operation(incubator_slot=incubator_slot)
+            
+            await self.microscope.scan_well_plate_simulated(
+                illuminate_channels=task_config["illuminate_channels"],
+                do_reflection_af=task_config["do_reflection_af"],
+                scanning_zone=task_config["imaging_zone"],
+                Nx=task_config["Nx"],
+                Ny=task_config["Ny"],
+                action_ID=action_id,
+            )
 
-        if not scan_successful:
-            logger.error(f"Sim: Microscope scanning failed for task {task_name}.")
-            logger.info(f"Sim: Attempting to unload plate for task {task_name} after scan failure.")
-            if not await self.unload_plate_from_microscope(incubator_slot=incubator_slot):
-                logger.error(f"Sim: Failed to unload sample for task {task_name} after scan error.")
-            return False
+            await self._execute_unload_operation(incubator_slot=incubator_slot)
+            
+            logger.info(f"Sim: Cycle for task {task_name} (action_id: {action_id}) completed successfully.")
+            
+        except Exception as e:
+            logger.error(f"Sim: Cycle failed for task {task_name}: {e}")
+            # Attempt cleanup - unload if possible
+            try:
+                await self._execute_unload_operation(incubator_slot=incubator_slot)
+                logger.info(f"Sim: Cleanup unload completed for task {task_name} after cycle failure.")
+            except Exception as cleanup_error:
+                logger.error(f"Sim: Cleanup unload also failed for task {task_name}: {cleanup_error}")
+            
+            # Re-raise the original exception
+            raise
 
-        if not await self.unload_plate_from_microscope(incubator_slot=incubator_slot):
-            logger.error(f"Sim: Failed to unload sample for task {task_name} after successful scan.")
-            return False
-        
-        logger.info(f"Sim: Cycle for task {task_name} (action_id: {action_id}) completed successfully.")
-        return True
-
-    async def run_time_lapse(self): # Adapted from orchestrator.py
+    async def run_time_lapse(self):
         logger.info("Simulated Orchestrator run_time_lapse started.")
         last_config_read_time = 0
 
         while True:
-            current_time_utc = datetime.now(timezone.utc)
-            logger.debug(f"Sim: run_time_lapse loop. Current time: {current_time_utc.isoformat()}")
+            current_time_naive = datetime.now()
+            logger.debug(f"Sim: run_time_lapse loop. Current time: {current_time_naive.isoformat()}")
 
             if (asyncio.get_event_loop().time() - last_config_read_time) > CONFIG_READ_INTERVAL:
                 await self._load_and_update_tasks()
                 last_config_read_time = asyncio.get_event_loop().time()
 
             next_task_to_run = None
-            earliest_next_run_dt_obj = None # Stores the actual datetime object for comparison
-            current_pending_tp_for_next_task = None # Stores the specific TP to be imaged
+            earliest_pending_tp_for_selection = None 
 
             if not self.tasks:
                 logger.debug("Sim: No tasks loaded yet.")
             
+            eligible_tasks_for_run = []
+
             for task_name, task_data in list(self.tasks.items()):
                 internal_config = task_data["config"]
                 status = task_data["status"]
-                # next_run_time from task_data is already a datetime object or None
-                task_next_run_dt_obj = task_data["next_run_time"] 
+                pending_datetimes = internal_config.get("pending_datetimes", [])
 
-                logger.debug(f"Sim: Checking task '{task_name}': status='{status}', next_run_dt_obj='{task_next_run_dt_obj.isoformat() if task_next_run_dt_obj else 'None'}', pending_points_count={len(internal_config['pending_datetimes'])}")
+                logger.debug(f"Sim: Checking task '{task_name}': status='{status}', pending_points_count={len(pending_datetimes)}")
 
-                if status in ["completed", "error_max_retries", "idle_no_pending_points"]:
+                if status in ["completed", "error"]:
                     logger.debug(f"Sim: Task '{task_name}' skipped due to status: {status}")
                     continue
                 
-                if not task_next_run_dt_obj: # Should not happen if status isn't one of the above, but a safeguard
-                    logger.warning(f"Sim: Task '{task_name}' has status '{status}' but no next_run_time. Skipping.")
+                if not pending_datetimes:
+                    logger.debug(f"Sim: Task '{task_name}' skipped, no pending time points.")
+                    if status != "completed":
+                        logger.warning(f"Task '{task_name}' has status '{status}' but no pending points. Marking completed.")
+                        await self._update_task_state_and_write_config(task_name, status="completed")
                     continue
-                
-                # Check if this task is due based on its next_run_time (earliest pending time point)
-                if current_time_utc >= task_next_run_dt_obj:
-                    logger.debug(f"Sim: Task '{task_name}' is eligible (next_run: {task_next_run_dt_obj.isoformat()}). Current earliest_next_run: {earliest_next_run_dt_obj.isoformat() if earliest_next_run_dt_obj else 'None'}")
-                    if earliest_next_run_dt_obj is None or task_next_run_dt_obj < earliest_next_run_dt_obj:
-                        earliest_next_run_dt_obj = task_next_run_dt_obj
-                        next_task_to_run = task_name
-                        current_pending_tp_for_next_task = internal_config["pending_datetimes"][0] # This is the TP to image
-                        logger.debug(f"Sim: Task '{task_name}' provisionally selected for TP: {current_pending_tp_for_next_task.isoformat()}.")
-                    else:
-                        logger.debug(f"Sim: Task '{task_name}' eligible but its next_run_time ({task_next_run_dt_obj.isoformat()}) is not earlier than current earliest ({earliest_next_run_dt_obj.isoformat() if earliest_next_run_dt_obj else 'N/A'}).")
+
+                earliest_tp_for_this_task = pending_datetimes[0]
+                if current_time_naive >= earliest_tp_for_this_task:
+                    eligible_tasks_for_run.append((task_name, earliest_tp_for_this_task))
+                    logger.debug(f"Sim: Task '{task_name}' is eligible with TP: {earliest_tp_for_this_task.isoformat()}")
                 else:
-                    logger.debug(f"Sim: Task '{task_name}' not due yet (next_run: {task_next_run_dt_obj.isoformat()}).")
+                    logger.debug(f"Sim: Task '{task_name}' not due yet (earliest TP: {earliest_tp_for_this_task.isoformat()}).")
             
-            if next_task_to_run and current_pending_tp_for_next_task:
+            # Select the task with the overall earliest time point from eligible tasks
+            if eligible_tasks_for_run:
+                eligible_tasks_for_run.sort(key=lambda x: x[1])
+                next_task_to_run, earliest_pending_tp_for_selection = eligible_tasks_for_run[0]
+                logger.info(f"Sim: Selected task '{next_task_to_run}' for TP: {earliest_pending_tp_for_selection.isoformat()} from eligible tasks.")
+
+            if next_task_to_run and earliest_pending_tp_for_selection:
                 self.active_task_name = next_task_to_run
                 task_data = self.tasks[self.active_task_name]
-                task_config_for_cycle = task_data["config"] # This contains the parsed settings and datetime lists
+                task_config_for_cycle = task_data["config"]
+                current_pending_tp_to_process = earliest_pending_tp_for_selection
                 
-                logger.info(f"Sim: Selected task {self.active_task_name} for time point {current_pending_tp_for_next_task.isoformat()}. Current state: status='{task_data['status']}', next_run='{task_data['next_run_time'].isoformat() if task_data['next_run_time'] else 'None'}'")
+                logger.info(f"Sim: Preparing to run task {self.active_task_name} for time point {current_pending_tp_to_process.isoformat()}. Current state: status='{task_data['status']}'")
 
-                if not await self.setup_connections(target_microscope_id_from_task=task_config_for_cycle["allocated_microscope"]):
-                    logger.error(f"Sim: Failed to setup connections for task {self.active_task_name}. Retrying later.")
+                try:
+                    await self.setup_connections(target_microscope_id_from_task=task_config_for_cycle["allocated_microscope"])
+                except Exception as setup_error:
+                    logger.error(f"Sim: Failed to setup connections for task {self.active_task_name}: {setup_error}")
                     await self._update_task_state_and_write_config(
                         self.active_task_name,
-                        status="error_connection_failed",
-                        next_run_time=current_time_utc + CYCLE_RETRY_DELAY # Keep current TP as next run, but delay
+                        status="error"
                     )
                     self.active_task_name = None
                     await asyncio.sleep(ORCHESTRATOR_LOOP_SLEEP)
                     continue
                 
                 if not self.microscope or self.current_microscope_id != task_config_for_cycle["allocated_microscope"]:
-                    logger.error(f"Sim: Microscope {task_config_for_cycle['allocated_microscope']} not available for {self.active_task_name}. Retrying later.")
+                    logger.error(f"Sim: Microscope {task_config_for_cycle['allocated_microscope']} not available for {self.active_task_name}.")
                     await self._update_task_state_and_write_config(
                         self.active_task_name,
-                        status="error_microscope_unavailable",
-                        next_run_time=current_time_utc + CYCLE_RETRY_DELAY # Keep current TP as next run, but delay
+                        status="error"
                     )
                     self.active_task_name = None
                     await asyncio.sleep(ORCHESTRATOR_LOOP_SLEEP)
                     continue
 
-                logger.info(f"Sim: Starting cycle for task: {self.active_task_name}, time point: {current_pending_tp_for_next_task.isoformat()}")
+                logger.info(f"Sim: Starting cycle for task: {self.active_task_name}, time point: {current_pending_tp_to_process.isoformat()}")
                 await self._update_task_state_and_write_config(self.active_task_name, status="active")
                 
-                # Pass the full internal config to run_cycle, it has all necessary fields like Nx, Ny etc.
-                cycle_success = await self.run_cycle(task_config_for_cycle) 
-
-                if cycle_success:
-                    logger.info(f"Sim: Cycle for task {self.active_task_name}, time point {current_pending_tp_for_next_task.isoformat()} success.")
-                    # Move current_pending_tp_for_next_task to imaged_datetimes
-                    # _update_task_state_and_write_config will also update next_run_time to the new earliest pending (or None if complete)
-                    # and set status to 'completed' if no more pending points.
-                    self.tasks[self.active_task_name]["retries"] = 0 # Reset retries on success for this TP
+                try:
+                    await self.run_cycle(task_config_for_cycle) 
+                    logger.info(f"Sim: Cycle for task {self.active_task_name}, time point {current_pending_tp_to_process.isoformat()} success.")
                     await self._update_task_state_and_write_config(
                         self.active_task_name,
-                        status="waiting_for_next_run", # This status will be overridden to 'completed' by the helper if no more TPs
-                        current_tp_to_move_to_imaged=current_pending_tp_for_next_task,
-                        next_run_time=Ellipsis # Signal to recalculate from remaining pending points
+                        status="waiting_for_next_run",
+                        current_tp_to_move_to_imaged=current_pending_tp_to_process
                     )
-                else: # Cycle failed for the current time point
-                    logger.error(f"Sim: Cycle for task {self.active_task_name}, time point {current_pending_tp_for_next_task.isoformat()} failed.")
-                    
-                    current_retries = self.tasks[self.active_task_name]["retries"]
-                    if current_retries + 1 >= MAX_CYCLE_RETRIES: 
-                        logger.error(f"Sim: Max retries ({MAX_CYCLE_RETRIES}) will be reached for {self.active_task_name} on time point {current_pending_tp_for_next_task.isoformat()}. Marking task error_max_retries.")
-                        # Keep the failed TP in pending_datetimes, but mark task as error_max_retries.
-                        # next_run_time will effectively be None for this task.
-                        await self._update_task_state_and_write_config(
-                            self.active_task_name,
-                            status="error_max_retries",
-                            increment_retries=True,
-                            next_run_time=None # Task stops trying
-                        )
-                    else:
-                        logger.info(f"Sim: Scheduling retry for {self.active_task_name} on time point {current_pending_tp_for_next_task.isoformat()} (current retries: {current_retries}).")
-                        # The next_run_time for retry will be current_time + delay. The current_pending_tp_for_next_task remains the one to retry.
-                        await self._update_task_state_and_write_config(
-                            self.active_task_name,
-                            status="error_cycle_failed",
-                            next_run_time=current_time_utc + CYCLE_RETRY_DELAY, # Retry this specific TP later
-                            increment_retries=True
-                        )
+                except Exception as cycle_error:
+                    logger.error(f"Sim: Cycle for task {self.active_task_name}, time point {current_pending_tp_to_process.isoformat()} failed: {cycle_error}")
+                    await self._update_task_state_and_write_config(
+                        self.active_task_name,
+                        status="error"
+                    )
+
                 self.active_task_name = None
             else:
-                if self.active_task_name: self.active_task_name = None
+                if self.active_task_name:
+                    logger.warning("Sim: Active task was set but no task selected for run. Clearing active_task_name.")
+                    self.active_task_name = None
+                
+                # Determine minimum wait time before next loop iteration
                 min_wait_time = ORCHESTRATOR_LOOP_SLEEP
+                next_potential_run_time = None
+                for task_data_val in self.tasks.values():
+                    if task_data_val["status"] not in ["completed", "error"] and task_data_val["config"]["pending_datetimes"]:
+                        earliest_tp = task_data_val["config"]["pending_datetimes"][0]
+                        if next_potential_run_time is None or earliest_tp < next_potential_run_time:
+                            next_potential_run_time = earliest_tp
+                
+                if next_potential_run_time and next_potential_run_time > current_time_naive:
+                    wait_seconds = (next_potential_run_time - current_time_naive).total_seconds()
+                    min_wait_time = max(0.1, min(wait_seconds, ORCHESTRATOR_LOOP_SLEEP))
+                    logger.debug(f"Sim: Calculated dynamic sleep: {min_wait_time:.2f}s until next potential task time ({next_potential_run_time.isoformat()})")
+                elif not self.tasks or all(t["status"] in ["completed", "error"] for t in self.tasks.values()):
+                    logger.debug(f"Sim: No active tasks or all tasks completed/errored out. Sleeping for {ORCHESTRATOR_LOOP_SLEEP}s.")
+                else:
+                    logger.debug(f"Sim: No task ready right now or eligible tasks are in the past. Default sleep {ORCHESTRATOR_LOOP_SLEEP}s.")
+
                 await asyncio.sleep(min_wait_time)
 
 async def main():
-    parser = argparse.ArgumentParser(description='Run the Simulated Orchestration System.')
-    parser.add_argument('--local', action='store_true', help='Run in local sim mode')
-    args = parser.parse_args()
-
+    # Removed argparse and --local argument handling
     log_file_name = f"orchestrator-simulation-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log"
-    global logger # Define logger globally for the simulation script
+    global logger 
     logger = setup_logging(log_file=log_file_name)
 
-    orchestrator = OrchestrationSystem(local=args.local)
-    # await orchestrator.setup_connections() # setup_connections is now called within run_time_lapse per task
+    orchestrator = OrchestrationSystem() # Instantiate without local argument
+    
     try:
         await orchestrator._register_self_as_hypha_service() # Register orchestrator's own Hypha service
         await orchestrator.run_time_lapse() # Removed round_time
@@ -1205,6 +1130,7 @@ async def main():
     finally:
         logger.info("Simulated Orchestrator performing cleanup...")
         if orchestrator:
+            await orchestrator._stop_transport_worker() # Stop the worker
             if orchestrator.orchestrator_hypha_server_connection:
                 try:
                     # Ideally, unregister service if Hypha API supports it easily, or just disconnect.
