@@ -5,12 +5,16 @@
             "settings": {
                 "incubator_slot": 1,
                 "allocated_microscope": "sim-microscope-alpha",
-                "time_start_imaging": "2025-05-20T13:00:00",
-                "imaging_started": false,
-                "imaging_completed": false,
-                "next_run_time": "2025-05-20T13:00:00",
-                "time_end_imaging": "2025-05-20T14:30:00",
-                "imaging_interval": 60,
+                "pending_time_points": [],
+                "imaged_time_points": [
+                    "2025-05-20T13:00:00Z",
+                    "2025-05-20T13:01:00Z",
+                    "2025-05-20T13:02:00Z",
+                    "2025-05-20T13:03:00Z",
+                    "2025-05-20T13:04:00Z"
+                ],
+                "imaging_started": true,
+                "imaging_completed": true,
                 "imaging_zone": [
                     [
                         0,
@@ -29,10 +33,10 @@
                 "do_reflection_af": true
             },
             "operational_state": {
-                "status": "pending",
-                "next_run_time_utc": "2025-05-20T13:00:00",
+                "status": "completed",
+                "next_run_time_utc": "2025-05-20T13:04:00Z",
                 "retries": 0,
-                "last_updated_by_orchestrator": "2025-05-20T14:36:35"
+                "last_updated_by_orchestrator": "2025-06-02T11:00:05Z"
             }
         }
     ]
