@@ -702,7 +702,6 @@ class OrchestrationSystem:
             try:
                 with open(CONFIG_FILE_PATH, 'w') as f_write:
                     json.dump(output_config_data, f_write, indent=4)
-                logger.info(f"Successfully wrote tasks state to {CONFIG_FILE_PATH}")
             except IOError as e:
                 logger.error(f"Error writing tasks state to {CONFIG_FILE_PATH}: {e}")
                 
@@ -995,7 +994,6 @@ class OrchestrationSystem:
 
         while True:
             current_time_naive = datetime.now()
-            logger.debug(f"Sim: run_time_lapse loop. Current time: {current_time_naive.isoformat()}")
 
             if (asyncio.get_event_loop().time() - last_config_read_time) > CONFIG_READ_INTERVAL:
                 await self._load_and_update_tasks()
@@ -1014,10 +1012,7 @@ class OrchestrationSystem:
                 status = task_data["status"]
                 pending_datetimes = internal_config.get("pending_datetimes", [])
 
-                logger.debug(f"Sim: Checking task '{task_name}': status='{status}', pending_points_count={len(pending_datetimes)}")
-
                 if status in ["completed", "error"]:
-                    logger.debug(f"Sim: Task '{task_name}' skipped due to status: {status}")
                     continue
                 
                 if not pending_datetimes:
@@ -1107,10 +1102,7 @@ class OrchestrationSystem:
                     wait_seconds = (next_potential_run_time - current_time_naive).total_seconds()
                     min_wait_time = max(0.1, min(wait_seconds, ORCHESTRATOR_LOOP_SLEEP))
                     logger.debug(f"Sim: Calculated dynamic sleep: {min_wait_time:.2f}s until next potential task time ({next_potential_run_time.isoformat()})")
-                elif not self.tasks or all(t["status"] in ["completed", "error"] for t in self.tasks.values()):
-                    logger.debug(f"Sim: No active tasks or all tasks completed/errored out. Sleeping for {ORCHESTRATOR_LOOP_SLEEP}s.")
-                else:
-                    logger.debug(f"Sim: No task ready right now or eligible tasks are in the past. Default sleep {ORCHESTRATOR_LOOP_SLEEP}s.")
+
 
                 await asyncio.sleep(min_wait_time)
 
