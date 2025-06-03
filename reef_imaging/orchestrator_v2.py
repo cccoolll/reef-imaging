@@ -156,7 +156,9 @@ class OrchestrationSystem:
                     "imaging_zone": settings["imaging_zone"],
                     "Nx": settings["Nx"],
                     "Ny": settings["Ny"],
-                    "illuminate_channels": settings["illuminate_channels"],
+                    "well_plate_type": settings["well_plate_type"],
+                    "illumination_settings": settings["illumination_settings"],
+                    "do_contrast_autofocus": settings["do_contrast_autofocus"],
                     "do_reflection_af": settings["do_reflection_af"],
                     "pending_datetimes": pending_datetimes, 
                     "imaged_datetimes": imaged_datetimes,
@@ -766,7 +768,9 @@ class OrchestrationSystem:
             
             # Scan with the provided microscope_service
             await microscope_service.scan_well_plate(
-                illuminate_channels=task_config["illuminate_channels"],
+                well_plate_type=task_config["well_plate_type"],
+                illumination_settings=task_config["illumination_settings"],
+                do_contrast_autofocus=task_config["do_contrast_autofocus"],
                 do_reflection_af=task_config["do_reflection_af"],
                 scanning_zone=task_config["imaging_zone"],
                 Nx=task_config["Nx"],
@@ -1048,7 +1052,7 @@ class OrchestrationSystem:
         task_name = task_definition["name"]
         new_settings = task_definition["settings"]
 
-        required_settings = ["incubator_slot", "allocated_microscope", "pending_time_points", "imaging_zone", "Nx", "Ny", "illuminate_channels", "do_reflection_af"]
+        required_settings = ["incubator_slot", "allocated_microscope", "pending_time_points", "imaging_zone", "Nx", "Ny", "well_plate_type", "illumination_settings", "do_contrast_autofocus", "do_reflection_af"]
         for req_field in required_settings:
             if req_field not in new_settings:
                 msg = f"Missing required field '{req_field}' in settings for task '{task_name}'."

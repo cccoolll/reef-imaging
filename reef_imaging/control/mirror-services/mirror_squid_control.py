@@ -547,7 +547,7 @@ class MirrorMicroscopeService:
             logger.error(f"Failed to close illumination: {e}")
             raise e
 
-    async def scan_well_plate(self, well_plate_type="96", illuminate_channels=None, do_contrast_autofocus=False, do_reflection_af=True, scanning_zone=None, Nx=3, Ny=3, action_ID='testPlateScan', context=None):
+    async def scan_well_plate(self, well_plate_type="96", illumination_settings=None, do_contrast_autofocus=False, do_reflection_af=True, scanning_zone=None, Nx=3, Ny=3, action_ID='testPlateScan', context=None):
         """Mirror function to scan_well_plate on local service"""
         task_name = "scan_well_plate"
         self.task_status[task_name] = "started"
@@ -555,14 +555,18 @@ class MirrorMicroscopeService:
             if self.local_service is None:
                 await self.connect_to_local_service()
             
-            if illuminate_channels is None:
-                illuminate_channels = ['BF LED matrix full','Fluorescence 488 nm Ex','Fluorescence 561 nm Ex']
+            if illumination_settings is None:
+                illumination_settings = [
+                    {'channel': 'BF LED matrix full', 'intensity': 28.0, 'exposure_time': 20.0},
+                    {'channel': 'Fluorescence 488 nm Ex', 'intensity': 27.0, 'exposure_time': 60.0},
+                    {'channel': 'Fluorescence 561 nm Ex', 'intensity': 98.0, 'exposure_time': 100.0}
+                ]
             
             if scanning_zone is None:
                 scanning_zone = [(0,0),(0,0)]
                 
             result = await self.local_service.scan_well_plate(
-                well_plate_type, illuminate_channels, do_contrast_autofocus, 
+                well_plate_type, illumination_settings, do_contrast_autofocus, 
                 do_reflection_af, scanning_zone, Nx, Ny, action_ID
             )
             self.task_status[task_name] = "finished"
