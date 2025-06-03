@@ -159,6 +159,7 @@ class MirrorMicroscopeService:
             "move_to_loading_position": "not_started",
             "auto_focus": "not_started",
             "do_laser_autofocus": "not_started",
+            "set_laser_reference": "not_started",
             "navigate_to_well": "not_started",
             "get_chatbot_url": "not_started"
         }
@@ -281,6 +282,7 @@ class MirrorMicroscopeService:
                 "move_to_loading_position": self.move_to_loading_position,
                 "auto_focus": self.auto_focus,
                 "do_laser_autofocus": self.do_laser_autofocus,
+                "set_laser_reference": self.set_laser_reference,
                 "get_status": self.get_status,
                 "update_parameters_from_client": self.update_parameters_from_client,
                 "get_chatbot_url": self.get_chatbot_url,
@@ -712,6 +714,21 @@ class MirrorMicroscopeService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to do laser autofocus: {e}")
+            raise e
+    async def set_laser_reference(self, context=None):
+        """Mirror function to set_laser_reference on local service"""
+        task_name = "set_laser_reference"
+        self.task_status[task_name] = "started"
+        try:
+            if self.local_service is None:
+                await self.connect_to_local_service()
+            
+            result = await self.local_service.set_laser_reference()
+            self.task_status[task_name] = "finished"
+            return result
+        except Exception as e:
+            self.task_status[task_name] = "failed"
+            logger.error(f"Failed to set laser reference: {e}")
             raise e
 
     async def navigate_to_well(self, row='A', col=1, wellplate_type='96', context=None):
