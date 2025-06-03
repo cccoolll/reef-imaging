@@ -573,7 +573,6 @@ class OrchestrationSystem:
                     break
             
             persisted_status = operational_state_from_file.get("status", "pending")
-            persisted_retries = operational_state_from_file.get("retries", 0)
 
             # Determine actual status based on current pending_datetimes
             current_actual_status = persisted_status
@@ -582,8 +581,7 @@ class OrchestrationSystem:
             elif persisted_status == "completed" and current_settings_config["pending_datetimes"]:
                  # If file said completed, but now there are pending points (e.g. user added them)
                  current_actual_status = "pending" # Reset to pending
-                 persisted_retries = 0 # Reset retries as well
-                 logger.info(f"Task '{task_name}' was completed but now has pending points. Resetting status to pending and retries to 0.")
+                 logger.info(f"Task '{task_name}' was completed but now has pending points. Resetting status to pending.")
                  a_task_state_changed_for_write = True
 
             if task_name not in self.tasks:
@@ -591,9 +589,7 @@ class OrchestrationSystem:
                 self.tasks[task_name] = {
                     "config": current_settings_config, 
                     "status": current_actual_status,
-                    "retries": persisted_retries,
-                    "_raw_settings_from_input": copy.deepcopy(sample_config_from_file.get("settings", {})),
-                    "_next_retry_allowed_time": None # Initialize internal retry timestamp
+                    "_raw_settings_from_input": copy.deepcopy(sample_config_from_file.get("settings", {}))
                 }
                 a_task_state_changed_for_write = True # Status might have been determined above
 
@@ -614,40 +610,26 @@ class OrchestrationSystem:
                 if existing_task_data["status"] != current_actual_status:
                     logger.info(f"Task '{task_name}' status changing from '{existing_task_data['status']}' to '{current_actual_status}' due to config load/re-evaluation.")
                     existing_task_data["status"] = current_actual_status
-                    # If status changed (e.g. from error to pending due to new points), reset retry time
-                    if current_actual_status == "pending":
-                        existing_task_data["retries"] = 0 # Reset retries if config change made it pending again
-                        existing_task_data["_next_retry_allowed_time"] = None
-                
-                if persisted_retries != existing_task_data["retries"]:
-                    # This case should be rare if retries are reset above correctly
-                    # but handles if config file had different retries for some reason
-                    existing_task_data["retries"] = persisted_retries
-                    logger.info(f"Task '{task_name}' retries updated from file to {persisted_retries}")
 
                 if config_changed_significantly and existing_task_data["status"] not in ["pending", "completed"]:
-                    # If config changed and task was in an error/retry state, 
+                    # If config changed and task was in an error state, 
                     # and status hasn't already been reset to pending/completed by logic above,
                     # it might need re-evaluation. If new pending points exist, status should become pending.
                     if current_settings_config["pending_datetimes"]:
                         if existing_task_data["status"] != "pending":
                             logger.info(f"Task '{task_name}' had significant config changes while in status '{existing_task_data['status']}'. Resetting to pending as new points exist.")
                             existing_task_data["status"] = "pending"
-                            existing_task_data["retries"] = 0
-                            existing_task_data["_next_retry_allowed_time"] = None
                     elif not existing_task_data["config"]["imaged_datetimes"]:
                         # No pending, no imaged, but config changed? Should be completed. Or if no pending but imaged.
                          if existing_task_data["status"] != "completed":
                             logger.info(f"Task '{task_name}' had significant config changes. No pending points. Marking completed.")
                             existing_task_data["status"] = "completed"
-                            existing_task_data["_next_retry_allowed_time"] = None 
             
             # Final status check: if a task somehow ends up with status != completed but no pending_datetimes, fix it.
             task_state_dict = self.tasks[task_name]
             if not task_state_dict["config"]["pending_datetimes"] and task_state_dict["status"] != "completed":
                 logger.warning(f"Task '{task_name}' has status '{task_state_dict['status']}' but no pending time points. Forcing to 'completed'.")
                 task_state_dict["status"] = "completed"
-                task_state_dict["_next_retry_allowed_time"] = None # No retries for completed tasks
                 a_task_state_changed_for_write = True
 
         if a_task_state_changed_for_write or tasks_to_remove:
@@ -691,7 +673,6 @@ class OrchestrationSystem:
                     "settings": settings_to_write, 
                     "operational_state": {
                         "status": task_data_internal["status"],
-                        "retries": task_data_internal["retries"],
                         "last_updated_by_orchestrator": datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
                     }
                 }
