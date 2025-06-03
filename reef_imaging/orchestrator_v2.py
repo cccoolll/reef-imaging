@@ -53,9 +53,8 @@ CONFIG_READ_INTERVAL = 10 # Seconds to wait before re-reading config.json
 ORCHESTRATOR_LOOP_SLEEP = 5 # Seconds to sleep in main loop when no immediate task is due
 
 class OrchestrationSystem:
-    def __init__(self, local=False):
-        self.local = local
-        self.server_url = "http://reef.dyn.scilifelab.se:9527" if local else "https://hypha.aicell.io"
+    def __init__(self):
+        self.server_url = "http://reef.dyn.scilifelab.se:9527"
         
         # Orchestrator's own Hypha service registration details
         self.orchestrator_hypha_server_url = "https://hypha.aicell.io"
@@ -432,7 +431,7 @@ class OrchestrationSystem:
             elif service_type == 'robotic_arm' and self.robotic_arm:
                 reef_server = await connect_to_server({
                     "server_url": self.server_url,
-                    "token": os.environ.get("REEF_LOCAL_TOKEN"),
+                    "token": self.token_for_orchestrator_registration,
                     "workspace": os.environ.get("REEF_LOCAL_WORKSPACE") if self.local else "reef-imaging",
                     "ping_interval": None
                 })
@@ -446,29 +445,28 @@ class OrchestrationSystem:
     async def reconnect_single_service(self, service_type, service_id_to_reconnect=None): # MODIFIED signature
         """Reconnect a specific service."""
         try:
-            reef_token = os.environ.get("REEF_LOCAL_TOKEN") if self.local else os.environ.get("REEF_WORKSPACE_TOKEN")
-            squid_token = os.environ.get("REEF_LOCAL_TOKEN") if self.local else os.environ.get("SQUID_WORKSPACE_TOKEN")
+            operational_token = os.environ.get("REEF_LOCAL_TOKEN")
+            operational_workspace = os.environ.get("REEF_LOCAL_WORKSPACE")
             
-            if not reef_token or not squid_token:
-                token = await login({"server_url": self.server_url})
-                if not token: # check if login failed
-                    logger.error(f"Hypha login failed during reconnect for {service_type} ({service_id_to_reconnect}). Cannot obtain token.")
-                    return # Cannot proceed without token
-                reef_token = token
-                squid_token = token
+            if not operational_token: 
+                logger.error(f"REEF_LOCAL_TOKEN not set. Cannot reconnect local service {service_type} ({service_id_to_reconnect}).")
+                return
+            if not operational_workspace: 
+                logger.error(f"REEF_LOCAL_WORKSPACE not set. Cannot reconnect local service {service_type} ({service_id_to_reconnect}).")
+                return
             
             if service_type == 'incubator':
-                if self.incubator: # Should ideally be disconnected first
+                if self.incubator: 
                     logger.warning("Incubator already connected during reconnect attempt. Skipping.")
                     return
                 reef_server = await connect_to_server({
-                    "server_url": self.server_url,
-                    "token": reef_token,
-                    "workspace": os.environ.get("REEF_LOCAL_WORKSPACE") if self.local else "reef-imaging",
+                    "server_url": self.server_url, 
+                    "token": operational_token,
+                    "workspace": operational_workspace,
                     "ping_interval": None
                 })
                 self.incubator = await reef_server.get_service(self.incubator_id)
-                logger.info(f"Incubator service ({self.incubator_id}) reconnected successfully.")
+                logger.info(f"Incubator service ({self.incubator_id}) reconnected successfully locally.")
                 await self._start_health_check('incubator', self.incubator, self.incubator_id)
                 
             elif service_type == 'microscope':
@@ -479,120 +477,107 @@ class OrchestrationSystem:
                     logger.warning(f"Microscope {service_id_to_reconnect} already connected during reconnect attempt. Skipping.")
                     return
 
-                # Ensure this microscope ID is still in the current configuration
                 if service_id_to_reconnect not in self.configured_microscopes_info:
                     logger.error(f"Cannot reconnect microscope {service_id_to_reconnect}: no longer in configuration.")
                     return
 
                 squid_server = await connect_to_server({
-                    "server_url": self.server_url,
-                    "token": squid_token,
-                    # Assuming squid-control workspace for all microscopes for now
-                    "workspace": os.environ.get("REEF_LOCAL_WORKSPACE") if self.local else "squid-control", 
+                    "server_url": self.server_url, 
+                    "token": operational_token, 
+                    "workspace": operational_workspace, 
                     "ping_interval": None
                 })
                 microscope_service_instance = await squid_server.get_service(service_id_to_reconnect)
                 self.microscope_services[service_id_to_reconnect] = microscope_service_instance
-                logger.info(f"Microscope service ({service_id_to_reconnect}) reconnected successfully.")
+                logger.info(f"Microscope service ({service_id_to_reconnect}) reconnected successfully locally.")
                 await self._start_health_check('microscope', microscope_service_instance, service_id_to_reconnect)
                 
             elif service_type == 'robotic_arm':
-                if self.robotic_arm: # Should ideally be disconnected first
+                if self.robotic_arm: 
                     logger.warning("Robotic arm already connected during reconnect attempt. Skipping.")
                     return
                 reef_server = await connect_to_server({
-                    "server_url": self.server_url,
-                    "token": reef_token,
-                    "workspace": os.environ.get("REEF_LOCAL_WORKSPACE") if self.local else "reef-imaging",
+                    "server_url": self.server_url, 
+                    "token": operational_token,
+                    "workspace": operational_workspace,
                     "ping_interval": None
                 })
                 self.robotic_arm = await reef_server.get_service(self.robotic_arm_id)
-                logger.info(f"Robotic arm service ({self.robotic_arm_id}) reconnected successfully.")
+                logger.info(f"Robotic arm service ({self.robotic_arm_id}) reconnected successfully locally.")
                 await self._start_health_check('robotic_arm', self.robotic_arm, self.robotic_arm_id)
                 
         except Exception as e:
-            logger.error(f"Error reconnecting {service_type} service ({service_id_to_reconnect if service_id_to_reconnect else ''}): {e}")
+            logger.error(f"Error reconnecting local {service_type} service ({service_id_to_reconnect if service_id_to_reconnect else ''}): {e}")
 
-    async def setup_connections(self): # MODIFIED: target_microscope_id parameter removed
-        """Set up connections to incubator, robotic arm, and all configured microscopes."""
-        reef_token = os.environ.get("REEF_LOCAL_TOKEN") if self.local else os.environ.get("REEF_WORKSPACE_TOKEN")
-        squid_token = os.environ.get("REEF_LOCAL_TOKEN") if self.local else os.environ.get("SQUID_WORKSPACE_TOKEN")
+    async def setup_connections(self): 
+        """Set up connections to incubator, robotic arm, and all configured microscopes (all locally)."""
+        operational_token = os.environ.get("REEF_LOCAL_TOKEN")
+        operational_workspace = os.environ.get("REEF_LOCAL_WORKSPACE")
         
-        if not reef_token or not squid_token:
-            token = await login({"server_url": self.server_url})
-            if not token:
-                logger.error("Failed to login to Hypha server. Cannot setup connections.")
-                return False
-            reef_token = token
-            squid_token = token
+        if not operational_token: 
+            logger.error("REEF_LOCAL_TOKEN not set. Cannot setup local connections.")
+            return False
+        if not operational_workspace:
+            logger.error("REEF_LOCAL_WORKSPACE not set. Cannot setup local connections.")
+            return False
 
-        # Connect to REEF services (Incubator, Robotic Arm)
+        # Connect to REEF services (Incubator, Robotic Arm) - LOCALLY
         try:
             reef_server = await connect_to_server({
-                "server_url": self.server_url,
-                "token": reef_token,
-                "workspace": os.environ.get("REEF_LOCAL_WORKSPACE") if self.local else "reef-imaging",
+                "server_url": self.server_url, 
+                "token": operational_token,
+                "workspace": operational_workspace,
                 "ping_interval": None
             })
             if not self.incubator:
                 self.incubator = await reef_server.get_service(self.incubator_id)
-                logger.info(f"Incubator ({self.incubator_id}) connected.")
+                logger.info(f"Incubator ({self.incubator_id}) connected locally.")
                 await self._start_health_check('incubator', self.incubator, self.incubator_id)
             if not self.robotic_arm:
                 self.robotic_arm = await reef_server.get_service(self.robotic_arm_id)
-                logger.info(f"Robotic arm ({self.robotic_arm_id}) connected.")
+                logger.info(f"Robotic arm ({self.robotic_arm_id}) connected locally.")
                 await self._start_health_check('robotic_arm', self.robotic_arm, self.robotic_arm_id)
         except Exception as e:
-            logger.error(f"Failed to connect to REEF services (incubator/robotic arm): {e}")
-            return False # Critical failure
+            logger.error(f"Failed to connect to local REEF services (incubator/robotic arm): {e}")
+            return False 
 
-        # Connect to SQUID services (All Configured Microscopes)
+        # Connect to SQUID services (All Configured Microscopes) - LOCALLY
         connected_microscope_count = 0
         if not self.configured_microscopes_info:
             logger.warning("No microscopes defined in the configuration (self.configured_microscopes_info is empty).")
         
         for mic_id, mic_config in self.configured_microscopes_info.items():
-            if mic_id not in self.microscope_services: # If not already connected
-                logger.info(f"Attempting to connect to microscope: {mic_id}...")
+            if mic_id not in self.microscope_services: 
+                logger.info(f"Attempting to connect to local microscope: {mic_id}...")
                 try:
-                    # Assuming squid-control workspace for all microscopes, adjust if needed per mic_config
-                    squid_workspace = os.environ.get("REEF_LOCAL_WORKSPACE") if self.local else mic_config.get("workspace", "squid-control") # Allow override from config
-                    
                     squid_server_conn_for_mic = await connect_to_server({
-                        "server_url": self.server_url, # Assuming all microscopes on the same Hypha server instance
-                        "token": squid_token, # Assuming same token for all SQUID services
-                        "workspace": squid_workspace,
+                        "server_url": self.server_url, 
+                        "token": operational_token,
+                        "workspace": operational_workspace, # MODIFIED: Always use operational_workspace
                         "ping_interval": None
                     })
                     microscope_service_instance = await squid_server_conn_for_mic.get_service(mic_id)
                     self.microscope_services[mic_id] = microscope_service_instance
-                    # Initialize sample on microscope flag if it wasn't (e.g. if config reloaded)
                     if mic_id not in self.sample_on_microscope_flags:
                         self.sample_on_microscope_flags[mic_id] = False
-                    logger.info(f"Microscope {mic_id} connected.")
+                    logger.info(f"Microscope {mic_id} connected locally.")
                     await self._start_health_check('microscope', microscope_service_instance, mic_id)
                     connected_microscope_count +=1
                 except Exception as e:
-                    logger.error(f"Failed to connect to microscope {mic_id}: {e}")
-                    if mic_id in self.microscope_services: # Should not happen if connection failed, but as a safeguard
+                    logger.error(f"Failed to connect to local microscope {mic_id}: {e}")
+                    if mic_id in self.microscope_services: 
                         del self.microscope_services[mic_id]
-                    # We don't return False here, allow orchestrator to run if other services are up.
             else:
-                logger.info(f"Microscope {mic_id} already connected.")
+                logger.info(f"Local microscope {mic_id} already connected.")
                 connected_microscope_count +=1
         
-        # Disconnect any microscope services that are connected but no longer in configured_microscopes_info
-        # This might happen if config is reloaded and a microscope is removed
         connected_ids = list(self.microscope_services.keys())
         for mid in connected_ids:
             if mid not in self.configured_microscopes_info:
-                logger.info(f"Microscope {mid} is connected but no longer in configuration. Disconnecting.")
+                logger.info(f"Local microscope {mid} is connected but no longer in configuration. Disconnecting.")
                 await self.disconnect_single_service('microscope', mid)
 
-
-        logger.info(f'Device connection setup process completed. Connected {connected_microscope_count}/{len(self.configured_microscopes_info)} configured microscopes.')
-        # Return true if essential services (incubator, arm) are connected.
-        # Individual tasks will check for their specific allocated microscope.
+        logger.info(f'Local device connection setup process completed. Connected {connected_microscope_count}/{len(self.configured_microscopes_info)} configured local microscopes.')
         return bool(self.incubator and self.robotic_arm)
 
     async def disconnect_services(self):
@@ -1284,9 +1269,9 @@ class OrchestrationSystem:
             return {"error": str(e), "success": False}
 
 async def main():
-    parser = argparse.ArgumentParser(description='Run the Orchestration System.')
-    parser.add_argument('--local', action='store_true', help='Run in local mode using REEF_LOCAL_TOKEN and REEF_LOCAL_WORKSPACE')
-    args = parser.parse_args()
+    # parser = argparse.ArgumentParser(description='Run the Orchestration System.')
+    # parser.add_argument('--local', action='store_true', help='Run in local mode using REEF_LOCAL_TOKEN and REEF_LOCAL_WORKSPACE')
+    # args = parser.parse_args()
     
     # Initialize logger here after argument parsing, if args are needed for logging setup
     # For now, assuming log file name doesn't depend on args.
@@ -1294,7 +1279,7 @@ async def main():
     global logger
     logger = setup_logging(log_file=log_file_name)
 
-    orchestrator = OrchestrationSystem(local=args.local)
+    orchestrator = OrchestrationSystem()
     try:
         await orchestrator._register_self_as_hypha_service() # Register orchestrator's own Hypha service
         await orchestrator.run_time_lapse() # Removed round_time
