@@ -66,17 +66,16 @@ class OrchestrationSystem:
         self.orchestrator_hypha_server_connection = None
         
         self.incubator = None
-        self.microscope = None # Will be set based on task
+        self.microscope_services = {} # microscope_id -> service object
+        self.configured_microscopes_info = {} # microscope_id -> config dict from config.json
         self.robotic_arm = None
-        self.sample_on_microscope_flag = False # Tracks if a sample (any sample) is currently on the microscope
+        self.sample_on_microscope_flags = {} # microscope_id -> bool, True if sample on that microscope
 
         self.incubator_id = "incubator-control"
-        # self.microscope_id = "microscope-control-squid-1" # Now dynamic from config
-        self.current_microscope_id = None # ID of the currently connected microscope
         self.robotic_arm_id = "robotic-arm-control"
 
         self.tasks = {} # Stores task configurations and states
-        self.health_check_tasks = {} # Stores asyncio tasks for health checks
+        self.health_check_tasks = {} # Stores asyncio tasks for health checks, keyed by (service_type, service_id)
         self.active_task_name = None # Name of the task currently being processed or None
         self._config_lock = asyncio.Lock()
 
@@ -84,24 +83,26 @@ class OrchestrationSystem:
         self.transport_queue = asyncio.Queue()
         self._transport_worker_task = None # Will be created in _register_self_as_hypha_service
 
-    async def _start_health_check(self, service_type, service_instance):
-        if service_type in self.health_check_tasks and not self.health_check_tasks[service_type].done():
-            logger.info(f"Health check for {service_type} already running.")
+    async def _start_health_check(self, service_type, service_instance, service_identifier=None): # MODIFIED signature
+        key = (service_type, service_identifier) if service_identifier else service_type
+        if key in self.health_check_tasks and not self.health_check_tasks[key].done():
+            logger.info(f"Health check for {service_type} ({service_identifier if service_identifier else ''}) already running.")
             return
-        logger.info(f"Starting health check for {service_type}...")
-        task = asyncio.create_task(self.check_service_health(service_instance, service_type))
-        self.health_check_tasks[service_type] = task
+        logger.info(f"Starting health check for {service_type} ({service_identifier if service_identifier else ''})...")
+        task = asyncio.create_task(self.check_service_health(service_instance, service_type, service_identifier)) # Pass identifier
+        self.health_check_tasks[key] = task
 
-    async def _stop_health_check(self, service_type):
-        if service_type in self.health_check_tasks:
-            task = self.health_check_tasks.pop(service_type)
+    async def _stop_health_check(self, service_type, service_identifier=None): # MODIFIED signature
+        key = (service_type, service_identifier) if service_identifier else service_type
+        if key in self.health_check_tasks:
+            task = self.health_check_tasks.pop(key)
             if task and not task.done():
-                logger.info(f"Stopping health check for {service_type}...")
+                logger.info(f"Stopping health check for {service_type} ({service_identifier if service_identifier else ''})...")
                 task.cancel()
                 try:
                     await task
                 except asyncio.CancelledError:
-                    logger.info(f"Health check for {service_type} cancelled.")
+                    logger.info(f"Health check for {service_type} ({service_identifier if service_identifier else ''}) cancelled.")
 
     async def _load_and_update_tasks(self):
         new_task_configs = {}
@@ -245,6 +246,36 @@ class OrchestrationSystem:
                 task_state_dict["status"] = "completed"
                 a_task_state_changed_for_write = True
 
+        # Load microscope configurations
+        newly_configured_microscopes_info = {}
+        for mic_config in raw_config_data.get("microscopes", []):
+            mic_id = mic_config.get("id")
+            if mic_id:
+                newly_configured_microscopes_info[mic_id] = mic_config
+                if mic_id not in self.sample_on_microscope_flags: # Initialize flag for new microscopes
+                    self.sample_on_microscope_flags[mic_id] = False
+            else:
+                logger.warning(f"Found a microscope configuration without an ID in {CONFIG_FILE_PATH}. Skipping: {mic_config}")
+        
+        # Handle microscopes removed from config
+        removed_microscope_ids = [mid for mid in self.configured_microscopes_info if mid not in newly_configured_microscopes_info]
+        for mid in removed_microscope_ids:
+            logger.info(f"Microscope {mid} removed from configuration. Will disconnect if connected.")
+            # Actual disconnection will be handled by setup_connections or a dedicated cleanup if needed
+            if mid in self.sample_on_microscope_flags:
+                del self.sample_on_microscope_flags[mid]
+            # Stop health check if running for this microscope
+            await self._stop_health_check('microscope', mid)
+            if mid in self.microscope_services:
+                try:
+                    await self.microscope_services[mid].disconnect()
+                    logger.info(f"Disconnected removed microscope {mid}.")
+                except Exception as e:
+                    logger.error(f"Error disconnecting removed microscope {mid}: {e}")
+                del self.microscope_services[mid]
+
+        self.configured_microscopes_info = newly_configured_microscopes_info
+        
         if a_task_state_changed_for_write or tasks_to_remove:
             await self._write_tasks_to_config()
 
@@ -336,9 +367,11 @@ class OrchestrationSystem:
         if changed:
             await self._write_tasks_to_config()
 
-    async def check_service_health(self, service, service_type):
+    async def check_service_health(self, service, service_type, service_identifier=None): # MODIFIED signature
         """Check if the service is healthy and reset if needed"""
-        service_name = service.id if hasattr(service, "id") else f"{service_type}_service"
+        # Use service_identifier for logging if available, otherwise fallback
+        log_service_name_part = service_identifier if service_identifier else (service.id if hasattr(service, "id") else service_type)
+        service_name = f"{service_type} ({log_service_name_part})"
             
         while True:
             try:
@@ -361,37 +394,56 @@ class OrchestrationSystem:
                 logger.info(f"Attempting to reset only the {service_type} service...")
                 
                 # Disconnect only the specific service
-                await self.disconnect_single_service(service_type)
+                await self.disconnect_single_service(service_type, service_identifier) # Pass identifier
                 
                 # Reconnect only the specific service
-                await self.reconnect_single_service(service_type)
+                await self.reconnect_single_service(service_type, service_identifier) # Pass identifier
                 
             await asyncio.sleep(30)  # Check every half minute
 
-    async def disconnect_single_service(self, service_type):
+    async def disconnect_single_service(self, service_type, service_id_to_disconnect=None): # MODIFIED signature
         """Disconnect a specific service and its health check."""
-        await self._stop_health_check(service_type) # Stop health check first
+        # Determine the correct identifier for stopping health check and for logging
+        actual_service_id = service_id_to_disconnect
+        if service_type == 'incubator':
+            actual_service_id = self.incubator_id
+        elif service_type == 'robotic_arm':
+            actual_service_id = self.robotic_arm_id
+        
+        if actual_service_id: # Only stop health check if we have a valid ID for it
+             await self._stop_health_check(service_type, actual_service_id) # Stop health check first
+
         try:
             if service_type == 'incubator' and self.incubator:
-                logger.info(f"Disconnecting incubator service...")
+                logger.info(f"Disconnecting incubator service ({self.incubator_id})...")
                 await self.incubator.disconnect()
                 self.incubator = None
-                logger.info(f"Incubator service disconnected.")
-            elif service_type == 'microscope' and self.microscope:
-                logger.info(f"Disconnecting microscope service ({self.current_microscope_id})...")
-                await self.microscope.disconnect()
-                self.microscope = None
-                self.current_microscope_id = None
-                logger.info(f"Microscope service disconnected.")
+                logger.info(f"Incubator service ({self.incubator_id}) disconnected.")
+            elif service_type == 'microscope':
+                if service_id_to_disconnect and service_id_to_disconnect in self.microscope_services:
+                    logger.info(f"Disconnecting microscope service ({service_id_to_disconnect})...")
+                    mic_service = self.microscope_services.pop(service_id_to_disconnect)
+                    await mic_service.disconnect()
+                    if service_id_to_disconnect in self.sample_on_microscope_flags: # Keep flag consistent
+                        self.sample_on_microscope_flags[service_id_to_disconnect] = False 
+                    logger.info(f"Microscope service ({service_id_to_disconnect}) disconnected.")
+                elif not service_id_to_disconnect:
+                    logger.warning("disconnect_single_service called for microscope without specifying ID. Cannot disconnect.")
             elif service_type == 'robotic_arm' and self.robotic_arm:
-                logger.info(f"Disconnecting robotic_arm service...")
-                await self.robotic_arm.disconnect()
-                self.robotic_arm = None
-                logger.info(f"Robotic arm service disconnected.")
+                reef_server = await connect_to_server({
+                    "server_url": self.server_url,
+                    "token": os.environ.get("REEF_LOCAL_TOKEN"),
+                    "workspace": os.environ.get("REEF_LOCAL_WORKSPACE") if self.local else "reef-imaging",
+                    "ping_interval": None
+                })
+                self.robotic_arm = await reef_server.get_service(self.robotic_arm_id)
+                logger.info(f"Robotic arm service ({self.robotic_arm_id}) reconnected successfully.")
+                await self._start_health_check('robotic_arm', self.robotic_arm) # Restart health check
+                
         except Exception as e:
-            logger.error(f"Error disconnecting {service_type} service: {e}")
-    
-    async def reconnect_single_service(self, service_type):
+            logger.error(f"Error disconnecting {service_type} service ({service_id_to_disconnect if service_id_to_disconnect else ''}): {e}")
+
+    async def reconnect_single_service(self, service_type, service_id_to_reconnect=None): # MODIFIED signature
         """Reconnect a specific service."""
         try:
             reef_token = os.environ.get("REEF_LOCAL_TOKEN") if self.local else os.environ.get("REEF_WORKSPACE_TOKEN")
@@ -399,10 +451,16 @@ class OrchestrationSystem:
             
             if not reef_token or not squid_token:
                 token = await login({"server_url": self.server_url})
+                if not token: # check if login failed
+                    logger.error(f"Hypha login failed during reconnect for {service_type} ({service_id_to_reconnect}). Cannot obtain token.")
+                    return # Cannot proceed without token
                 reef_token = token
                 squid_token = token
             
             if service_type == 'incubator':
+                if self.incubator: # Should ideally be disconnected first
+                    logger.warning("Incubator already connected during reconnect attempt. Skipping.")
+                    return
                 reef_server = await connect_to_server({
                     "server_url": self.server_url,
                     "token": reef_token,
@@ -410,25 +468,38 @@ class OrchestrationSystem:
                     "ping_interval": None
                 })
                 self.incubator = await reef_server.get_service(self.incubator_id)
-                logger.info(f"Incubator service reconnected successfully.")
-                await self._start_health_check('incubator', self.incubator) # Restart health check
+                logger.info(f"Incubator service ({self.incubator_id}) reconnected successfully.")
+                await self._start_health_check('incubator', self.incubator, self.incubator_id)
                 
             elif service_type == 'microscope':
+                if not service_id_to_reconnect:
+                    logger.error("Cannot reconnect microscope: service_id_to_reconnect is not provided.")
+                    return
+                if service_id_to_reconnect in self.microscope_services:
+                    logger.warning(f"Microscope {service_id_to_reconnect} already connected during reconnect attempt. Skipping.")
+                    return
+
+                # Ensure this microscope ID is still in the current configuration
+                if service_id_to_reconnect not in self.configured_microscopes_info:
+                    logger.error(f"Cannot reconnect microscope {service_id_to_reconnect}: no longer in configuration.")
+                    return
+
                 squid_server = await connect_to_server({
                     "server_url": self.server_url,
                     "token": squid_token,
-                    "workspace": os.environ.get("REEF_LOCAL_WORKSPACE") if self.local else "squid-control", # This workspace might need to be dynamic too if multiple microscope providers
+                    # Assuming squid-control workspace for all microscopes for now
+                    "workspace": os.environ.get("REEF_LOCAL_WORKSPACE") if self.local else "squid-control", 
                     "ping_interval": None
                 })
-                # self.microscope = await squid_server.get_service(self.microscope_id) # self.microscope_id is not set globally
-                if not self.current_microscope_id:
-                    logger.error("Cannot reconnect microscope: current_microscope_id is not set.")
-                    return
-                self.microscope = await squid_server.get_service(self.current_microscope_id)
-                logger.info(f"Microscope service ({self.current_microscope_id}) reconnected successfully.")
-                await self._start_health_check('microscope', self.microscope) # Restart health check
+                microscope_service_instance = await squid_server.get_service(service_id_to_reconnect)
+                self.microscope_services[service_id_to_reconnect] = microscope_service_instance
+                logger.info(f"Microscope service ({service_id_to_reconnect}) reconnected successfully.")
+                await self._start_health_check('microscope', microscope_service_instance, service_id_to_reconnect)
                 
             elif service_type == 'robotic_arm':
+                if self.robotic_arm: # Should ideally be disconnected first
+                    logger.warning("Robotic arm already connected during reconnect attempt. Skipping.")
+                    return
                 reef_server = await connect_to_server({
                     "server_url": self.server_url,
                     "token": reef_token,
@@ -436,14 +507,14 @@ class OrchestrationSystem:
                     "ping_interval": None
                 })
                 self.robotic_arm = await reef_server.get_service(self.robotic_arm_id)
-                logger.info(f"Robotic arm service reconnected successfully.")
-                await self._start_health_check('robotic_arm', self.robotic_arm) # Restart health check
+                logger.info(f"Robotic arm service ({self.robotic_arm_id}) reconnected successfully.")
+                await self._start_health_check('robotic_arm', self.robotic_arm, self.robotic_arm_id)
                 
         except Exception as e:
-            logger.error(f"Error reconnecting {service_type} service: {e}")
+            logger.error(f"Error reconnecting {service_type} service ({service_id_to_reconnect if service_id_to_reconnect else ''}): {e}")
 
-    async def setup_connections(self, target_microscope_id=None):
-        """Set up connections to incubator, robotic arm, and the target microscope."""
+    async def setup_connections(self): # MODIFIED: target_microscope_id parameter removed
+        """Set up connections to incubator, robotic arm, and all configured microscopes."""
         reef_token = os.environ.get("REEF_LOCAL_TOKEN") if self.local else os.environ.get("REEF_WORKSPACE_TOKEN")
         squid_token = os.environ.get("REEF_LOCAL_TOKEN") if self.local else os.environ.get("SQUID_WORKSPACE_TOKEN")
         
@@ -465,209 +536,251 @@ class OrchestrationSystem:
             })
             if not self.incubator:
                 self.incubator = await reef_server.get_service(self.incubator_id)
-                logger.info("Incubator connected.")
-                await self._start_health_check('incubator', self.incubator)
+                logger.info(f"Incubator ({self.incubator_id}) connected.")
+                await self._start_health_check('incubator', self.incubator, self.incubator_id)
             if not self.robotic_arm:
                 self.robotic_arm = await reef_server.get_service(self.robotic_arm_id)
-                logger.info("Robotic arm connected.")
-                await self._start_health_check('robotic_arm', self.robotic_arm)
+                logger.info(f"Robotic arm ({self.robotic_arm_id}) connected.")
+                await self._start_health_check('robotic_arm', self.robotic_arm, self.robotic_arm_id)
         except Exception as e:
             logger.error(f"Failed to connect to REEF services (incubator/robotic arm): {e}")
             return False # Critical failure
 
-        # Connect to SQUID service (Microscope)
-        if target_microscope_id:
-            if self.current_microscope_id != target_microscope_id or not self.microscope:
-                if self.microscope: # Connected to a different microscope
-                    logger.info(f"Switching microscope from {self.current_microscope_id} to {target_microscope_id}")
-                    await self.disconnect_single_service('microscope') # This will also stop its health check
-                
-                logger.info(f"Connecting to microscope: {target_microscope_id}...")
+        # Connect to SQUID services (All Configured Microscopes)
+        connected_microscope_count = 0
+        if not self.configured_microscopes_info:
+            logger.warning("No microscopes defined in the configuration (self.configured_microscopes_info is empty).")
+        
+        for mic_id, mic_config in self.configured_microscopes_info.items():
+            if mic_id not in self.microscope_services: # If not already connected
+                logger.info(f"Attempting to connect to microscope: {mic_id}...")
                 try:
-                    # Assuming squid_server might need re-establishing if tokens/workspaces are very different per microscope type
-                    # For now, using the SQUID_WORKSPACE_TOKEN and squid-control workspace as per original
-                    squid_workspace = os.environ.get("REEF_LOCAL_WORKSPACE") if self.local else "squid-control"
-                    squid_server = await connect_to_server({
-                        "server_url": self.server_url,
-                        "token": squid_token,
+                    # Assuming squid-control workspace for all microscopes, adjust if needed per mic_config
+                    squid_workspace = os.environ.get("REEF_LOCAL_WORKSPACE") if self.local else mic_config.get("workspace", "squid-control") # Allow override from config
+                    
+                    squid_server_conn_for_mic = await connect_to_server({
+                        "server_url": self.server_url, # Assuming all microscopes on the same Hypha server instance
+                        "token": squid_token, # Assuming same token for all SQUID services
                         "workspace": squid_workspace,
                         "ping_interval": None
                     })
-                    self.microscope = await squid_server.get_service(target_microscope_id)
-                    self.current_microscope_id = target_microscope_id
-                    logger.info(f"Microscope {self.current_microscope_id} connected.")
-                    await self._start_health_check('microscope', self.microscope)
+                    microscope_service_instance = await squid_server_conn_for_mic.get_service(mic_id)
+                    self.microscope_services[mic_id] = microscope_service_instance
+                    # Initialize sample on microscope flag if it wasn't (e.g. if config reloaded)
+                    if mic_id not in self.sample_on_microscope_flags:
+                        self.sample_on_microscope_flags[mic_id] = False
+                    logger.info(f"Microscope {mic_id} connected.")
+                    await self._start_health_check('microscope', microscope_service_instance, mic_id)
+                    connected_microscope_count +=1
                 except Exception as e:
-                    logger.error(f"Failed to connect to microscope {target_microscope_id}: {e}")
-                    self.microscope = None
-                    self.current_microscope_id = None
-                    # Do not return False here, as other services might be up, and run_time_lapse can decide
+                    logger.error(f"Failed to connect to microscope {mic_id}: {e}")
+                    if mic_id in self.microscope_services: # Should not happen if connection failed, but as a safeguard
+                        del self.microscope_services[mic_id]
+                    # We don't return False here, allow orchestrator to run if other services are up.
             else:
-                logger.info(f"Microscope {target_microscope_id} already connected.")
-        else: # No target microscope ID specified, ensure any existing microscope connection is closed
-            if self.microscope:
-                logger.info(f"No target microscope specified. Disconnecting current microscope {self.current_microscope_id}.")
-                await self.disconnect_single_service('microscope')
+                logger.info(f"Microscope {mic_id} already connected.")
+                connected_microscope_count +=1
+        
+        # Disconnect any microscope services that are connected but no longer in configured_microscopes_info
+        # This might happen if config is reloaded and a microscope is removed
+        connected_ids = list(self.microscope_services.keys())
+        for mid in connected_ids:
+            if mid not in self.configured_microscopes_info:
+                logger.info(f"Microscope {mid} is connected but no longer in configuration. Disconnecting.")
+                await self.disconnect_single_service('microscope', mid)
 
-        logger.info('Device connection setup process completed.')
+
+        logger.info(f'Device connection setup process completed. Connected {connected_microscope_count}/{len(self.configured_microscopes_info)} configured microscopes.')
         # Return true if essential services (incubator, arm) are connected.
-        # Microscope connection status is handled by the task scheduler.
+        # Individual tasks will check for their specific allocated microscope.
         return bool(self.incubator and self.robotic_arm)
 
     async def disconnect_services(self):
         """Disconnect from all services and stop their health checks."""
         logger.info("Disconnecting all services...")
         
-        service_types_to_disconnect = []
-        if self.incubator: service_types_to_disconnect.append('incubator')
-        if self.microscope: service_types_to_disconnect.append('microscope')
-        if self.robotic_arm: service_types_to_disconnect.append('robotic_arm')
-
-        for service_type in service_types_to_disconnect:
-            await self.disconnect_single_service(service_type) # This now handles health checks too
+        # Disconnect Incubator
+        if self.incubator:
+            await self.disconnect_single_service('incubator', self.incubator_id) 
+        
+        # Disconnect all Microscopes
+        microscope_ids_to_disconnect = list(self.microscope_services.keys())
+        for mic_id in microscope_ids_to_disconnect:
+            await self.disconnect_single_service('microscope', mic_id)
+        
+        # Disconnect Robotic Arm
+        if self.robotic_arm:
+            await self.disconnect_single_service('robotic_arm', self.robotic_arm_id)
                 
         logger.info("Disconnect process completed for all services.")
 
-    async def load_plate_from_incubator_to_microscope_api(self, incubator_slot: int):
-        logger.info(f"API call: Queuing load_plate_from_incubator_to_microscope for slot {incubator_slot}")
+    async def load_plate_from_incubator_to_microscope_api(self, incubator_slot: int, microscope_id: str): # MODIFIED: added microscope_id
+        logger.info(f"API call: Queuing load_plate_from_incubator_to_microscope for slot {incubator_slot} to microscope {microscope_id}")
+        if microscope_id not in self.configured_microscopes_info:
+            msg = f"Microscope ID '{microscope_id}' not found in configured microscopes."
+            logger.error(msg)
+            return {"success": False, "message": msg}
+
         op_future = asyncio.get_event_loop().create_future()
         await self.transport_queue.put({
             "action": "load",
             "incubator_slot": incubator_slot,
+            "microscope_id": microscope_id, # Added microscope_id to queue item
             "future": op_future
         })
         #wait for load to be completed
         await op_future
-        return {"success": True, "message": f"Load task for slot {incubator_slot} queued."}
+        return {"success": True, "message": f"Load task for slot {incubator_slot} to microscope {microscope_id} queued."}
 
-    async def _execute_load_operation(self, incubator_slot):
-        if self.sample_on_microscope_flag:
-            logger.info("Sample plate already on microscope")
-            return # Success case - no need to load again
-            
-        logger.info(f"Loading sample from incubator slot {incubator_slot}...")
-        
-        try:
-            # Figure out which microscope we're currently connected to
-            microscope_id = 1  # Default to microscope 1
-            if self.current_microscope_id:
-                # Extract the microscope ID from the service ID
-                if self.current_microscope_id.endswith('2'):
-                    microscope_id = 2
-                elif self.current_microscope_id.endswith('1'):
-                    microscope_id = 1
-            
-            # Start parallel operations
-            await asyncio.gather(
-                self.incubator.get_sample_from_slot_to_transfer_station(incubator_slot),
-                self.microscope.home_stage()
-            )
-            # Move sample with robotic arm
-            await self.incubator.update_sample_location(incubator_slot, "robotic_arm")
-            await self.robotic_arm.incubator_to_microscope(microscope_id)
-            
-            # Return microscope stage
-            await self.incubator.update_sample_location(incubator_slot, f"microscope{microscope_id}")
-            await self.microscope.return_stage()
-            
-            logger.info("Sample loaded onto microscope.")
-            self.sample_on_microscope_flag = True
-            
-        except Exception as e:
-            error_msg = f"Failed to load sample from slot {incubator_slot}: {e}"
+    async def _execute_load_operation(self, incubator_slot, microscope_id_str): # MODIFIED: added microscope_id_str
+        target_microscope_service = self.microscope_services.get(microscope_id_str)
+        if not target_microscope_service:
+            error_msg = f"Failed to load: Microscope service {microscope_id_str} is not connected."
             logger.error(error_msg)
             raise Exception(error_msg)
 
-    async def unload_plate_from_microscope_api(self, incubator_slot: int):
-        logger.info(f"API call: Queuing unload_plate_from_microscope for slot {incubator_slot}")
+        if self.sample_on_microscope_flags.get(microscope_id_str, False):
+            logger.info(f"Sample plate already on microscope {microscope_id_str}")
+            return 
+            
+        logger.info(f"Loading sample from incubator slot {incubator_slot} to microscope {microscope_id_str}...")
+        
+        try:
+            # Determine the robot arm's target microscope ID (e.g., 1 or 2)
+            # This logic might need to be more robust or configurable
+            robot_microscope_target_id = 1 
+            if microscope_id_str.endswith('2'):
+                robot_microscope_target_id = 2
+            elif microscope_id_str.endswith('1'):
+                robot_microscope_target_id = 1
+            # Add more sophisticated mapping if microscope IDs are not simply ending with 1 or 2
+            else:
+                logger.warning(f"Could not determine robot target ID for microscope {microscope_id_str}, defaulting to 1. This might be incorrect.")
+
+
+            # Start parallel operations
+            await asyncio.gather(
+                self.incubator.get_sample_from_slot_to_transfer_station(incubator_slot),
+                target_microscope_service.home_stage()
+            )
+            # Move sample with robotic arm
+            await self.incubator.update_sample_location(incubator_slot, "robotic_arm")
+            await self.robotic_arm.incubator_to_microscope(robot_microscope_target_id) # Use derived robot_microscope_target_id
+            
+            # Return microscope stage
+            await self.incubator.update_sample_location(incubator_slot, f"microscope{robot_microscope_target_id}") # Log with robot target ID
+            await target_microscope_service.return_stage()
+            
+            logger.info(f"Sample loaded onto microscope {microscope_id_str}.")
+            self.sample_on_microscope_flags[microscope_id_str] = True
+            
+        except Exception as e:
+            error_msg = f"Failed to load sample from slot {incubator_slot} to microscope {microscope_id_str}: {e}"
+            logger.error(error_msg)
+            # Reset flag on failure if it was set prematurely or state is uncertain
+            self.sample_on_microscope_flags[microscope_id_str] = False
+            raise Exception(error_msg)
+
+    async def unload_plate_from_microscope_api(self, incubator_slot: int, microscope_id: str): # MODIFIED: added microscope_id
+        logger.info(f"API call: Queuing unload_plate_from_microscope for slot {incubator_slot} from microscope {microscope_id}")
+        if microscope_id not in self.configured_microscopes_info:
+            msg = f"Microscope ID '{microscope_id}' not found in configured microscopes."
+            logger.error(msg)
+            return {"success": False, "message": msg}
+
         op_future = asyncio.get_event_loop().create_future()
         await self.transport_queue.put({
             "action": "unload",
             "incubator_slot": incubator_slot,
+            "microscope_id": microscope_id, # Added microscope_id to queue item
             "future": op_future
         })
         #wait for unload to be completed
         await op_future
-        return {"success": True, "message": f"Unload task for slot {incubator_slot} queued."}
+        return {"success": True, "message": f"Unload task for slot {incubator_slot} from microscope {microscope_id} queued."}
 
-    async def _execute_unload_operation(self, incubator_slot):
-        if not self.sample_on_microscope_flag:
-            logger.info("Sample plate not on microscope")
-            return # Success case - nothing to unload
+    async def _execute_unload_operation(self, incubator_slot, microscope_id_str): # MODIFIED: added microscope_id_str
+        target_microscope_service = self.microscope_services.get(microscope_id_str)
+        if not target_microscope_service:
+            error_msg = f"Failed to unload: Microscope service {microscope_id_str} is not connected."
+            logger.error(error_msg)
+            raise Exception(error_msg)
+
+        if not self.sample_on_microscope_flags.get(microscope_id_str, False):
+            logger.info(f"Sample plate not on microscope {microscope_id_str}")
+            return 
             
-        logger.info(f"Unloading sample to incubator slot {incubator_slot}...")
+        logger.info(f"Unloading sample to incubator slot {incubator_slot} from microscope {microscope_id_str}...")
 
         try:
-            # Figure out which microscope we're currently connected to
-            microscope_id = 1  # Default to microscope 1
-            if self.current_microscope_id:
-                # Extract the microscope ID from the service ID
-                if self.current_microscope_id.endswith('2'):
-                    microscope_id = 2
-                elif self.current_microscope_id.endswith('1'):
-                    microscope_id = 1
+            # Determine the robot arm's target microscope ID (e.g., 1 or 2)
+            robot_microscope_target_id = 1
+            if microscope_id_str.endswith('2'):
+                robot_microscope_target_id = 2
+            elif microscope_id_str.endswith('1'):
+                robot_microscope_target_id = 1
+            else:
+                logger.warning(f"Could not determine robot target ID for microscope {microscope_id_str}, defaulting to 1. This might be incorrect.")
 
             # Home microscope stage
-            await self.microscope.home_stage()
+            await target_microscope_service.home_stage()
             
             # Move sample with robotic arm
             await self.incubator.update_sample_location(incubator_slot, "robotic_arm")
-            await self.robotic_arm.microscope_to_incubator(microscope_id)
+            await self.robotic_arm.microscope_to_incubator(robot_microscope_target_id) # Use derived robot_microscope_target_id
             
             # Put sample back and return stage in parallel
             await asyncio.gather(
                 self.incubator.put_sample_from_transfer_station_to_slot(incubator_slot),
-                self.microscope.return_stage()
+                target_microscope_service.return_stage()
             )
             await self.incubator.update_sample_location(incubator_slot, "incubator_slot")
-            logger.info("Sample unloaded from microscope.")
-            self.sample_on_microscope_flag = False
+            logger.info(f"Sample unloaded from microscope {microscope_id_str}.")
+            self.sample_on_microscope_flags[microscope_id_str] = False
             
         except Exception as e:
-            error_msg = f"Failed to unload sample to slot {incubator_slot}: {e}"
+            error_msg = f"Failed to unload sample to slot {incubator_slot} from microscope {microscope_id_str}: {e}"
             logger.error(error_msg)
+            # State of sample_on_microscope_flags[microscope_id_str] is uncertain on failure, could leave as True or try to verify.
+            # For now, we assume it might still be there if unload fails critically.
             raise Exception(error_msg)
 
-    async def run_cycle(self, task_config):
-        """Run the complete load-scan-unload process for a given task."""
+    async def run_cycle(self, task_config, microscope_service, allocated_microscope_id): # MODIFIED: added microscope_service, allocated_microscope_id
+        """Run the complete load-scan-unload process for a given task on a specific microscope."""
         task_name = task_config["name"]
         incubator_slot = task_config["incubator_slot"]
         action_id = f"{task_name.replace(' ', '_')}-{datetime.now().strftime('%Y%m%dT%H%M%S')}"
-        logger.info(f"Starting imaging cycle for task: {task_name} with action_id: {action_id}")
+        logger.info(f"Starting imaging cycle for task: {task_name} on microscope {allocated_microscope_id} with action_id: {action_id}")
 
-        # Verify services are available
-        if not self.incubator or not self.microscope or not self.robotic_arm:
-            logger.error(f"One or more services are not available for task {task_name}. Attempting reconnect.")
-            try:
-                await self.setup_connections(target_microscope_id=task_config["allocated_microscope"])
-            except Exception as e:
-                error_msg = f"Failed to re-establish service connections for task {task_name}: {e}"
-                logger.error(error_msg)
-                raise Exception(error_msg)
-                
-            if not self.microscope:
-                error_msg = f"Microscope {task_config['allocated_microscope']} still not available after reconnection"
-                logger.error(error_msg)
-                raise Exception(error_msg)
-
+        # Verify essential services (incubator, arm) are available - microscope_service is passed in and presumed connected by caller
+        if not self.incubator or not self.robotic_arm:
+            error_msg = f"Incubator or Robotic Arm not available for task {task_name} on microscope {allocated_microscope_id}."
+            logger.error(error_msg)
+            # Attempt to reconnect essential shared services.
+            # We don't try to reconnect the specific microscope here as that's handled by run_time_lapse logic.
+            await self.setup_connections() 
+            if not self.incubator or not self.robotic_arm: # Check again
+                raise Exception(f"Essential services still unavailable after reconnect attempt: {error_msg}")
+        
         # Reset all task status on the services themselves before starting a new cycle
         try:
-            logger.info(f"Resetting task statuses on services for task {task_name}...")
-            if self.microscope: await self.microscope.reset_all_task_status()
+            logger.info(f"Resetting task statuses on services for task {task_name} (microscope: {allocated_microscope_id})...")
+            await microscope_service.reset_all_task_status()
             if self.incubator: await self.incubator.reset_all_task_status()
             if self.robotic_arm: await self.robotic_arm.reset_all_task_status()
-            logger.info(f"Service task statuses reset for task {task_name}.")
+            logger.info(f"Service task statuses reset for task {task_name} on {allocated_microscope_id}.")
         except Exception as e:
-            logger.error(f"Error resetting task statuses on services for {task_name}: {e}. Proceeding with caution.")
+            logger.error(f"Error resetting task statuses on services for {task_name} on {allocated_microscope_id}: {e}. Proceeding with caution.")
 
-        # Reset sample_on_microscope_flag based on actual state if possible, or assume it needs loading
-        self.sample_on_microscope_flag = False 
+        # Ensure the specific microscope's sample flag is false before load, other microscopes' flags are untouched.
+        self.sample_on_microscope_flags[allocated_microscope_id] = False 
 
         try:
-            await self._execute_load_operation(incubator_slot=incubator_slot)
+            # Pass allocated_microscope_id to transport operations
+            await self._execute_load_operation(incubator_slot=incubator_slot, microscope_id_str=allocated_microscope_id)
             
-            # Scan with direct service call
-            await self.microscope.scan_well_plate(
+            # Scan with the provided microscope_service
+            await microscope_service.scan_well_plate(
                 illuminate_channels=task_config["illuminate_channels"],
                 do_reflection_af=task_config["do_reflection_af"],
                 scanning_zone=task_config["imaging_zone"],
@@ -676,21 +789,21 @@ class OrchestrationSystem:
                 action_ID=action_id,
             )
             
-            await self._execute_unload_operation(incubator_slot=incubator_slot)
+            await self._execute_unload_operation(incubator_slot=incubator_slot, microscope_id_str=allocated_microscope_id)
             
-            logger.info(f"Imaging cycle for task {task_name} (action_id: {action_id}) completed successfully.")
+            logger.info(f"Imaging cycle for task {task_name} on microscope {allocated_microscope_id} (action_id: {action_id}) completed successfully.")
             
         except Exception as e:
-            logger.error(f"Cycle failed for task {task_name}: {e}")
-            # Attempt cleanup - unload if possible
+            logger.error(f"Cycle failed for task {task_name} on microscope {allocated_microscope_id}: {e}")
+            # Attempt cleanup - unload if possible from the specific microscope
             try:
-                await self._execute_unload_operation(incubator_slot=incubator_slot)
-                logger.info(f"Cleanup unload completed for task {task_name} after cycle failure.")
+                logger.info(f"Attempting cleanup unload for task {task_name} from microscope {allocated_microscope_id} after cycle failure.")
+                await self._execute_unload_operation(incubator_slot=incubator_slot, microscope_id_str=allocated_microscope_id)
+                logger.info(f"Cleanup unload completed for task {task_name} from {allocated_microscope_id} after cycle failure.")
             except Exception as cleanup_error:
-                logger.error(f"Cleanup unload also failed for task {task_name}: {cleanup_error}")
+                logger.error(f"Cleanup unload also failed for task {task_name} from {allocated_microscope_id}: {cleanup_error}")
             
-            # Re-raise the original exception
-            raise
+            raise # Re-raise the original exception that caused the cycle failure
 
     async def run_time_lapse(self):
         """Main orchestration loop to manage and run imaging tasks based on config.json."""
@@ -746,43 +859,53 @@ class OrchestrationSystem:
                 task_config_for_cycle = task_data["config"]
                 current_pending_tp_to_process = earliest_pending_tp_for_selection
                 
-                logger.info(f"Preparing to run task {self.active_task_name} for time point {current_pending_tp_to_process.isoformat()}. Current state: status='{task_data['status']}'")
+                allocated_microscope_id = task_config_for_cycle.get("allocated_microscope")
+                if not allocated_microscope_id:
+                    logger.error(f"Task {self.active_task_name} does not have an 'allocated_microscope'. Skipping.")
+                    await self._update_task_state_and_write_config(self.active_task_name, status="error")
+                    self.active_task_name = None
+                    await asyncio.sleep(ORCHESTRATOR_LOOP_SLEEP) # Prevent rapid looping on misconfiguration
+                    continue
 
+                logger.info(f"Preparing to run task {self.active_task_name} for time point {current_pending_tp_to_process.isoformat()} on microscope {allocated_microscope_id}. Current state: status='{task_data['status']}'")
+
+                # Ensure connections to shared services and the specific allocated microscope
                 try:
-                    await self.setup_connections(target_microscope_id=task_config_for_cycle["allocated_microscope"])
+                    # setup_connections now handles all configured microscopes.
+                    # We must ensure it has run recently enough or run it if the allocated one is missing.
+                    if not self.incubator or not self.robotic_arm or allocated_microscope_id not in self.microscope_services:
+                         logger.info(f"Essential services or allocated microscope {allocated_microscope_id} not ready. Running setup_connections.")
+                         await self.setup_connections() 
                 except Exception as setup_error:
-                    logger.error(f"Failed to setup connections for task {self.active_task_name}: {setup_error}")
-                    await self._update_task_state_and_write_config(
-                        self.active_task_name,
-                        status="error"
-                    )
+                    logger.error(f"Failed to setup/verify connections for task {self.active_task_name} (microscope {allocated_microscope_id}): {setup_error}")
+                    await self._update_task_state_and_write_config(self.active_task_name, status="error")
                     self.active_task_name = None
                     await asyncio.sleep(ORCHESTRATOR_LOOP_SLEEP)
                     continue
                 
-                if not self.microscope or self.current_microscope_id != task_config_for_cycle["allocated_microscope"]:
-                    logger.error(f"Microscope {task_config_for_cycle['allocated_microscope']} not available for {self.active_task_name}.")
-                    await self._update_task_state_and_write_config(
-                        self.active_task_name,
-                        status="error"
-                    )
+                # After setup_connections, check again for the specific microscope
+                target_microscope_service = self.microscope_services.get(allocated_microscope_id)
+                if not target_microscope_service:
+                    logger.error(f"Microscope {allocated_microscope_id} for task {self.active_task_name} is not available/connected even after setup_connections attempt.")
+                    await self._update_task_state_and_write_config(self.active_task_name, status="error")
                     self.active_task_name = None
                     await asyncio.sleep(ORCHESTRATOR_LOOP_SLEEP)
                     continue
 
-                logger.info(f"Starting cycle for task: {self.active_task_name}, time point: {current_pending_tp_to_process.isoformat()}")
+                logger.info(f"Starting cycle for task: {self.active_task_name} on microscope {allocated_microscope_id}, time point: {current_pending_tp_to_process.isoformat()}")
                 await self._update_task_state_and_write_config(self.active_task_name, status="active")
                 
                 try:
-                    await self.run_cycle(task_config_for_cycle) 
-                    logger.info(f"Cycle for task {self.active_task_name}, time point {current_pending_tp_to_process.isoformat()} success.")
+                    # Pass the specific microscope service and its ID to run_cycle
+                    await self.run_cycle(task_config_for_cycle, target_microscope_service, allocated_microscope_id) 
+                    logger.info(f"Cycle for task {self.active_task_name} on {allocated_microscope_id}, time point {current_pending_tp_to_process.isoformat()} success.")
                     await self._update_task_state_and_write_config(
                         self.active_task_name,
                         status="waiting_for_next_run",
                         current_tp_to_move_to_imaged=current_pending_tp_to_process
                     )
                 except Exception as cycle_error:
-                    logger.error(f"Cycle for task {self.active_task_name}, time point {current_pending_tp_to_process.isoformat()} failed: {cycle_error}")
+                    logger.error(f"Cycle for task {self.active_task_name} on {allocated_microscope_id}, time point {current_pending_tp_to_process.isoformat()} failed: {cycle_error}")
                     await self._update_task_state_and_write_config(
                         self.active_task_name,
                         status="error"
@@ -816,22 +939,34 @@ class OrchestrationSystem:
             try:
                 # Get a transport task from the queue
                 task_details = await self.transport_queue.get()
-                logger.info(f"Transport worker picked up task: {task_details.get('action')} for slot {task_details.get('incubator_slot')}")
-                
                 action = task_details.get("action")
                 incubator_slot = task_details.get("incubator_slot")
+                microscope_id_for_transport = task_details.get("microscope_id") # Get microscope_id
                 future_to_resolve = task_details.get("future")
+
+                logger.info(f"Transport worker picked up task: {action} for slot {incubator_slot} on microscope {microscope_id_for_transport}")
+                
+                if not microscope_id_for_transport:
+                    error_msg = f"Transport task {action} for slot {incubator_slot} missing microscope_id."
+                    logger.error(error_msg)
+                    if future_to_resolve: future_to_resolve.set_exception(ValueError(error_msg))
+                    self.transport_queue.task_done()
+                    continue
+
+                target_microscope_service = self.microscope_services.get(microscope_id_for_transport)
+                if not target_microscope_service:
+                    error_msg = f"Microscope service {microscope_id_for_transport} not connected for transport operation {action}."
+                    logger.error(error_msg)
+                    if future_to_resolve: future_to_resolve.set_exception(Exception(error_msg))
+                    self.transport_queue.task_done()
+                    continue
                 
                 try:
                     if action == "load":
-                        if not self.microscope:
-                             raise Exception("Microscope not available for load operation")
-                        await self._execute_load_operation(incubator_slot)
+                        await self._execute_load_operation(incubator_slot, microscope_id_for_transport) # Pass microscope_id
                         if future_to_resolve: future_to_resolve.set_result(True)
                     elif action == "unload":
-                        if not self.microscope:
-                             raise Exception("Microscope not available for unload operation")
-                        await self._execute_unload_operation(incubator_slot)
+                        await self._execute_unload_operation(incubator_slot, microscope_id_for_transport) # Pass microscope_id
                         if future_to_resolve: future_to_resolve.set_result(True)
                     else:
                         error_msg = f"Unknown transport action: {action}"
@@ -839,12 +974,12 @@ class OrchestrationSystem:
                         if future_to_resolve: future_to_resolve.set_exception(ValueError(error_msg))
 
                 except Exception as e:
-                    logger.error(f"Transport worker failed for {action} on slot {incubator_slot}: {e}")
+                    logger.error(f"Transport worker failed for {action} on slot {incubator_slot}, microscope {microscope_id_for_transport}: {e}")
                     if future_to_resolve and not future_to_resolve.done():
                         future_to_resolve.set_exception(e)
                 
                 self.transport_queue.task_done()
-                logger.info(f"Transport task {action} for slot {incubator_slot} completed")
+                logger.info(f"Transport task {action} for slot {incubator_slot}, microscope {microscope_id_for_transport} completed")
 
             except asyncio.CancelledError:
                 logger.info("Transport worker loop cancelled.")
@@ -1106,33 +1241,40 @@ class OrchestrationSystem:
             )
             
             # Get worker status details
-            worker_status = "stopped"
+            worker_status = "stopped" # Default if not running or completed/cancelled/error
             if self._transport_worker_task is None:
                 worker_status = "not_started"
+            elif not self._transport_worker_task.done(): # Explicitly check if running
+                 worker_status = "running"
             elif self._transport_worker_task.done():
                 if self._transport_worker_task.cancelled():
                     worker_status = "cancelled"
                 elif self._transport_worker_task.exception():
                     worker_status = "error"
-                else:
-                    worker_status = "completed"
+                else: # Successfully completed its loop (should not happen for a continuous worker unless explicitly stopped)
+                    worker_status = "completed_normally" 
             
+            # Get sample on microscope flags for all configured microscopes
+            sample_on_flags_per_microscope = {}
+            for mic_id in self.configured_microscopes_info.keys():
+                sample_on_flags_per_microscope[mic_id] = self.sample_on_microscope_flags.get(mic_id, False)
+
             status_info = {
                 "queue_size": queue_size,
-                "worker_running": worker_running,
-                "worker_status": worker_status,
-                "sample_on_microscope": self.sample_on_microscope_flag,
-                "current_microscope": self.current_microscope_id,
+                "worker_running": worker_running, # This is a more direct interpretation
+                "worker_detailed_status": worker_status, # More granular status
+                "sample_on_microscope_flags": sample_on_flags_per_microscope, # Changed to flags per microscope
+                "connected_microscopes": list(self.microscope_services.keys()), # List of connected microscope IDs
                 "active_task": self.active_task_name
             }
             
             # Add worker exception info if there was an error
-            if worker_status == "error" and self._transport_worker_task:
+            if worker_status == "error" and self._transport_worker_task and self._transport_worker_task.done(): # Check done for safety
                 try:
                     exception = self._transport_worker_task.exception()
                     status_info["worker_error"] = str(exception)
-                except Exception:
-                    status_info["worker_error"] = "Unknown error"
+                except Exception: # Broad catch if .exception() itself fails or returns non-stringable
+                    status_info["worker_error"] = "Unknown error retrieving exception details"
             
             logger.debug(f"Transport queue status: {status_info}")
             return status_info

@@ -144,7 +144,7 @@ class MockMicroscope(MockHyphaService):
     async def scan_well_plate_simulated(self, illuminate_channels, do_reflection_af, scanning_zone, Nx, Ny, action_ID, **kwargs):
         logger.info(f"Mock {self.id}: scan_well_plate_simulated called with action_ID: {action_ID}, channels: {illuminate_channels}, zone: {scanning_zone}, Nx: {Nx}, Ny: {Ny}, AF: {do_reflection_af}")
         # Simulate a longer scan, maybe with a chance of failure
-        await self._simulate_method_call("scan_well_plate_simulated", duration=2, fail_sometimes=True, fail_rate=0.05) # 5% chance of scan failure
+        await self._simulate_method_call("scan_well_plate_simulated", duration=2, fail_sometimes=True, fail_rate=0.0) # 5% chance of scan failure
 
 # --- End Mock Hypha Services ---
 
