@@ -54,7 +54,7 @@ class MicroscopeVideoTrack(MediaStreamTrack):
         self.count = 0
         self.running = True
         self.start_time = None
-        self.fps = 3 # Target FPS for WebRTC stream
+        self.fps = 5 # Target FPS for WebRTC stream
         self.frame_width = 720
         self.frame_height = 720
         logger.info("MicroscopeVideoTrack initialized with local_service")
