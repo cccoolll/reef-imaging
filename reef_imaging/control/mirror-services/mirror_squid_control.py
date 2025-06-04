@@ -314,6 +314,8 @@ class MirrorMicroscopeService:
             async def on_connectionstatechange():
                 logger.info(f"WebRTC connection state changed to: {peer_connection.connectionState}")
                 if peer_connection.connectionState in ["closed", "failed", "disconnected"]:
+                    self.local_service.off_illumination()
+                    logger.info("Illumination closed")
                     if self.video_track and self.video_track.running:
                         logger.info(f"Connection state is {peer_connection.connectionState}. Stopping video track.")
                         self.video_track.stop()
@@ -331,6 +333,8 @@ class MirrorMicroscopeService:
                     return
                 
                 try:
+                    self.local_service.on_illumination()
+                    logger.info("Illumination opened")
                     self.video_track = MicroscopeVideoTrack(self.local_service)
                     peer_connection.addTrack(self.video_track)
                     logger.info("Added MicroscopeVideoTrack to peer connection")
@@ -341,6 +345,8 @@ class MirrorMicroscopeService:
                 @track.on("ended")
                 def on_ended():
                     logger.info(f"Client track {track.kind} ended")
+                    self.local_service.off_illumination()
+                    logger.info("Illumination closed")
                     if self.video_track:
                         logger.info("Stopping MicroscopeVideoTrack.")
                         self.video_track.stop()  # Now synchronous
