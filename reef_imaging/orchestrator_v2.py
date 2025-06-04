@@ -299,6 +299,16 @@ class OrchestrationSystem:
                 settings_to_write = copy.deepcopy(task_data_internal.get("_raw_settings_from_input", {}))
                 current_internal_config = task_data_internal["config"]
 
+                # Ensure all critical fields from internal config are preserved
+                # This prevents existing tasks from losing their allocated_microscope when new tasks are added
+                critical_fields = [
+                    "incubator_slot", "allocated_microscope", "imaging_zone", "Nx", "Ny", 
+                    "well_plate_type", "illumination_settings", "do_contrast_autofocus", "do_reflection_af"
+                ]
+                for field in critical_fields:
+                    if field in current_internal_config:
+                        settings_to_write[field] = current_internal_config[field]
+
                 settings_to_write["pending_time_points"] = sorted([
                     dt.strftime('%Y-%m-%dT%H:%M:%S') for dt in current_internal_config.get("pending_datetimes", [])
                 ])
