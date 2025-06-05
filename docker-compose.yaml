@@ -16,7 +16,7 @@ services:
       retries: 30
 
   hypha:
-    image: ghcr.io/amun-ai/hypha:0.20.47.post15
+    image: ghcr.io/amun-ai/hypha:0.20.54.post7
     restart: always
     networks:
       - hypha-app-engine
