@@ -286,6 +286,7 @@ class MirrorMicroscopeService:
                 "get_status": self.get_status,
                 "update_parameters_from_client": self.update_parameters_from_client,
                 "get_chatbot_url": self.get_chatbot_url,
+                "adjust_video_frame": self.adjust_video_frame,
                 # Add status functions
                 "get_task_status": self.get_task_status,
                 "get_all_task_status": self.get_all_task_status,
@@ -815,6 +816,18 @@ class MirrorMicroscopeService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get chatbot URL: {e}")
+            raise e
+
+    async def adjust_video_frame(self, min_val=0, max_val=None, context=None):
+        """Mirror function to adjust_video_frame on local service"""
+        try:
+            if self.local_service is None:
+                await self.connect_to_local_service()
+            
+            result = await self.local_service.adjust_video_frame(min_val, max_val)
+            return result
+        except Exception as e:
+            logger.error(f"Failed to adjust video frame: {e}")
             raise e
 
 if __name__ == "__main__":
