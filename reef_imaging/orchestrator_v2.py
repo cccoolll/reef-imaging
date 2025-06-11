@@ -400,17 +400,34 @@ class OrchestrationSystem:
                     logger.error(f"{service_name} service hello_world check failed: {hello_world_result}")
                     raise Exception("Service not healthy")
                 
+                # Service is healthy, log success and continue with normal interval
+                logger.debug(f"{service_name} service health check passed.")
+                
             except Exception as e:
                 logger.error(f"{service_name} service health check failed: {e}")
                 logger.info(f"Attempting to reset only the {service_type} service...")
                 
-                # Disconnect only the specific service
-                await self.disconnect_single_service(service_type, service_identifier) # Pass identifier
+                try:
+                    # Disconnect only the specific service
+                    await self.disconnect_single_service(service_type, service_identifier) # Pass identifier
+                    
+                    # Reconnect only the specific service
+                    await self.reconnect_single_service(service_type, service_identifier) # Pass identifier
+                    
+                    logger.info(f"{service_name} service reset completed. Will retry health check in 60 seconds.")
+                    
+                except Exception as reset_error:
+                    logger.error(f"Failed to reset {service_name} service: {reset_error}")
+                    logger.info(f"Will retry {service_name} service reset in 120 seconds due to reset failure.")
+                    # Longer delay when reset fails to prevent spam
+                    await asyncio.sleep(120)
+                    continue
                 
-                # Reconnect only the specific service
-                await self.reconnect_single_service(service_type, service_identifier) # Pass identifier
+                # Wait longer after a reset before checking health again
+                await asyncio.sleep(60)
+                continue
                 
-            await asyncio.sleep(30)  # Check every half minute
+            await asyncio.sleep(30)  # Check every half minute when healthy
 
     async def disconnect_single_service(self, service_type, service_id_to_disconnect=None): # MODIFIED signature
         """Disconnect a specific service and its health check."""
