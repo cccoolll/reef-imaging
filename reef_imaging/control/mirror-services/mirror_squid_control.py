@@ -84,6 +84,9 @@ class MicroscopeVideoTrack(MediaStreamTrack):
             if self.start_time is None:
                 self.start_time = time.time()
             
+            # Time the entire frame processing
+            frame_start_time = time.time()
+            
             next_frame_time = self.start_time + (self.count / self.fps)
             sleep_duration = next_frame_time - time.time()
             if sleep_duration > 0:
@@ -94,12 +97,17 @@ class MicroscopeVideoTrack(MediaStreamTrack):
                 logger.error("MicroscopeVideoTrack: local_service is None")
                 raise Exception("Local service not available")
 
-            # Get frame using the get_video_frame method with frame dimensions
+            # Time getting the video frame from local service
+            get_frame_start = time.time()
             processed_frame = await self.local_service.get_video_frame(
                 frame_width=self.frame_width,
                 frame_height=self.frame_height
             )
+            get_frame_end = time.time()
+            get_frame_latency = (get_frame_end - get_frame_start) * 1000  # Convert to ms
             
+            # Time processing the frame
+            process_start = time.time()
             current_time = time.time()
             # Use a 90kHz timebase, common for video, to provide accurate frame timing.
             # This prevents video from speeding up if frame acquisition is slow.
@@ -109,6 +117,15 @@ class MicroscopeVideoTrack(MediaStreamTrack):
             new_video_frame = VideoFrame.from_ndarray(processed_frame, format="rgb24")
             new_video_frame.pts = pts
             new_video_frame.time_base = time_base
+            process_end = time.time()
+            process_latency = (process_end - process_start) * 1000  # Convert to ms
+            
+            # Calculate total frame latency
+            frame_end_time = time.time()
+            total_frame_latency = (frame_end_time - frame_start_time) * 1000  # Convert to ms
+            
+            # Print timing information every frame (you can adjust frequency as needed)
+            print(f"Frame {self.count} timing: get_video_frame={get_frame_latency:.2f}ms, process={process_latency:.2f}ms, total={total_frame_latency:.2f}ms")
             
             if self.count % (self.fps * 5) == 0:  # Log every 5 seconds
                 duration = current_time - self.start_time
