@@ -106,6 +106,18 @@ class MicroscopeVideoTrack(MediaStreamTrack):
             get_frame_end = time.time()
             get_frame_latency = (get_frame_end - get_frame_start) * 1000  # Convert to ms
             
+            # Calculate frame data size in KB
+            if hasattr(processed_frame, 'nbytes'):
+                # For numpy arrays
+                frame_size_bytes = processed_frame.nbytes
+            else:
+                # For other data types
+                import sys
+                frame_size_bytes = sys.getsizeof(processed_frame)
+            
+            frame_size_kb = frame_size_bytes / 1024
+            print(f"Frame {self.count} data size: {frame_size_kb:.2f} KB ({frame_size_bytes} bytes)")
+            
             # Time processing the frame
             process_start = time.time()
             current_time = time.time()
