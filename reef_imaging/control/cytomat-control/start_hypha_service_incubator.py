@@ -84,7 +84,7 @@ class IncubatorService:
             "get_co2_level": "not_started",
             "get_slot_information": "not_started",
             "update_sample_location": "not_started",
-            "get_sample_location": "not_started"
+            "get_sample_location": "not_started",
         }
 
     async def check_service_health(self):
@@ -168,7 +168,7 @@ class IncubatorService:
         logger.info(f"You can also test the service via the HTTP proxy: {self.server_url}/{server.config.workspace}/services/{id}/initialize")
 
         # Start the health check task
-        asyncio.create_task(self.check_service_health())
+        #asyncio.create_task(self.check_service_health())
 
     async def setup(self):
         if not self.simulation:

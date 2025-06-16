@@ -65,7 +65,8 @@ class MirrorIncubatorService:
             "get_co2_level": "not_started",
             "get_slot_information": "not_started",
             "update_sample_location": "not_started",
-            "get_sample_location": "not_started"
+            "get_sample_location": "not_started",
+            "get_well_plate_type": "not_started"
         }
 
     async def connect_to_local_service(self):
@@ -181,6 +182,8 @@ class MirrorIncubatorService:
             # Add new location-related functions
             "update_sample_location": self.update_sample_location,
             "get_sample_location": self.get_sample_location,
+            # Add well plate type function
+            "get_well_plate_type": self.get_well_plate_type,
             # Add status functions
             "get_task_status": self.get_task_status,
             "get_all_task_status": self.get_all_task_status,
@@ -430,6 +433,23 @@ class MirrorIncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to get sample location: {e}")
+            raise e
+
+    async def get_well_plate_type(self, slot: int):
+        """Mirror function for get_well_plate_type"""
+        task_name = "get_well_plate_type"
+        self.task_status[task_name] = "started"
+        try:
+            if self.local_service is None:
+                await self.connect_to_local_service()
+            
+            result = await self.local_service.get_well_plate_type(slot)
+            self.task_status[task_name] = "finished"
+            logger.info(f"Retrieved well plate type '{result}' for slot {slot} via mirror service")
+            return result
+        except Exception as e:
+            self.task_status[task_name] = "failed"
+            logger.error(f"Failed to get well plate type for slot {slot}: {e}")
             raise e
 
 if __name__ == "__main__":
