@@ -84,7 +84,9 @@ class IncubatorService:
             "get_co2_level": "not_started",
             "get_slot_information": "not_started",
             "update_sample_location": "not_started",
-            "get_sample_location": "not_started"
+            "get_sample_location": "not_started",
+            "add_sample": "not_started",
+            "remove_sample": "not_started",
         }
 
     async def check_service_health(self):
@@ -155,6 +157,9 @@ class IncubatorService:
             # Add new location-related functions
             "update_sample_location": self.update_sample_location,
             "get_sample_location": self.get_sample_location,
+            # Add new sample management functions
+            "add_sample": self.add_sample,
+            "remove_sample": self.remove_sample,
             # Add status functions
             "get_task_status": self.get_task_status,
             "get_all_task_status": self.get_all_task_status,
@@ -168,7 +173,7 @@ class IncubatorService:
         logger.info(f"You can also test the service via the HTTP proxy: {self.server_url}/{server.config.workspace}/services/{id}/initialize")
 
         # Start the health check task
-        asyncio.create_task(self.check_service_health())
+        #asyncio.create_task(self.check_service_health())
 
     async def setup(self):
         if not self.simulation:
@@ -537,6 +542,117 @@ class IncubatorService:
         except Exception as e:
             self.task_status[task_name] = "failed"
             logger.error(f"Failed to check if incubator is busy: {e}")
+            raise e
+
+    @schema_function(skip_self=True)
+    def add_sample(self, 
+                   slot: int = Field(..., description="Slot number, range: 1-42"),
+                   name: str = Field(..., description="Name of the sample (required)"),
+                   status: str = Field("", description="Status of the sample (e.g., 'IN', 'OUT', 'Not Available')"),
+                   location: str = Field("incubator_slot", description="Current location of the sample"),
+                   date_to_incubator: str = Field("", description="Date when sample was put in incubator (ISO format)"),
+                   well_plate_type: str = Field("96", description="Type of well plate (e.g., '96', '384')")):
+        """
+        Add a new sample to the incubator's sample tracking system
+        Returns: A string message confirming the addition
+        """
+        task_name = "add_sample"
+        self.task_status[task_name] = "started"
+        try:
+            # Validate slot number
+            if not (1 <= slot <= 42):
+                self.task_status[task_name] = "failed"
+                raise ValueError(f"Invalid slot number {slot}. Must be between 1 and 42.")
+            
+            # Validate that name is not empty
+            if not name or name.strip() == "":
+                self.task_status[task_name] = "failed"
+                raise ValueError("Sample name cannot be empty.")
+            
+            # Load existing samples
+            with open(self.samples_file, 'r') as file:
+                samples = json.load(file)
+            
+            # Find the slot entry
+            slot_entry = next((sample for sample in samples if sample["incubator_slot"] == slot), None)
+            if not slot_entry:
+                self.task_status[task_name] = "failed"
+                raise ValueError(f"Slot {slot} not found in configuration.")
+            
+            # Check if slot is already occupied (has a name)
+            if slot_entry['name'] and slot_entry['name'].strip() != "":
+                self.task_status[task_name] = "failed"
+                raise ValueError(f"Slot {slot} is already occupied by: {slot_entry['name']}")
+            
+            # Update the existing slot entry with new sample information
+            slot_entry.update({
+                "name": name,
+                "status": status,
+                "location": location,
+                "date_to_incubator": date_to_incubator,
+                "well_plate_type": well_plate_type
+            })
+            
+            # Save updated samples back to file
+            with open(self.samples_file, 'w') as file:
+                json.dump(samples, file, indent=4)
+            
+            self.task_status[task_name] = "finished"
+            logger.info(f"Sample '{name}' added to slot {slot}")
+            return f"Sample '{name}' successfully added to slot {slot}."
+            
+        except Exception as e:
+            self.task_status[task_name] = "failed"
+            logger.error(f"Failed to add sample to slot {slot}: {e}")
+            raise e
+
+    @schema_function(skip_self=True)
+    def remove_sample(self, slot: int = Field(..., description="Slot number to remove sample from, range: 1-42")):
+        """
+        Remove a sample from the incubator's sample tracking system by clearing its information
+        Returns: A string message confirming the removal
+        """
+        task_name = "remove_sample"
+        self.task_status[task_name] = "started"
+        try:
+            # Load existing samples
+            with open(self.samples_file, 'r') as file:
+                samples = json.load(file)
+            
+            # Find the slot entry
+            slot_entry = next((sample for sample in samples if sample["incubator_slot"] == slot), None)
+            if not slot_entry:
+                self.task_status[task_name] = "failed"
+                raise ValueError(f"Slot {slot} not found in configuration.")
+            
+            # Check if slot actually has a sample (name is not empty)
+            if not slot_entry['name'] or slot_entry['name'].strip() == "":
+                self.task_status[task_name] = "failed"
+                raise ValueError(f"Slot {slot} is already empty.")
+            
+            # Store sample name for the return message
+            sample_name = slot_entry["name"]
+            
+            # Reset the slot entry to default/empty values
+            slot_entry.update({
+                "name": "",
+                "status": "",
+                "location": "incubator_slot",
+                "date_to_incubator": "",
+                "well_plate_type": "96"
+            })
+            
+            # Save updated samples back to file
+            with open(self.samples_file, 'w') as file:
+                json.dump(samples, file, indent=4)
+            
+            self.task_status[task_name] = "finished"
+            logger.info(f"Sample '{sample_name}' removed from slot {slot}")
+            return f"Sample '{sample_name}' successfully removed from slot {slot}."
+            
+        except Exception as e:
+            self.task_status[task_name] = "failed"
+            logger.error(f"Failed to remove sample from slot {slot}: {e}")
             raise e
 
 if __name__ == "__main__":

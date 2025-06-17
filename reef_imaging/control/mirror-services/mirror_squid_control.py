@@ -12,6 +12,9 @@ import aiohttp
 import fractions
 from av import VideoFrame
 from aiortc import MediaStreamTrack
+# Image processing imports
+import cv2
+import numpy as np
 
 dotenv.load_dotenv()  
 ENV_FILE = dotenv.find_dotenv()  
@@ -55,8 +58,8 @@ class MicroscopeVideoTrack(MediaStreamTrack):
         self.running = True
         self.start_time = None
         self.fps = 5 # Target FPS for WebRTC stream
-        self.frame_width = 720
-        self.frame_height = 720
+        self.frame_width = 640
+        self.frame_height = 640
         logger.info("MicroscopeVideoTrack initialized with local_service")
 
     def draw_crosshair(self, img, center_x, center_y, size=20, color=[255, 255, 255]):
@@ -84,28 +87,105 @@ class MicroscopeVideoTrack(MediaStreamTrack):
             if self.start_time is None:
                 self.start_time = time.time()
             
+            # Time the entire frame processing (including sleep)
+            frame_start_time = time.time()
+            
+            # Calculate and perform FPS throttling sleep
             next_frame_time = self.start_time + (self.count / self.fps)
             sleep_duration = next_frame_time - time.time()
+            sleep_start = time.time()
             if sleep_duration > 0:
                 await asyncio.sleep(sleep_duration)
+            sleep_end = time.time()
+            actual_sleep_time = (sleep_end - sleep_start) * 1000  # Convert to ms
+            
+            # Start timing actual processing after sleep
+            processing_start_time = time.time()
 
             # Check if local_service is still available
             if self.local_service is None:
                 logger.error("MicroscopeVideoTrack: local_service is None")
                 raise Exception("Local service not available")
 
-            # Get frame using the get_video_frame method with frame dimensions
-            processed_frame = await self.local_service.get_video_frame(
+            # Time getting the video frame from local service
+            get_frame_start = time.time()
+            frame_data = await self.local_service.get_video_frame(
                 frame_width=self.frame_width,
                 frame_height=self.frame_height
             )
+            get_frame_end = time.time()
+            get_frame_latency = (get_frame_end - get_frame_start) * 1000  # Convert to ms
             
+            # Handle new JPEG format returned by get_video_frame
+            if isinstance(frame_data, dict) and 'data' in frame_data:
+                # New format: dictionary with JPEG data
+                jpeg_data = frame_data['data']
+                frame_format = frame_data.get('format', 'jpeg')
+                frame_size_bytes = frame_data.get('size_bytes', len(jpeg_data))
+                compression_ratio = frame_data.get('compression_ratio', 1.0)
+                
+                print(f"Frame {self.count} compressed data: {frame_size_bytes / 1024:.2f} KB, compression ratio: {compression_ratio:.2f}")
+                
+                # Decode JPEG data to numpy array
+                decode_start = time.time()
+                if isinstance(jpeg_data, bytes):
+                    # Convert bytes to numpy array for cv2.imdecode
+                    jpeg_np = np.frombuffer(jpeg_data, dtype=np.uint8)
+                    # Decode JPEG to BGR format (OpenCV default)
+                    processed_frame_bgr = cv2.imdecode(jpeg_np, cv2.IMREAD_COLOR)
+                    if processed_frame_bgr is None:
+                        raise Exception("Failed to decode JPEG data")
+                    # Convert BGR to RGB for VideoFrame
+                    processed_frame = cv2.cvtColor(processed_frame_bgr, cv2.COLOR_BGR2RGB)
+                else:
+                    raise Exception(f"Unexpected JPEG data type: {type(jpeg_data)}")
+                decode_end = time.time()
+                decode_latency = (decode_end - decode_start) * 1000  # Convert to ms
+                print(f"Frame {self.count} decode time: {decode_latency:.2f}ms")
+            else:
+                # Fallback for old format (numpy array)
+                processed_frame = frame_data
+                if hasattr(processed_frame, 'nbytes'):
+                    frame_size_bytes = processed_frame.nbytes
+                else:
+                    import sys
+                    frame_size_bytes = sys.getsizeof(processed_frame)
+                
+                frame_size_kb = frame_size_bytes / 1024
+                print(f"Frame {self.count} raw data size: {frame_size_kb:.2f} KB ({frame_size_bytes} bytes)")
+            
+            # Time processing the frame
+            process_start = time.time()
+            current_time = time.time()
+            # Use a 90kHz timebase, common for video, to provide accurate frame timing.
+            # This prevents video from speeding up if frame acquisition is slow.
+            time_base = fractions.Fraction(1, 90000)
+            pts = int((current_time - self.start_time) * time_base.denominator)
+
             new_video_frame = VideoFrame.from_ndarray(processed_frame, format="rgb24")
-            new_video_frame.pts = self.count
-            new_video_frame.time_base = fractions.Fraction(1, self.fps)
+            new_video_frame.pts = pts
+            new_video_frame.time_base = time_base
+            process_end = time.time()
+            process_latency = (process_end - process_start) * 1000  # Convert to ms
+            
+            # Calculate processing and total latencies
+            processing_end_time = time.time()
+            processing_latency = (processing_end_time - processing_start_time) * 1000  # Convert to ms
+            total_frame_latency = (processing_end_time - frame_start_time) * 1000  # Convert to ms
+            
+            # Print timing information every frame (you can adjust frequency as needed)
+            if isinstance(frame_data, dict) and 'data' in frame_data:
+                print(f"Frame {self.count} timing: sleep={actual_sleep_time:.2f}ms, get_video_frame={get_frame_latency:.2f}ms, decode={decode_latency:.2f}ms, process={process_latency:.2f}ms, processing_total={processing_latency:.2f}ms, total_with_sleep={total_frame_latency:.2f}ms")
+            else:
+                print(f"Frame {self.count} timing: sleep={actual_sleep_time:.2f}ms, get_video_frame={get_frame_latency:.2f}ms, process={process_latency:.2f}ms, processing_total={processing_latency:.2f}ms, total_with_sleep={total_frame_latency:.2f}ms")
             
             if self.count % (self.fps * 5) == 0:  # Log every 5 seconds
-                logger.info(f"MicroscopeVideoTrack: Sent frame {self.count}")
+                duration = current_time - self.start_time
+                if duration > 0:
+                    actual_fps = (self.count + 1) / duration
+                    logger.info(f"MicroscopeVideoTrack: Sent frame {self.count}, actual FPS: {actual_fps:.2f}")
+                else:
+                    logger.info(f"MicroscopeVideoTrack: Sent frame {self.count}")
             
             self.count += 1
             return new_video_frame
@@ -128,6 +208,7 @@ class MirrorMicroscopeService:
         self.cloud_token = os.environ.get("REEF_WORKSPACE_TOKEN")
         self.cloud_service_id = "mirror-microscope-control-squid-1"
         self.cloud_server = None
+        self.cloud_service = None  # Add reference to registered cloud service
         
         # Connection to local service
         self.local_server_url = "http://reef.dyn.scilifelab.se:9527"
@@ -137,38 +218,20 @@ class MirrorMicroscopeService:
         self.local_service = None
         self.video_track = None
 
-        # Task tracking
+        # Video streaming state
+        self.is_streaming = False
+        self.webrtc_service_id = None
+
+        # Setup task tracking
         self.setup_task = None
-        self.task_status = {
-            "connect_to_local_service": "not_started",
-            "move_by_distance": "not_started",
-            "move_to_position": "not_started",
-            "get_status": "not_started",
-            "update_parameters_from_client": "not_started",
-            "one_new_frame": "not_started",
-            "snap": "not_started",
-            "open_illumination": "not_started",
-            "close_illumination": "not_started",
-            "scan_well_plate": "not_started",
-            "scan_well_plate_simulated": "not_started",
-            "set_illumination": "not_started",
-            "set_camera_exposure": "not_started",
-            "stop_scan": "not_started",
-            "home_stage": "not_started",
-            "return_stage": "not_started",
-            "move_to_loading_position": "not_started",
-            "auto_focus": "not_started",
-            "do_laser_autofocus": "not_started",
-            "set_laser_reference": "not_started",
-            "navigate_to_well": "not_started",
-            "get_chatbot_url": "not_started"
-        }
+        
+        # Store dynamically created mirror methods
+        self.mirrored_methods = {}
 
     async def connect_to_local_service(self):
         """Connect to the local microscope service"""
-        task_name = "connect_to_local_service"
-        self.task_status[task_name] = "started"
         try:
+            logger.info(f"Connecting to local service at {self.local_server_url}")
             self.local_server = await connect_to_server({
                 "server_url": self.local_server_url, 
                 "token": self.local_token,
@@ -177,13 +240,90 @@ class MirrorMicroscopeService:
             
             # Connect to the local service
             self.local_service = await self.local_server.get_service(self.local_service_id)
-            logger.info(f"Connected to local service {self.local_service_id}")
-            self.task_status[task_name] = "finished"
+            logger.info(f"Successfully connected to local service {self.local_service_id}")
             return True
         except Exception as e:
-            self.task_status[task_name] = "failed"
             logger.error(f"Failed to connect to local service: {e}")
+            self.local_service = None
+            self.local_server = None
             return False
+
+    async def cleanup_cloud_service(self):
+        """Clean up the cloud service registration"""
+        try:
+            if self.cloud_service:
+                logger.info(f"Unregistering cloud service {self.cloud_service_id}")
+                # Try to unregister the service
+                try:
+                    await self.cloud_server.unregister_service(self.cloud_service_id)
+                    logger.info(f"Successfully unregistered cloud service {self.cloud_service_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to unregister cloud service {self.cloud_service_id}: {e}")
+                
+                self.cloud_service = None
+            
+            # Clear mirrored methods
+            self.mirrored_methods.clear()
+            logger.info("Cleared mirrored methods")
+            
+        except Exception as e:
+            logger.error(f"Error during cloud service cleanup: {e}")
+
+    def _create_mirror_method(self, method_name, local_method):
+        """Create a mirror method that forwards calls to the local service"""
+        async def mirror_method(*args, **kwargs):
+            try:
+                if self.local_service is None:
+                    logger.warning(f"Local service is None when calling {method_name}, attempting to reconnect")
+                    success = await self.connect_to_local_service()
+                    if not success or self.local_service is None:
+                        raise Exception("Failed to connect to local service")
+                
+                # Forward the call to the local service
+                result = await local_method(*args, **kwargs)
+                return result
+            except Exception as e:
+                logger.error(f"Failed to call {method_name}: {e}")
+                raise e
+        
+        return mirror_method
+
+    def _get_mirrored_methods(self):
+        """Dynamically create mirror methods for all callable methods in local_service"""
+        if self.local_service is None:
+            logger.warning("Cannot create mirror methods: local_service is None")
+            return {}
+        
+        logger.info(f"Creating mirror methods for local service {self.local_service_id}")
+        logger.info(f"Local service type: {type(self.local_service)}")
+        logger.info(f"Local service attributes: {list(dir(self.local_service))}")
+        
+        mirrored_methods = {}
+        
+        # Methods to exclude from mirroring (these are handled specially)
+        excluded_methods = {
+            'name', 'id', 'config', 'type',  # Service metadata
+            '__class__', '__doc__', '__dict__', '__module__',  # Python internals
+        }
+        
+        # Get all attributes from the local service
+        for attr_name in dir(self.local_service):
+            if attr_name.startswith('_') or attr_name in excluded_methods:
+                logger.debug(f"Skipping attribute: {attr_name} (excluded or private)")
+                continue
+                
+            attr = getattr(self.local_service, attr_name)
+            
+            # Check if it's callable (a method)
+            if callable(attr):
+                logger.info(f"Creating mirror method for: {attr_name}")
+                mirrored_methods[attr_name] = self._create_mirror_method(attr_name, attr)
+            else:
+                logger.debug(f"Skipping non-callable attribute: {attr_name}")
+        
+        logger.info(f"Total mirrored methods created: {len(mirrored_methods)}")
+        logger.info(f"Mirrored method names: {list(mirrored_methods.keys())}")
+        return mirrored_methods
 
     async def check_service_health(self):
         """Check if the service is healthy and rerun setup if needed"""
@@ -191,22 +331,26 @@ class MirrorMicroscopeService:
         while True:
             try:
                 # Try to get the service status
-                if self.cloud_service_id:
-                    service = await self.cloud_server.get_service(self.cloud_service_id)
-                    # Try a simple operation to verify service is working
-                    hello_world_result = await asyncio.wait_for(service.hello_world(), timeout=10)
-                    if hello_world_result != "Hello world":
-                        logger.error(f"Service health check failed: {hello_world_result}")
-                        raise Exception("Service not healthy")
+                if self.cloud_service_id and self.cloud_server:
+                    try:
+                        service = await self.cloud_server.get_service(self.cloud_service_id)
+                        # Try a simple operation to verify service is working
+                        hello_world_result = await asyncio.wait_for(service.hello_world(), timeout=10)
+                        if hello_world_result != "Hello world":
+                            logger.error(f"Cloud service health check failed: {hello_world_result}")
+                            raise Exception("Cloud service not healthy")
+                    except Exception as e:
+                        logger.error(f"Cloud service health check failed: {e}")
+                        raise Exception(f"Cloud service not healthy: {e}")
                 else:
-                    logger.info("Service ID not set, waiting for service registration")
+                    logger.info("Cloud service ID or server not set, waiting for service registration")
                     
                 # Always check local service regardless of whether it's None
                 try:
                     if self.local_service is None:
                         logger.info("Local service connection lost, attempting to reconnect")
-                        await self.connect_to_local_service()
-                        if self.local_service is None:
+                        success = await self.connect_to_local_service()
+                        if not success or self.local_service is None:
                             raise Exception("Failed to connect to local service")
                     
                     #logger.info("Checking local service health...")
@@ -224,9 +368,14 @@ class MirrorMicroscopeService:
                     raise Exception(f"Local service not healthy: {e}")
             except Exception as e:
                 logger.error(f"Service health check failed: {e}")
-                logger.info("Attempting to rerun setup...")
-                # Clean up Hypha service-related connections and variables
+                logger.info("Attempting to clean up and rerun setup...")
+                
+                # Clean up everything properly
                 try:
+                    # First, clean up the cloud service
+                    await self.cleanup_cloud_service()
+                    
+                    # Then disconnect from servers
                     if self.cloud_server:
                         await self.cloud_server.disconnect()
                     if self.local_server:
@@ -234,76 +383,80 @@ class MirrorMicroscopeService:
                     if self.setup_task:
                         self.setup_task.cancel()  # Cancel the previous setup task
                 except Exception as disconnect_error:
-                    logger.error(f"Error during disconnect: {disconnect_error}")
+                    logger.error(f"Error during cleanup: {disconnect_error}")
                 finally:
                     self.cloud_server = None
+                    self.cloud_service = None
                     self.local_server = None
                     self.local_service = None
+                    self.mirrored_methods.clear()
 
-                while True:
+                # Retry setup with exponential backoff
+                retry_count = 0
+                max_retries = 50
+                base_delay = 10
+                
+                while retry_count < max_retries:
                     try:
+                        delay = base_delay * (2 ** min(retry_count, 5))  # Cap at 32 * base_delay
+                        logger.info(f"Retrying setup in {delay} seconds (attempt {retry_count + 1}/{max_retries})")
+                        await asyncio.sleep(delay)
+                        
                         # Rerun the setup method
                         self.setup_task = asyncio.create_task(self.setup())
                         await self.setup_task
-                        logger.info("Setup successful")
+                        logger.info("Setup successful after reconnection")
                         break  # Exit the loop if setup is successful
                     except Exception as setup_error:
-                        logger.error(f"Failed to rerun setup: {setup_error}")
-                        await asyncio.sleep(30)  # Wait before retrying
+                        retry_count += 1
+                        logger.error(f"Failed to rerun setup (attempt {retry_count}/{max_retries}): {setup_error}")
+                        if retry_count >= max_retries:
+                            logger.error("Max retries reached, giving up on setup")
+                            await asyncio.sleep(60)  # Wait longer before next health check cycle
+                            break
             
             await asyncio.sleep(10)  # Check more frequently (was 30)
 
     async def start_hypha_service(self, server):
+        """Start the Hypha service with dynamically mirrored methods"""
         self.cloud_server = server
-        svc = await server.register_service(
-            {
-                "name": "Mirror Microscope Control Service",
-                "id": self.cloud_service_id,
-                "config": {
-                    "visibility": "public",
-                    "run_in_executor": True
-                },
-                "type": "echo",
-                "hello_world": self.hello_world,
-                "move_by_distance": self.move_by_distance,
-                "snap": self.snap,
-                "one_new_frame": self.one_new_frame,
-                "off_illumination": self.close_illumination,
-                "on_illumination": self.open_illumination,
-                "set_illumination": self.set_illumination,
-                "set_camera_exposure": self.set_camera_exposure,
-                "scan_well_plate": self.scan_well_plate,
-                "scan_well_plate_simulated": self.scan_well_plate_simulated,
-                "stop_scan": self.stop_scan,
-                "home_stage": self.home_stage,
-                "return_stage": self.return_stage,
-                "navigate_to_well": self.navigate_to_well,
-                "move_to_position": self.move_to_position,
-                "move_to_loading_position": self.move_to_loading_position,
-                "auto_focus": self.auto_focus,
-                "do_laser_autofocus": self.do_laser_autofocus,
-                "set_laser_reference": self.set_laser_reference,
-                "get_status": self.get_status,
-                "update_parameters_from_client": self.update_parameters_from_client,
-                "get_chatbot_url": self.get_chatbot_url,
-                "adjust_video_frame": self.adjust_video_frame,
-                # Add status functions
-                "get_task_status": self.get_task_status,
-                "get_all_task_status": self.get_all_task_status,
-                "reset_task_status": self.reset_task_status,
-                "reset_all_task_status": self.reset_all_task_status
+        
+        # Ensure we have a connection to the local service
+        if self.local_service is None:
+            logger.info("Local service not connected, attempting to connect before creating mirror methods")
+            success = await self.connect_to_local_service()
+            if not success:
+                raise Exception("Cannot start Hypha service without local service connection")
+        
+        # Get the mirrored methods from the current local service
+        self.mirrored_methods = self._get_mirrored_methods()
+        
+        # Base service configuration with core methods
+        service_config = {
+            "name": "Mirror Microscope Control Service",
+            "id": self.cloud_service_id,
+            "config": {
+                "visibility": "public",
+                "run_in_executor": True
             },
-        )
+            "type": "echo",
+            "hello_world": self.hello_world,
+        }
+        
+        # Add all mirrored methods to the service configuration
+        service_config.update(self.mirrored_methods)
+        
+        # Register the service
+        self.cloud_service = await server.register_service(service_config)
 
         logger.info(
-            f"Mirror service (service_id={self.cloud_service_id}) started successfully, available at {self.cloud_server_url}/services"
+            f"Mirror service (service_id={self.cloud_service_id}) started successfully with {len(self.mirrored_methods)} mirrored methods, available at {self.cloud_server_url}/services"
         )
 
-        logger.info(f'You can use this service using the service id: {svc.id}')
-        id = svc.id.split(":")[1]
+        logger.info(f'You can use this service using the service id: {self.cloud_service.id}')
+        id = self.cloud_service.id.split(":")[1]
 
         logger.info(f"You can also test the service via the HTTP proxy: {self.cloud_server_url}/{server.config.workspace}/services/{id}")
-
 
     async def start_webrtc_service(self, server, webrtc_service_id_arg):
         self.webrtc_service_id = webrtc_service_id_arg 
@@ -392,371 +545,39 @@ class MirrorMicroscopeService:
             "ping_interval": None
         })
         
-        # Start the cloud service
+        # Connect to local service first (needed to get available methods)
+        logger.info("Connecting to local service before setting up mirror service")
+        success = await self.connect_to_local_service()
+        if not success or self.local_service is None:
+            raise Exception("Failed to connect to local service during setup")
+        
+        # Verify local service is working
+        try:
+            hello_result = await asyncio.wait_for(self.local_service.hello_world(), timeout=10)
+            if hello_result != "Hello world":
+                raise Exception(f"Local service verification failed: {hello_result}")
+            logger.info("Local service connection verified successfully")
+        except Exception as e:
+            logger.error(f"Local service verification failed: {e}")
+            raise Exception(f"Local service not responding properly: {e}")
+        
+        # Small delay to ensure local service is fully ready
+        await asyncio.sleep(1)
+        
+        # Start the cloud service with mirrored methods
+        logger.info("Starting cloud service with mirrored methods")
         await self.start_hypha_service(server)
         
-        # Connect to local service
-        await self.connect_to_local_service()
-        time.sleep(1)
         # Start the WebRTC service
         self.webrtc_service_id = f"video-track-{self.local_service_id}"
         logger.info(f"Starting WebRTC service with id: {self.webrtc_service_id}")
         await self.start_webrtc_service(server, self.webrtc_service_id)
+        
+        logger.info("Setup completed successfully")
 
     def hello_world(self):
-        """Hello world"""
+        """Hello world - core service method"""
         return "Hello world"
-
-    def get_task_status(self, task_name):
-        """Get the status of a specific task"""
-        return self.task_status.get(task_name, "unknown")
-    
-    def get_all_task_status(self):
-        """Get the status of all tasks"""
-        return self.task_status
-
-    def reset_task_status(self, task_name):
-        """Reset the status of a specific task"""
-        if task_name in self.task_status:
-            self.task_status[task_name] = "not_started"
-    
-    def reset_all_task_status(self):
-        """Reset the status of all tasks"""
-        for task_name in self.task_status:
-            self.task_status[task_name] = "not_started"
-
-    # Mirrored functions that call the local service
-    async def move_by_distance(self, x=0.0, y=0.0, z=0.0, context=None):
-        """Mirror function to move_by_distance on local service"""
-        task_name = "move_by_distance"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.move_by_distance(x, y, z)
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to move by distance: {e}")
-            raise e
-
-    async def move_to_position(self, x=None, y=None, z=None, context=None):
-        """Mirror function to move_to_position on local service"""
-        task_name = "move_to_position"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.move_to_position(x, y, z)
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to move to position: {e}")
-            raise e
-
-    async def get_status(self, context=None):
-        """Mirror function to get_status on local service"""
-        task_name = "get_status"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.get_status()
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to get status: {e}")
-            raise e
-
-    async def update_parameters_from_client(self, new_parameters=None, context=None):
-        """Mirror function to update_parameters_from_client on local service"""
-        task_name = "update_parameters_from_client"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.update_parameters_from_client(new_parameters)
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to update parameters: {e}")
-            raise e
-
-    async def one_new_frame(self, context=None):
-        """Mirror function to one_new_frame on local service"""
-        task_name = "one_new_frame"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.one_new_frame()
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to get new frame: {e}")
-            raise e
-
-    async def snap(self, exposure_time=100, channel=0, intensity=50, context=None):
-        """Mirror function to snap on local service"""
-        task_name = "snap"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.snap(exposure_time, channel, intensity)
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to snap image: {e}")
-            raise e
-
-    async def open_illumination(self, context=None):
-        """Mirror function to open_illumination on local service"""
-        task_name = "open_illumination"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.on_illumination()
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to open illumination: {e}")
-            raise e
-
-    async def close_illumination(self, context=None):
-        """Mirror function to close_illumination on local service"""
-        task_name = "close_illumination"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.off_illumination()
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to close illumination: {e}")
-            raise e
-
-    async def scan_well_plate(self, well_plate_type="96", illumination_settings=None, do_contrast_autofocus=False, do_reflection_af=True, scanning_zone=None, Nx=3, Ny=3, action_ID='testPlateScan', context=None):
-        """Mirror function to scan_well_plate on local service"""
-        task_name = "scan_well_plate"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            if illumination_settings is None:
-                illumination_settings = [
-                    {'channel': 'BF LED matrix full', 'intensity': 28.0, 'exposure_time': 20.0},
-                    {'channel': 'Fluorescence 488 nm Ex', 'intensity': 27.0, 'exposure_time': 60.0},
-                    {'channel': 'Fluorescence 561 nm Ex', 'intensity': 98.0, 'exposure_time': 100.0}
-                ]
-            
-            if scanning_zone is None:
-                scanning_zone = [(0,0),(0,0)]
-                
-            result = await self.local_service.scan_well_plate(
-                well_plate_type, illumination_settings, do_contrast_autofocus, 
-                do_reflection_af, scanning_zone, Nx, Ny, action_ID
-            )
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to scan well plate: {e}")
-            raise e
-
-    async def scan_well_plate_simulated(self, context=None):
-        """Mirror function to scan_well_plate_simulated on local service"""
-        task_name = "scan_well_plate_simulated"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.scan_well_plate_simulated()
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to scan well plate: {e}")
-            raise e
-
-    async def set_illumination(self, channel=0, intensity=50, context=None):
-        """Mirror function to set_illumination on local service"""
-        task_name = "set_illumination"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.set_illumination(channel, intensity)
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to set illumination: {e}")
-            raise e
-
-    async def set_camera_exposure(self, channel=0, exposure_time=100, context=None):
-        """Mirror function to set_camera_exposure on local service"""
-        task_name = "set_camera_exposure"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.set_camera_exposure(channel, exposure_time)
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to set camera exposure: {e}")
-            raise e
-
-    async def stop_scan(self, context=None):
-        """Mirror function to stop_scan on local service"""
-        task_name = "stop_scan"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.stop_scan()
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to stop scan: {e}")
-            raise e
-
-    async def home_stage(self, context=None):
-        """Mirror function to home_stage on local service"""
-        task_name = "home_stage"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.home_stage()
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to home stage: {e}")
-            raise e
-
-    async def return_stage(self, context=None):
-        """Mirror function to return_stage on local service"""
-        task_name = "return_stage"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.return_stage()
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to return stage: {e}")
-            raise e
-
-    async def move_to_loading_position(self, context=None):
-        """Mirror function to move_to_loading_position on local service"""
-        task_name = "move_to_loading_position"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.move_to_loading_position()
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to move to loading position: {e}")
-            raise e
-
-    async def auto_focus(self, context=None):
-        """Mirror function to auto_focus on local service"""
-        task_name = "auto_focus"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.auto_focus()
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to auto focus: {e}")
-            raise e
-
-    async def do_laser_autofocus(self, context=None):
-        """Mirror function to do_laser_autofocus on local service"""
-        task_name = "do_laser_autofocus"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.do_laser_autofocus()
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to do laser autofocus: {e}")
-            raise e
-    async def set_laser_reference(self, context=None):
-        """Mirror function to set_laser_reference on local service"""
-        task_name = "set_laser_reference"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.set_laser_reference()
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to set laser reference: {e}")
-            raise e
-
-    async def navigate_to_well(self, row='A', col=1, wellplate_type='96', context=None):
-        """Mirror function to navigate_to_well on local service"""
-        task_name = "navigate_to_well"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.navigate_to_well(row, col, wellplate_type)
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to navigate to well: {e}")
-            raise e
 
     async def fetch_ice_servers(self):
         """Fetch ICE servers from the coturn service"""
@@ -801,33 +622,29 @@ class MirrorMicroscopeService:
         except Exception as e:
             logger.error(f"Failed to stop video streaming: {e}")
             raise e
-        
-    async def get_chatbot_url(self, context=None):
-        """Mirror function to get_chatbot_url on local service"""
-        task_name = "get_chatbot_url"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.get_chatbot_url()
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to get chatbot URL: {e}")
-            raise e
 
-    async def adjust_video_frame(self, min_val=0, max_val=None, context=None):
-        """Mirror function to adjust_video_frame on local service"""
+    async def set_video_fps(self, fps=5, context=None):
+        """Special method to set video FPS for both WebRTC and local service"""
         try:
             if self.local_service is None:
                 await self.connect_to_local_service()
             
-            result = await self.local_service.adjust_video_frame(min_val, max_val)
-            return result
+            # Update WebRTC video track FPS if active
+            if self.video_track and self.video_track.running:
+                old_webrtc_fps = self.video_track.fps
+                self.video_track.fps = fps
+                logger.info(f"WebRTC video track FPS updated from {old_webrtc_fps} to {fps}")
+            
+            # Forward call to local service if it has this method
+            if hasattr(self.local_service, 'set_video_fps'):
+                result = await self.local_service.set_video_fps(fps)
+                return result
+            else:
+                logger.warning("Local service does not have set_video_fps method")
+                return {"status": "webrtc_only", "message": f"WebRTC FPS set to {fps}, local service method not available"}
+            
         except Exception as e:
-            logger.error(f"Failed to adjust video frame: {e}")
+            logger.error(f"Failed to set video FPS: {e}")
             raise e
 
 if __name__ == "__main__":

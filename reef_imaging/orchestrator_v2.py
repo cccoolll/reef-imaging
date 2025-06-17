@@ -156,7 +156,6 @@ class OrchestrationSystem:
                     "imaging_zone": settings["imaging_zone"],
                     "Nx": settings["Nx"],
                     "Ny": settings["Ny"],
-                    "well_plate_type": settings["well_plate_type"],
                     "illumination_settings": settings["illumination_settings"],
                     "do_contrast_autofocus": settings["do_contrast_autofocus"],
                     "do_reflection_af": settings["do_reflection_af"],
@@ -214,6 +213,7 @@ class OrchestrationSystem:
             else: # Task already exists, update it
                 existing_task_data = self.tasks[task_name]
                 # Check for config changes that might warrant a state reset
+                # Note: well_plate_type is not checked here as it's now read from incubator service
                 config_changed_significantly = (
                     existing_task_data["config"]["pending_datetimes"] != current_settings_config["pending_datetimes"] or
                     existing_task_data["config"]["imaged_datetimes"] != current_settings_config["imaged_datetimes"] or
@@ -301,9 +301,10 @@ class OrchestrationSystem:
 
                 # Ensure all critical fields from internal config are preserved
                 # This prevents existing tasks from losing their allocated_microscope when new tasks are added
+                # Note: well_plate_type is now read from incubator service, not stored in config
                 critical_fields = [
                     "incubator_slot", "allocated_microscope", "imaging_zone", "Nx", "Ny", 
-                    "well_plate_type", "illumination_settings", "do_contrast_autofocus", "do_reflection_af"
+                    "illumination_settings", "do_contrast_autofocus", "do_reflection_af"
                 ]
                 for field in critical_fields:
                     if field in current_internal_config:
@@ -400,17 +401,34 @@ class OrchestrationSystem:
                     logger.error(f"{service_name} service hello_world check failed: {hello_world_result}")
                     raise Exception("Service not healthy")
                 
+                # Service is healthy, log success and continue with normal interval
+                logger.debug(f"{service_name} service health check passed.")
+                
             except Exception as e:
                 logger.error(f"{service_name} service health check failed: {e}")
                 logger.info(f"Attempting to reset only the {service_type} service...")
                 
-                # Disconnect only the specific service
-                await self.disconnect_single_service(service_type, service_identifier) # Pass identifier
+                try:
+                    # Disconnect only the specific service
+                    await self.disconnect_single_service(service_type, service_identifier) # Pass identifier
+                    
+                    # Reconnect only the specific service
+                    await self.reconnect_single_service(service_type, service_identifier) # Pass identifier
+                    
+                    logger.info(f"{service_name} service reset completed. Will retry health check in 60 seconds.")
+                    
+                except Exception as reset_error:
+                    logger.error(f"Failed to reset {service_name} service: {reset_error}")
+                    logger.info(f"Will retry {service_name} service reset in 120 seconds due to reset failure.")
+                    # Longer delay when reset fails to prevent spam
+                    await asyncio.sleep(120)
+                    continue
                 
-                # Reconnect only the specific service
-                await self.reconnect_single_service(service_type, service_identifier) # Pass identifier
+                # Wait longer after a reset before checking health again
+                await asyncio.sleep(60)
+                continue
                 
-            await asyncio.sleep(30)  # Check every half minute
+            await asyncio.sleep(30)  # Check every half minute when healthy
 
     async def disconnect_single_service(self, service_type, service_id_to_disconnect=None): # MODIFIED signature
         """Disconnect a specific service and its health check."""
@@ -776,9 +794,17 @@ class OrchestrationSystem:
             # Pass allocated_microscope_id to transport operations
             await self._execute_load_operation(incubator_slot=incubator_slot, microscope_id_str=allocated_microscope_id)
             
-            # Scan with the provided microscope_service
+            # Get well plate type from incubator service (read-only from incubator)
+            try:
+                well_plate_type = await self.incubator.get_well_plate_type(incubator_slot)
+                logger.info(f"Retrieved well plate type '{well_plate_type}' for slot {incubator_slot} from incubator service.")
+            except Exception as e:
+                logger.error(f"Failed to get well plate type from incubator for slot {incubator_slot}: {e}. Using default '96'.")
+                well_plate_type = "96"  # Default fallback
+            
+            # Scan with the provided microscope_service using well plate type from incubator
             await microscope_service.scan_well_plate(
-                well_plate_type=task_config["well_plate_type"],
+                well_plate_type=well_plate_type,
                 illumination_settings=task_config["illumination_settings"],
                 do_contrast_autofocus=task_config["do_contrast_autofocus"],
                 do_reflection_af=task_config["do_reflection_af"],
@@ -1062,7 +1088,7 @@ class OrchestrationSystem:
         task_name = task_definition["name"]
         new_settings = task_definition["settings"]
 
-        required_settings = ["incubator_slot", "allocated_microscope", "pending_time_points", "imaging_zone", "Nx", "Ny", "well_plate_type", "illumination_settings", "do_contrast_autofocus", "do_reflection_af"]
+        required_settings = ["incubator_slot", "allocated_microscope", "pending_time_points", "imaging_zone", "Nx", "Ny", "illumination_settings", "do_contrast_autofocus", "do_reflection_af"]
         for req_field in required_settings:
             if req_field not in new_settings:
                 msg = f"Missing required field '{req_field}' in settings for task '{task_name}'."
