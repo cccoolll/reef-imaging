@@ -50,29 +50,14 @@ class MirrorIncubatorService:
         self.local_server = None
         self.local_service = None
 
-        # Task tracking
+        # Setup task tracking
         self.setup_task = None
-        self.task_status = {
-            "connect_to_local_service": "not_started",
-            "initialize": "not_started",
-            "put_sample_from_transfer_station_to_slot": "not_started",
-            "get_sample_from_slot_to_transfer_station": "not_started",
-            "get_status": "not_started",
-            "is_busy": "not_started",
-            "reset_error_status": "not_started",
-            "get_sample_status": "not_started",
-            "get_temperature": "not_started",
-            "get_co2_level": "not_started",
-            "get_slot_information": "not_started",
-            "update_sample_location": "not_started",
-            "get_sample_location": "not_started",
-            "get_well_plate_type": "not_started"
-        }
+        
+        # Store dynamically created mirror methods
+        self.mirrored_methods = {}
 
     async def connect_to_local_service(self):
         """Connect to the local incubator service"""
-        task_name = "connect_to_local_service"
-        self.task_status[task_name] = "started"
         try:
             self.local_server = await connect_to_server({
                 "server_url": self.local_server_url, 
@@ -83,12 +68,55 @@ class MirrorIncubatorService:
             # Connect to the local service
             self.local_service = await self.local_server.get_service(self.local_service_id)
             logger.info(f"Connected to local service {self.local_service_id}")
-            self.task_status[task_name] = "finished"
             return True
         except Exception as e:
-            self.task_status[task_name] = "failed"
             logger.error(f"Failed to connect to local service: {e}")
             return False
+
+    def _create_mirror_method(self, method_name, local_method):
+        """Create a mirror method that forwards calls to the local service"""
+        async def mirror_method(*args, **kwargs):
+            try:
+                if self.local_service is None:
+                    await self.connect_to_local_service()
+                
+                # Forward the call to the local service
+                result = await local_method(*args, **kwargs)
+                return result
+            except Exception as e:
+                logger.error(f"Failed to call {method_name}: {e}")
+                raise e
+        
+        return mirror_method
+
+    def _get_mirrored_methods(self):
+        """Dynamically create mirror methods for all callable methods in local_service"""
+        if self.local_service is None:
+            logger.warning("Cannot create mirror methods: local_service is None")
+            return {}
+        
+        mirrored_methods = {}
+        
+        # Methods to exclude from mirroring (these are handled specially)
+        excluded_methods = {
+            'name', 'id', 'config', 'type',  # Service metadata
+            '__class__', '__doc__', '__dict__', '__module__',  # Python internals
+        }
+        
+        # Get all attributes from the local service
+        for attr_name in dir(self.local_service):
+            if attr_name.startswith('_') or attr_name in excluded_methods:
+                continue
+                
+            attr = getattr(self.local_service, attr_name)
+            
+            # Check if it's callable (a method)
+            if callable(attr):
+                logger.info(f"Creating incubator mirror method for: {attr_name}")
+                mirrored_methods[attr_name] = self._create_mirror_method(attr_name, attr)
+        
+        logger.info(f"Incubator service: Created {len(mirrored_methods)} mirror methods: {list(mirrored_methods.keys())}")
+        return mirrored_methods
 
     async def check_service_health(self):
         """Check if the service is healthy and rerun setup if needed"""
@@ -160,8 +188,14 @@ class MirrorIncubatorService:
             await asyncio.sleep(10)  # Check more frequently (was 30)
 
     async def start_hypha_service(self, server):
+        """Start the Hypha service with dynamically mirrored methods"""
         self.cloud_server = server
-        svc = await server.register_service({
+        
+        # First, get the mirrored methods
+        self.mirrored_methods = self._get_mirrored_methods()
+        
+        # Base service configuration with core methods
+        service_config = {
             "name": "Mirror Incubator Control",
             "id": self.cloud_service_id,
             "config": {
@@ -169,38 +203,22 @@ class MirrorIncubatorService:
                 "run_in_executor": True
             },
             "hello_world": self.hello_world,
-            "initialize": self.initialize,
-            "put_sample_from_transfer_station_to_slot": self.put_sample_from_transfer_station_to_slot,
-            "get_sample_from_slot_to_transfer_station": self.get_sample_from_slot_to_transfer_station,
-            "get_status": self.get_status,
-            "is_busy": self.is_busy,
-            "reset_error_status": self.reset_error_status,
-            "get_sample_status": self.get_sample_status,
-            "get_temperature": self.get_temperature,
-            "get_co2_level": self.get_co2_level,
-            "get_slot_information": self.get_slot_information,
-            # Add new location-related functions
-            "update_sample_location": self.update_sample_location,
-            "get_sample_location": self.get_sample_location,
-            # Add well plate type function
-            "get_well_plate_type": self.get_well_plate_type,
-            # Add status functions
-            "get_task_status": self.get_task_status,
-            "get_all_task_status": self.get_all_task_status,
-            "reset_task_status": self.reset_task_status,
-            "reset_all_task_status": self.reset_all_task_status
-        })
+        }
+        
+        # Add all mirrored methods to the service configuration
+        service_config.update(self.mirrored_methods)
+        
+        # Register the service
+        svc = await server.register_service(service_config)
 
         logger.info(
-            f"Mirror service (service_id={self.cloud_service_id}) started successfully, available at {self.cloud_server_url}/services"
+            f"Mirror incubator service (service_id={self.cloud_service_id}) started successfully with {len(self.mirrored_methods)} mirrored methods, available at {self.cloud_server_url}/services"
         )
 
         logger.info(f'You can use this service using the service id: {svc.id}')
         id = svc.id.split(":")[1]
 
         logger.info(f"You can also test the service via the HTTP proxy: {self.cloud_server_url}/{server.config.workspace}/services/{id}")
-
-
 
     async def setup(self):
         # Connect to cloud workspace
@@ -212,245 +230,15 @@ class MirrorIncubatorService:
             "ping_interval": None
         })
         
-        # Start the cloud service
-        await self.start_hypha_service(server)
-        
-        # Connect to local service
+        # Connect to local service first (needed to get available methods)
         await self.connect_to_local_service()
+        
+        # Start the cloud service with mirrored methods
+        await self.start_hypha_service(server)
 
     def hello_world(self):
-        """Hello world"""
+        """Hello world - core service method"""
         return "Hello world"
-
-    def get_task_status(self, task_name):
-        """Get the status of a specific task"""
-        return self.task_status.get(task_name, "unknown")
-    
-    def get_all_task_status(self):
-        """Get the status of all tasks"""
-        return self.task_status
-
-    def reset_task_status(self, task_name):
-        """Reset the status of a specific task"""
-        if task_name in self.task_status:
-            self.task_status[task_name] = "not_started"
-    
-    def reset_all_task_status(self):
-        """Reset the status of all tasks"""
-        for task_name in self.task_status:
-            self.task_status[task_name] = "not_started"
-
-    # Mirrored functions that call the local service
-    async def initialize(self):
-        """Mirror function for initialize"""
-        task_name = "initialize"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.initialize()
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to initialize: {e}")
-            raise e
-
-    async def put_sample_from_transfer_station_to_slot(self, slot: int = 5):
-        """Mirror function for put_sample_from_transfer_station_to_slot"""
-        task_name = "put_sample_from_transfer_station_to_slot"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.put_sample_from_transfer_station_to_slot(slot)
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to put sample from transfer station to slot: {e}")
-            raise e
-
-    async def get_sample_from_slot_to_transfer_station(self, slot: int = 5):
-        """Mirror function for get_sample_from_slot_to_transfer_station"""
-        task_name = "get_sample_from_slot_to_transfer_station"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.get_sample_from_slot_to_transfer_station(slot)
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to get sample from slot to transfer station: {e}")
-            raise e
-
-    async def get_status(self):
-        """Mirror function for get_status"""
-        task_name = "get_status"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.get_status()
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to get status: {e}")
-            raise e
-
-    async def is_busy(self):
-        """Mirror function for is_busy"""
-        task_name = "is_busy"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.is_busy()
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to check if busy: {e}")
-            raise e
-
-    async def reset_error_status(self):
-        """Mirror function for reset_error_status"""
-        task_name = "reset_error_status"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.reset_error_status()
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to reset error status: {e}")
-            raise e
-
-    async def get_sample_status(self, slot: Optional[int] = None):
-        """Mirror function for get_sample_status"""
-        task_name = "get_sample_status"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.get_sample_status(slot)
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to get sample status: {e}")
-            raise e
-
-    async def get_temperature(self):
-        """Mirror function for get_temperature"""
-        task_name = "get_temperature"
-        self.task_status[task_name] = "started"
-        try:
-            # if self.local_service is None:
-            #     await self.connect_to_local_service()
-            
-            # result = await self.local_service.get_temperature()
-            result = 37.0
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to get temperature: {e}")
-            raise e
-
-    async def get_co2_level(self):
-        """Mirror function for get_co2_level"""
-        task_name = "get_co2_level"
-        self.task_status[task_name] = "started"
-        try:
-            # if self.local_service is None:
-            #     await self.connect_to_local_service()
-            
-            # result = await self.local_service.get_co2_level()
-            result = 4.9
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to get CO2 level: {e}")
-            raise e
-
-    async def get_slot_information(self, slot: Optional[int] = None):
-        """Mirror function for get_slot_information"""
-        task_name = "get_slot_information"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.get_slot_information(slot)
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to get slot information: {e}")
-            raise e
-
-    async def update_sample_location(self, slot: int = 5, location: str = "incubator_slot"):
-        """Mirror function for update_sample_location"""
-        task_name = "update_sample_location"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.update_sample_location(slot, location)
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to update sample location: {e}")
-            raise e
-    
-    async def get_sample_location(self, slot: Optional[int] = None):
-        """Mirror function for get_sample_location"""
-        task_name = "get_sample_location"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.get_sample_location(slot)
-            self.task_status[task_name] = "finished"
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to get sample location: {e}")
-            raise e
-
-    async def get_well_plate_type(self, slot: int):
-        """Mirror function for get_well_plate_type"""
-        task_name = "get_well_plate_type"
-        self.task_status[task_name] = "started"
-        try:
-            if self.local_service is None:
-                await self.connect_to_local_service()
-            
-            result = await self.local_service.get_well_plate_type(slot)
-            self.task_status[task_name] = "finished"
-            logger.info(f"Retrieved well plate type '{result}' for slot {slot} via mirror service")
-            return result
-        except Exception as e:
-            self.task_status[task_name] = "failed"
-            logger.error(f"Failed to get well plate type for slot {slot}: {e}")
-            raise e
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
