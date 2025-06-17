@@ -367,6 +367,7 @@ class MirrorMicroscopeService:
                 "update_parameters_from_client": self.update_parameters_from_client,
                 "get_chatbot_url": self.get_chatbot_url,
                 "adjust_video_frame": self.adjust_video_frame,
+                "set_video_fps": self.set_video_fps,
                 # Add status functions
                 "get_task_status": self.get_task_status,
                 "get_all_task_status": self.get_all_task_status,
@@ -908,6 +909,26 @@ class MirrorMicroscopeService:
             return result
         except Exception as e:
             logger.error(f"Failed to adjust video frame: {e}")
+            raise e
+
+    async def set_video_fps(self, fps=5, context=None):
+        """Mirror function to set_video_fps on local service and update WebRTC stream FPS"""
+        try:
+            if self.local_service is None:
+                await self.connect_to_local_service()
+            
+            # Update WebRTC video track FPS if active
+            if self.video_track and self.video_track.running:
+                old_webrtc_fps = self.video_track.fps
+                self.video_track.fps = fps
+                logger.info(f"WebRTC video track FPS updated from {old_webrtc_fps} to {fps}")
+            
+            # Forward call to local service
+            result = await self.local_service.set_video_fps(fps)
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to set video FPS: {e}")
             raise e
 
 if __name__ == "__main__":
