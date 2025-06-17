@@ -12,6 +12,9 @@ import aiohttp
 import fractions
 from av import VideoFrame
 from aiortc import MediaStreamTrack
+# Image processing imports
+import cv2
+import numpy as np
 
 dotenv.load_dotenv()  
 ENV_FILE = dotenv.find_dotenv()  
@@ -84,13 +87,20 @@ class MicroscopeVideoTrack(MediaStreamTrack):
             if self.start_time is None:
                 self.start_time = time.time()
             
-            # Time the entire frame processing
+            # Time the entire frame processing (including sleep)
             frame_start_time = time.time()
             
+            # Calculate and perform FPS throttling sleep
             next_frame_time = self.start_time + (self.count / self.fps)
             sleep_duration = next_frame_time - time.time()
+            sleep_start = time.time()
             if sleep_duration > 0:
                 await asyncio.sleep(sleep_duration)
+            sleep_end = time.time()
+            actual_sleep_time = (sleep_end - sleep_start) * 1000  # Convert to ms
+            
+            # Start timing actual processing after sleep
+            processing_start_time = time.time()
 
             # Check if local_service is still available
             if self.local_service is None:
@@ -99,24 +109,50 @@ class MicroscopeVideoTrack(MediaStreamTrack):
 
             # Time getting the video frame from local service
             get_frame_start = time.time()
-            processed_frame = await self.local_service.get_video_frame(
+            frame_data = await self.local_service.get_video_frame(
                 frame_width=self.frame_width,
                 frame_height=self.frame_height
             )
             get_frame_end = time.time()
             get_frame_latency = (get_frame_end - get_frame_start) * 1000  # Convert to ms
             
-            # Calculate frame data size in KB
-            if hasattr(processed_frame, 'nbytes'):
-                # For numpy arrays
-                frame_size_bytes = processed_frame.nbytes
+            # Handle new JPEG format returned by get_video_frame
+            if isinstance(frame_data, dict) and 'data' in frame_data:
+                # New format: dictionary with JPEG data
+                jpeg_data = frame_data['data']
+                frame_format = frame_data.get('format', 'jpeg')
+                frame_size_bytes = frame_data.get('size_bytes', len(jpeg_data))
+                compression_ratio = frame_data.get('compression_ratio', 1.0)
+                
+                print(f"Frame {self.count} compressed data: {frame_size_bytes / 1024:.2f} KB, compression ratio: {compression_ratio:.2f}")
+                
+                # Decode JPEG data to numpy array
+                decode_start = time.time()
+                if isinstance(jpeg_data, bytes):
+                    # Convert bytes to numpy array for cv2.imdecode
+                    jpeg_np = np.frombuffer(jpeg_data, dtype=np.uint8)
+                    # Decode JPEG to BGR format (OpenCV default)
+                    processed_frame_bgr = cv2.imdecode(jpeg_np, cv2.IMREAD_COLOR)
+                    if processed_frame_bgr is None:
+                        raise Exception("Failed to decode JPEG data")
+                    # Convert BGR to RGB for VideoFrame
+                    processed_frame = cv2.cvtColor(processed_frame_bgr, cv2.COLOR_BGR2RGB)
+                else:
+                    raise Exception(f"Unexpected JPEG data type: {type(jpeg_data)}")
+                decode_end = time.time()
+                decode_latency = (decode_end - decode_start) * 1000  # Convert to ms
+                print(f"Frame {self.count} decode time: {decode_latency:.2f}ms")
             else:
-                # For other data types
-                import sys
-                frame_size_bytes = sys.getsizeof(processed_frame)
-            
-            frame_size_kb = frame_size_bytes / 1024
-            print(f"Frame {self.count} data size: {frame_size_kb:.2f} KB ({frame_size_bytes} bytes)")
+                # Fallback for old format (numpy array)
+                processed_frame = frame_data
+                if hasattr(processed_frame, 'nbytes'):
+                    frame_size_bytes = processed_frame.nbytes
+                else:
+                    import sys
+                    frame_size_bytes = sys.getsizeof(processed_frame)
+                
+                frame_size_kb = frame_size_bytes / 1024
+                print(f"Frame {self.count} raw data size: {frame_size_kb:.2f} KB ({frame_size_bytes} bytes)")
             
             # Time processing the frame
             process_start = time.time()
@@ -132,12 +168,16 @@ class MicroscopeVideoTrack(MediaStreamTrack):
             process_end = time.time()
             process_latency = (process_end - process_start) * 1000  # Convert to ms
             
-            # Calculate total frame latency
-            frame_end_time = time.time()
-            total_frame_latency = (frame_end_time - frame_start_time) * 1000  # Convert to ms
+            # Calculate processing and total latencies
+            processing_end_time = time.time()
+            processing_latency = (processing_end_time - processing_start_time) * 1000  # Convert to ms
+            total_frame_latency = (processing_end_time - frame_start_time) * 1000  # Convert to ms
             
             # Print timing information every frame (you can adjust frequency as needed)
-            print(f"Frame {self.count} timing: get_video_frame={get_frame_latency:.2f}ms, process={process_latency:.2f}ms, total={total_frame_latency:.2f}ms")
+            if isinstance(frame_data, dict) and 'data' in frame_data:
+                print(f"Frame {self.count} timing: sleep={actual_sleep_time:.2f}ms, get_video_frame={get_frame_latency:.2f}ms, decode={decode_latency:.2f}ms, process={process_latency:.2f}ms, processing_total={processing_latency:.2f}ms, total_with_sleep={total_frame_latency:.2f}ms")
+            else:
+                print(f"Frame {self.count} timing: sleep={actual_sleep_time:.2f}ms, get_video_frame={get_frame_latency:.2f}ms, process={process_latency:.2f}ms, processing_total={processing_latency:.2f}ms, total_with_sleep={total_frame_latency:.2f}ms")
             
             if self.count % (self.fps * 5) == 0:  # Log every 5 seconds
                 duration = current_time - self.start_time
