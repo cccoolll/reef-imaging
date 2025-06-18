@@ -64,7 +64,7 @@ async def test_get_zip_file_content_endpoint(
         zip_file.writestr("nested-zarr/.zattrs", zarr_attrs_json)
         
         # Create 1100 chunks of 1x1 to verify the file size's affect on the artifact manager
-        chunk_shape = [246, 256]
+        chunk_shape = [256, 256]
         array_shape = [11, 10, 10]  # Shape of the entire array
 
         
