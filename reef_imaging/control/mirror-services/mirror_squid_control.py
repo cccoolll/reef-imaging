@@ -7,6 +7,7 @@ import asyncio
 import traceback
 import dotenv
 import base64
+import json
 from hypha_rpc import login, connect_to_server, register_rtc_service
 # WebRTC imports
 import aiohttp
@@ -52,12 +53,13 @@ class MicroscopeVideoTrack(MediaStreamTrack):
 
     kind = "video"
 
-    def __init__(self, local_service, stitcher=None):
+    def __init__(self, local_service, stitcher=None, parent_service=None):
         super().__init__()
         if local_service is None:
             raise ValueError("local_service cannot be None when initializing MicroscopeVideoTrack")
         self.local_service = local_service
         self.stitcher = stitcher
+        self.parent_service = parent_service  # Reference to MirrorMicroscopeService for data channel access
         self.count = 0
         self.running = True
         self.start_time = None
@@ -180,6 +182,27 @@ class MicroscopeVideoTrack(MediaStreamTrack):
             process_end = time.time()
             process_latency = (process_end - process_start) * 1000  # Convert to ms
             
+            # SEND METADATA VIA WEBRTC DATA CHANNEL
+            # Send metadata through data channel instead of embedding in video frame
+            if stage_position and self.parent_service:
+                try:
+                    # Create frame metadata including stage position
+                    frame_metadata = {
+                        'stage_position': stage_position,
+                        'timestamp': current_time,
+                        'frame_count': self.count
+                    }
+                    # Add any additional metadata from frame_data if available
+                    if isinstance(frame_data, dict) and 'metadata' in frame_data:
+                        frame_metadata.update(frame_data['metadata'])
+                    
+                    metadata_json = json.dumps(frame_metadata)
+                    # Send metadata via WebRTC data channel
+                    asyncio.create_task(self._send_metadata_via_datachannel(metadata_json))
+                    logger.debug(f"Sent metadata via data channel: {len(metadata_json)} bytes")
+                except Exception as e:
+                    logger.warning(f"Failed to send metadata via data channel: {e}")
+            
             # Calculate processing and total latencies
             processing_end_time = time.time()
             processing_latency = (processing_end_time - processing_start_time) * 1000  # Convert to ms
@@ -231,6 +254,20 @@ class MicroscopeVideoTrack(MediaStreamTrack):
         logger.info("MicroscopeVideoTrack stop() called.")
         self.running = False
 
+    async def _send_metadata_via_datachannel(self, metadata_json):
+        """Send metadata via WebRTC data channel"""
+        try:
+            if (self.parent_service and 
+                hasattr(self.parent_service, 'metadata_data_channel') and 
+                self.parent_service.metadata_data_channel):
+                if self.parent_service.metadata_data_channel.readyState == 'open':
+                    self.parent_service.metadata_data_channel.send(metadata_json)
+                    logger.debug(f"Metadata sent via data channel: {len(metadata_json)} bytes")
+                else:
+                    logger.debug(f"Data channel not ready, state: {self.parent_service.metadata_data_channel.readyState}")
+        except Exception as e:
+            logger.warning(f"Error sending metadata via data channel: {e}")
+
 class MirrorMicroscopeService:
     def __init__(self):
         self.login_required = True
@@ -253,6 +290,8 @@ class MirrorMicroscopeService:
         # Video streaming state
         self.is_streaming = False
         self.webrtc_service_id = None
+        self.webrtc_connected = False
+        self.metadata_data_channel = None
 
         # Setup task tracking
         self.setup_task = None
@@ -523,16 +562,40 @@ class MirrorMicroscopeService:
         
         async def on_init(peer_connection):
             logger.info("WebRTC peer connection initialized")
+            # Mark as connected when peer connection starts
+            self.webrtc_connected = True
+            
+            # Create data channel for metadata transmission
+            self.metadata_data_channel = peer_connection.createDataChannel("metadata", ordered=True)
+            logger.info("Created metadata data channel")
+            
+            @self.metadata_data_channel.on("open")
+            def on_data_channel_open():
+                logger.info("Metadata data channel opened")
+            
+            @self.metadata_data_channel.on("close")
+            def on_data_channel_close():
+                logger.info("Metadata data channel closed")
+            
+            @self.metadata_data_channel.on("error")
+            def on_data_channel_error(error):
+                logger.error(f"Metadata data channel error: {error}")
             
             @peer_connection.on("connectionstatechange")
             async def on_connectionstatechange():
                 logger.info(f"WebRTC connection state changed to: {peer_connection.connectionState}")
                 if peer_connection.connectionState in ["closed", "failed", "disconnected"]:
+                    # Mark as disconnected
+                    self.webrtc_connected = False
+                    self.metadata_data_channel = None
                     self.local_service.off_illumination()
                     logger.info("Illumination closed")
                     if self.video_track and self.video_track.running:
                         logger.info(f"Connection state is {peer_connection.connectionState}. Stopping video track.")
                         self.video_track.stop()
+                elif peer_connection.connectionState in ["connected"]:
+                    # Mark as connected
+                    self.webrtc_connected = True
             
             @peer_connection.on("track")
             def on_track(track):
@@ -549,7 +612,7 @@ class MirrorMicroscopeService:
                 try:
                     self.local_service.on_illumination()
                     logger.info("Illumination opened")
-                    self.video_track = MicroscopeVideoTrack(self.local_service, self.stitcher)
+                    self.video_track = MicroscopeVideoTrack(self.local_service, self.stitcher, self)
                     peer_connection.addTrack(self.video_track)
                     logger.info("Added MicroscopeVideoTrack to peer connection")
                 except Exception as e:
@@ -565,6 +628,7 @@ class MirrorMicroscopeService:
                         logger.info("Stopping MicroscopeVideoTrack.")
                         self.video_track.stop()  # Now synchronous
                         self.video_track = None
+                    self.metadata_data_channel = None
 
         ice_servers = await self.fetch_ice_servers()
         if not ice_servers:
