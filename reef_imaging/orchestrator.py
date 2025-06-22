@@ -46,7 +46,7 @@ if ENV_FILE:
     dotenv.load_dotenv(ENV_FILE)
 
 # Configuration settings
-IMAGING_INTERVAL = 1800  # Time between cycles in seconds
+IMAGING_INTERVAL = 3600  # Time between cycles in seconds
 INCUBATOR_SLOT = 33  # Slot number in the incubator
 ILLUMINATE_CHANNELS = ['BF LED matrix full', 'Fluorescence 405 nm Ex', 'Fluorescence 488 nm Ex', 'Fluorescence 561 nm Ex', 'Fluorescence 638 nm Ex']
 SCANNING_ZONE = [(1, 1), (6, 10)] # The outside rows and columns have no cells
