@@ -214,8 +214,8 @@ class MicroscopeVideoTrack(MediaStreamTrack):
             else:
                 print(f"Frame {self.count} timing: sleep={actual_sleep_time:.2f}ms, get_video_frame={get_frame_latency:.2f}ms, process={process_latency:.2f}ms, processing_total={processing_latency:.2f}ms, total_with_sleep={total_frame_latency:.2f}ms")
             
-            # Add frame to stitcher if available and stage position is known
-            if self.stitcher:
+            # Add frame to stitcher if available, stitching is active, and stage position is known
+            if self.stitcher and self.parent_service and self.parent_service.real_time_stitching_active:
                 if stage_position:
                     try:
                         # Create metadata for stitching
@@ -230,9 +230,11 @@ class MicroscopeVideoTrack(MediaStreamTrack):
                     except Exception as e:
                         logger.error(f"Error adding frame to stitcher: {e}")
                 else:
-                    logger.debug(f"Frame {self.count}: Stitcher available but no stage position, skipping stitching")
+                    logger.debug(f"Frame {self.count}: Real-time stitching active but no stage position, skipping stitching")
+            elif self.stitcher and self.parent_service and not self.parent_service.real_time_stitching_active:
+                logger.debug(f"Frame {self.count}: Real-time stitching is disabled")
             else:
-                logger.debug(f"Frame {self.count}: No stitcher available")
+                logger.debug(f"Frame {self.count}: No stitcher available or no parent service")
             
             if self.count % (self.fps * 5) == 0:  # Log every 5 seconds
                 duration = current_time - self.start_time
@@ -303,7 +305,7 @@ class MirrorMicroscopeService:
         self.stitcher = None
         self.live_canvas_enabled = os.environ.get("LIVE_CANVAS_ENABLED", "true").lower() == "true"
         self.canvas_storage_path = os.environ.get("LIVE_CANVAS_STORAGE_PATH", "/data/live_canvas")
-        self.stitch_enabled = False  # Will be set by command line argument
+        self.real_time_stitching_active = False  # Runtime control for stitching
         
         # Stage limits for canvas calculation
         self.stage_limits = {
@@ -540,6 +542,11 @@ class MirrorMicroscopeService:
             # Live canvas methods
             "get_canvas_chunk": self.get_canvas_chunk,
             "reset_canvas": self.reset_canvas,
+            # Real-time stitching control methods
+            "turn_on_real_time_stitching": self.turn_on_real_time_stitching,
+            "turn_off_real_time_stitching": self.turn_off_real_time_stitching,
+            "reset_zarr_fileset": self.reset_zarr_fileset,
+            "get_real_time_stitching_status": self.get_real_time_stitching_status,
         }
         
         # Add all mirrored methods to the service configuration
@@ -698,7 +705,7 @@ class MirrorMicroscopeService:
         await self.start_webrtc_service(server, self.webrtc_service_id)
         
         # Initialize live stitcher if enabled
-        if self.live_canvas_enabled and self.stitch_enabled:
+        if self.live_canvas_enabled:
             logger.info("Initializing live stitcher...")
             try:
                 # Create canvas storage directory using service ID
@@ -737,8 +744,6 @@ class MirrorMicroscopeService:
         else:
             if not self.live_canvas_enabled:
                 logger.info("Live canvas is disabled via environment variable")
-            elif not self.stitch_enabled:
-                logger.info("Live stitching is disabled via command line argument")
             else:
                 logger.info("Live canvas is disabled")
         
@@ -876,6 +881,62 @@ class MirrorMicroscopeService:
             logger.error(f"Failed to reset canvas: {e}")
             raise e
 
+    async def turn_on_real_time_stitching(self, context=None):
+        """Turn on real-time stitching - frames will be added to canvas during live view"""
+        try:
+            if not self.stitcher:
+                return {"error": "Live canvas is not enabled or not initialized"}
+            
+            self.real_time_stitching_active = True
+            logger.info("Real-time stitching turned ON")
+            return {
+                "status": "success", 
+                "message": "Real-time stitching is now ON - frames will be added to canvas during live view",
+                "real_time_stitching_active": self.real_time_stitching_active
+            }
+        except Exception as e:
+            logger.error(f"Failed to turn on real-time stitching: {e}")
+            raise e
+
+    async def turn_off_real_time_stitching(self, context=None):
+        """Turn off real-time stitching - frames will not be added to canvas during live view"""
+        try:
+            self.real_time_stitching_active = False
+            logger.info("Real-time stitching turned OFF")
+            return {
+                "status": "success", 
+                "message": "Real-time stitching is now OFF - frames will not be added to canvas",
+                "real_time_stitching_active": self.real_time_stitching_active
+            }
+        except Exception as e:
+            logger.error(f"Failed to turn off real-time stitching: {e}")
+            raise e
+
+    async def reset_zarr_fileset(self, context=None):
+        """Reset the zarr fileset - clean the canvas"""
+        try:
+            if not self.stitcher:
+                return {"error": "Live canvas is not enabled or not initialized"}
+            
+            # This is the same as reset_canvas but with a more descriptive name
+            return await self.reset_canvas(context)
+        except Exception as e:
+            logger.error(f"Failed to reset zarr fileset: {e}")
+            raise e
+
+    async def get_real_time_stitching_status(self, context=None):
+        """Get the current status of real-time stitching"""
+        try:
+            return {
+                "real_time_stitching_active": self.real_time_stitching_active,
+                "live_canvas_enabled": self.live_canvas_enabled,
+                "stitcher_initialized": self.stitcher is not None,
+                "canvas_path": os.path.join(self.canvas_storage_path, f"live_canvas_{self.local_service_id}.zarr") if self.stitcher else None
+            }
+        except Exception as e:
+            logger.error(f"Failed to get real-time stitching status: {e}")
+            raise e
+
     async def set_video_fps(self, fps=5, context=None):
         """Special method to set video FPS for both WebRTC and local service"""
         try:
@@ -914,19 +975,12 @@ if __name__ == "__main__":
         default="microscope-control-squid-1",
         help="ID for the local service (default: microscope-control-squid-1)"
     )
-    parser.add_argument(
-        "--stitch",
-        action="store_true",
-        default=False,
-        help="Enable live stitching (default: False)"
-    )
     args = parser.parse_args()
 
     mirror_service = MirrorMicroscopeService()
-    # Override the service IDs and stitch setting with command line arguments
+    # Override the service IDs with command line arguments
     mirror_service.cloud_service_id = args.cloud_service_id
     mirror_service.local_service_id = args.local_service_id
-    mirror_service.stitch_enabled = args.stitch
 
     loop = asyncio.get_event_loop()
 
