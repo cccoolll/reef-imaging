@@ -545,7 +545,6 @@ class MirrorMicroscopeService:
             # Real-time stitching control methods
             "turn_on_real_time_stitching": self.turn_on_real_time_stitching,
             "turn_off_real_time_stitching": self.turn_off_real_time_stitching,
-            "reset_zarr_fileset": self.reset_zarr_fileset,
             "get_real_time_stitching_status": self.get_real_time_stitching_status,
         }
         
@@ -912,17 +911,7 @@ class MirrorMicroscopeService:
             logger.error(f"Failed to turn off real-time stitching: {e}")
             raise e
 
-    async def reset_zarr_fileset(self, context=None):
-        """Reset the zarr fileset - clean the canvas"""
-        try:
-            if not self.stitcher:
-                return {"error": "Live canvas is not enabled or not initialized"}
-            
-            # This is the same as reset_canvas but with a more descriptive name
-            return await self.reset_canvas(context)
-        except Exception as e:
-            logger.error(f"Failed to reset zarr fileset: {e}")
-            raise e
+
 
     async def get_real_time_stitching_status(self, context=None):
         """Get the current status of real-time stitching"""
