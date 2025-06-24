@@ -387,13 +387,6 @@ class OrchestrationSystem:
             
         while True:
             try:
-                # Get all task statuses
-                task_statuses = await service.get_all_task_status()
-                # Check if any task has failed
-                if any(status == "failed" for status in task_statuses.values()):
-                    logger.error(f"{service_name} service has failed tasks: {task_statuses}")
-                    raise Exception("Service not healthy")
-
                 # check hello_world
                 hello_world_result = await service.hello_world()
 
