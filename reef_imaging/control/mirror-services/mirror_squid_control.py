@@ -303,7 +303,7 @@ class MirrorMicroscopeService:
         
         # Live stitching components
         self.stitcher = None
-        self.live_canvas_enabled = os.environ.get("LIVE_CANVAS_ENABLED", "true").lower() == "true"
+        self.live_canvas_enabled = True
         self.canvas_storage_path = os.environ.get("LIVE_CANVAS_STORAGE_PATH", "/data/live_canvas")
         self.real_time_stitching_active = False  # Runtime control for stitching
         
@@ -798,27 +798,20 @@ class MirrorMicroscopeService:
 
 
     
-    async def get_canvas_chunk(self, x_mm: float, y_mm: float, scale_level: int = 1, context=None):
-        """Get a canvas chunk based on microscope stage location"""
+    async def get_canvas_chunk(self, chunk_x: int, chunk_y: int, scale_level: int = 1, context=None):
+        """Get a canvas chunk based on chunk coordinates"""
         try:
             if not self.stitcher:
                 return {"error": "Live canvas is not enabled or not initialized"}
-            
-            # Convert stage coordinates to pixel coordinates
-            x_pixel, y_pixel = self.stitcher.canvas.physical_to_pixel_coordinates(x_mm, y_mm)
-            
-            # Convert pixel coordinates to chunk coordinates
-            scale_factor = 4 ** (scale_level - 1)
-            scaled_x = x_pixel // scale_factor
-            scaled_y = y_pixel // scale_factor
-            
-            chunk_x = scaled_x // self.stitcher.chunk_size[1]
-            chunk_y = scaled_y // self.stitcher.chunk_size[0]
-            
+            logger.info(f"Getting canvas chunk at coordinates ({chunk_x}, {chunk_y}), scale{scale_level}")
             chunk_data = await self.stitcher.get_canvas_chunk(scale_level, chunk_x, chunk_y)
             
             if chunk_data is None:
-                return {"error": f"Chunk not found at stage location ({x_mm}, {y_mm}) mm, scale{scale_level}"}
+                return {"error": f"Chunk not found at coordinates ({chunk_x}, {chunk_y}), scale{scale_level}"}
+            
+            # Check if chunk_data is empty
+            if chunk_data.size == 0:
+                return {"error": f"Chunk is empty at coordinates ({chunk_x}, {chunk_y}), scale{scale_level}"}
             
             # Convert numpy array to base64-encoded PNG
             _, png_data = cv2.imencode('.png', chunk_data)
@@ -828,7 +821,6 @@ class MirrorMicroscopeService:
                 "data": img_base64,
                 "format": "png_base64",
                 "scale_level": scale_level,
-                "stage_location": {"x_mm": x_mm, "y_mm": y_mm},
                 "chunk_coordinates": {"chunk_x": chunk_x, "chunk_y": chunk_y}
             }
             
