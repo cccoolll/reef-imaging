@@ -274,9 +274,9 @@ class MirrorMicroscopeService:
     def __init__(self):
         self.login_required = True
         # Connection to cloud service
-        self.cloud_server_url = "https://hypha.aicell.io"
-        self.cloud_workspace = "reef-imaging"
-        self.cloud_token = os.environ.get("REEF_WORKSPACE_TOKEN")
+        self.cloud_server_url = "http://reef.dyn.scilifelab.se:9527"
+        self.cloud_workspace = "reef-imaging-local"
+        self.cloud_token = os.environ.get("REEF_LOCAL_TOKEN")
         self.cloud_service_id = "mirror-microscope-control-squid-1"
         self.cloud_server = None
         self.cloud_service = None  # Add reference to registered cloud service
