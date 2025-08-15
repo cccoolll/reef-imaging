@@ -10,6 +10,8 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from threading import Thread, Event
 from datetime import datetime, timedelta
+import asyncio
+from hypha_rpc import connect_to_server, login
 
 # Get the absolute path to the directory where the script is located
 base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -18,11 +20,38 @@ app = FastAPI()
 templates = Jinja2Templates(directory=os.path.join(base_dir, "templates"))
 app.mount("/static", StaticFiles(directory=os.path.join(base_dir, "static")), name="static")
 
+import dotenv
+dotenv.load_dotenv()
+
+token = os.getenv("REEF_WORKSPACE_TOKEN")
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 
-# Change from a global camera to a function that returns a fresh camera object
+# List all available cameras
+def count_available_cameras(max_tested=10):
+    count = 0
+    for i in range(max_tested):
+        cap = cv2.VideoCapture(i)
+        if cap.isOpened():
+            count += 1
+            cap.release()
+    return count
+
+print("Number of available cameras:", count_available_cameras())
+
+def get_first_available_camera():
+    for i in range(10):  # Test first 10 indices
+        cap = cv2.VideoCapture(i)
+        if cap.isOpened():
+            logging.info(f"Found available camera at index {i}")
+            return i
+        cap.release()
+    logging.error("No available cameras found")
+    return 0  # Fallback to 0 if no camera found
+
 def get_camera():
+    # Use the specific device path for RealSense camera
     cam = cv2.VideoCapture("/dev/video2")
     # Force camera settings refresh
     cam.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -45,10 +74,7 @@ def capture_frames():
             logging.error("Failed to capture image")
             frame_bytes = None  # Clear frame_bytes on error
         else:
-            # Convert to grayscale
-            #frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-            #rotate 180 degree
+            # Rotate 180 degrees for RealSense camera
             frame = cv2.rotate(frame, cv2.ROTATE_180)
 
             # Add date and time timestamp to the frame
@@ -96,7 +122,7 @@ def record_time_lapse():
                 break
 
         out.release()
-        logging.info(f"Time-lapse recording saved: {filename}")
+        #logging.info(f"Time-lapse recording saved: {filename}")
 
     logging.info("Time-lapse recording finished")
 
@@ -111,11 +137,11 @@ def clean_old_videos():
                 os.remove(filepath)
                 logging.info(f"Deleted old video: {filename}")
 
-@app.get('/')
+@app.get('/home')
 def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
-@app.get('/video_feed')
+@app.get('/')
 async def video_feed(request: Request):
     async def generator():
         try:
@@ -129,16 +155,50 @@ async def video_feed(request: Request):
 
     return StreamingResponse(generator(), media_type='multipart/x-mixed-replace; boundary=frame')
 
-if __name__ == '__main__':
-    # Start a background thread to clean old videos periodically
-    def periodic_cleaning():
-        while True:
-            clean_old_videos()
-            time.sleep(3600)  # Run every hour
+# Commented out the old standalone server code
+# if __name__ == '__main__':
+#     # Start a background thread to clean old videos periodically
+#     def periodic_cleaning():
+#         while True:
+#             clean_old_videos()
+#             time.sleep(3600)  # Run every hour
 
-    cleaning_thread = Thread(target=periodic_cleaning, daemon=True)
-    cleaning_thread.start()
+#     cleaning_thread = Thread(target=periodic_cleaning, daemon=True)
+#     cleaning_thread.start()
 
+#     # Start the frame capture in a background thread
+#     capture_thread = Thread(target=capture_frames, daemon=True)
+#     capture_thread.start()
+
+#     # Start the time-lapse recording in a background thread
+#     recording_thread = Thread(target=record_time_lapse, daemon=True)
+#     recording_thread.start()
+
+#     uvicorn.run(app, host='0.0.0.0', port=8001)  # Running on a different port
+
+async def serve_fastapi(args, context=None):
+    # context can be used for authorization, e.g., checking the user's permission
+    # e.g., check user id against a list of allowed users
+    scope = args["scope"]
+    print(f'{context["user"]["id"]} - {scope["client"]} - {scope["method"]} - {scope["path"]}')
+    await app(args["scope"], args["receive"], args["send"])
+
+async def main():
+    # Connect to Hypha server
+    server = await connect_to_server({"server_url": "https://hypha.aicell.io","workspace": "reef-imaging", "token": token})
+
+    svc_info = await server.register_service({
+        "id": "reef-realsense-feed",
+        "name": "reef-realsense-feed",
+        "type": "asgi",
+        "serve": serve_fastapi,
+        "config": {"visibility": "public", "require_context": True}
+    })
+
+    print(f"Access your app at:  {server.config.public_base_url}/{server.config.workspace}/apps/{svc_info['id'].split(':')[1]}")
+    await server.serve()
+
+if __name__ == "__main__":
     # Start the frame capture in a background thread
     capture_thread = Thread(target=capture_frames, daemon=True)
     capture_thread.start()
@@ -147,4 +207,7 @@ if __name__ == '__main__':
     recording_thread = Thread(target=record_time_lapse, daemon=True)
     recording_thread.start()
 
-    uvicorn.run(app, host='0.0.0.0', port=8001)  # Running on a different port
+    # Use the same pattern as other Hypha services
+    loop = asyncio.get_event_loop()
+    loop.create_task(main())
+    loop.run_forever()

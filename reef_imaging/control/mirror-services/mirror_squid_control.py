@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import traceback
 import dotenv
+import json
 from hypha_rpc import login, connect_to_server, register_rtc_service
 # WebRTC imports
 import aiohttp
@@ -49,17 +50,18 @@ class MicroscopeVideoTrack(MediaStreamTrack):
 
     kind = "video"
 
-    def __init__(self, local_service):
+    def __init__(self, local_service, parent_service=None):
         super().__init__()
         if local_service is None:
             raise ValueError("local_service cannot be None when initializing MicroscopeVideoTrack")
         self.local_service = local_service
+        self.parent_service = parent_service  # Reference to MirrorMicroscopeService for data channel access
         self.count = 0
         self.running = True
         self.start_time = None
         self.fps = 5 # Target FPS for WebRTC stream
-        self.frame_width = 640
-        self.frame_height = 640
+        self.frame_width = 750
+        self.frame_height = 750
         logger.info("MicroscopeVideoTrack initialized with local_service")
 
     def draw_crosshair(self, img, center_x, center_y, size=20, color=[255, 255, 255]):
@@ -116,6 +118,14 @@ class MicroscopeVideoTrack(MediaStreamTrack):
             get_frame_end = time.time()
             get_frame_latency = (get_frame_end - get_frame_start) * 1000  # Convert to ms
             
+            # Extract stage position from frame metadata
+            stage_position = None
+            if isinstance(frame_data, dict) and 'metadata' in frame_data:
+                stage_position = frame_data['metadata'].get('stage_position')
+                logger.debug(f"Frame {self.count}: Found stage_position in metadata: {stage_position}")
+            else:
+                logger.debug(f"Frame {self.count}: No metadata found in frame_data, keys: {list(frame_data.keys()) if isinstance(frame_data, dict) else 'not dict'}")
+                
             # Handle new JPEG format returned by get_video_frame
             if isinstance(frame_data, dict) and 'data' in frame_data:
                 # New format: dictionary with JPEG data
@@ -168,6 +178,27 @@ class MicroscopeVideoTrack(MediaStreamTrack):
             process_end = time.time()
             process_latency = (process_end - process_start) * 1000  # Convert to ms
             
+            # SEND METADATA VIA WEBRTC DATA CHANNEL
+            # Send metadata through data channel instead of embedding in video frame
+            if stage_position and self.parent_service:
+                try:
+                    # Create frame metadata including stage position
+                    frame_metadata = {
+                        'stage_position': stage_position,
+                        'timestamp': current_time,
+                        'frame_count': self.count
+                    }
+                    # Add any additional metadata from frame_data if available
+                    if isinstance(frame_data, dict) and 'metadata' in frame_data:
+                        frame_metadata.update(frame_data['metadata'])
+                    
+                    metadata_json = json.dumps(frame_metadata)
+                    # Send metadata via WebRTC data channel
+                    asyncio.create_task(self._send_metadata_via_datachannel(metadata_json))
+                    logger.debug(f"Sent metadata via data channel: {len(metadata_json)} bytes")
+                except Exception as e:
+                    logger.warning(f"Failed to send metadata via data channel: {e}")
+            
             # Calculate processing and total latencies
             processing_end_time = time.time()
             processing_latency = (processing_end_time - processing_start_time) * 1000  # Convert to ms
@@ -178,6 +209,8 @@ class MicroscopeVideoTrack(MediaStreamTrack):
                 print(f"Frame {self.count} timing: sleep={actual_sleep_time:.2f}ms, get_video_frame={get_frame_latency:.2f}ms, decode={decode_latency:.2f}ms, process={process_latency:.2f}ms, processing_total={processing_latency:.2f}ms, total_with_sleep={total_frame_latency:.2f}ms")
             else:
                 print(f"Frame {self.count} timing: sleep={actual_sleep_time:.2f}ms, get_video_frame={get_frame_latency:.2f}ms, process={process_latency:.2f}ms, processing_total={processing_latency:.2f}ms, total_with_sleep={total_frame_latency:.2f}ms")
+            
+
             
             if self.count % (self.fps * 5) == 0:  # Log every 5 seconds
                 duration = current_time - self.start_time
@@ -198,6 +231,20 @@ class MicroscopeVideoTrack(MediaStreamTrack):
     def stop(self):
         logger.info("MicroscopeVideoTrack stop() called.")
         self.running = False
+
+    async def _send_metadata_via_datachannel(self, metadata_json):
+        """Send metadata via WebRTC data channel"""
+        try:
+            if (self.parent_service and 
+                hasattr(self.parent_service, 'metadata_data_channel') and 
+                self.parent_service.metadata_data_channel):
+                if self.parent_service.metadata_data_channel.readyState == 'open':
+                    self.parent_service.metadata_data_channel.send(metadata_json)
+                    logger.debug(f"Metadata sent via data channel: {len(metadata_json)} bytes")
+                else:
+                    logger.debug(f"Data channel not ready, state: {self.parent_service.metadata_data_channel.readyState}")
+        except Exception as e:
+            logger.warning(f"Error sending metadata via data channel: {e}")
 
 class MirrorMicroscopeService:
     def __init__(self):
@@ -221,6 +268,8 @@ class MirrorMicroscopeService:
         # Video streaming state
         self.is_streaming = False
         self.webrtc_service_id = None
+        self.webrtc_connected = False
+        self.metadata_data_channel = None
 
         # Setup task tracking
         self.setup_task = None
@@ -463,16 +512,40 @@ class MirrorMicroscopeService:
         
         async def on_init(peer_connection):
             logger.info("WebRTC peer connection initialized")
+            # Mark as connected when peer connection starts
+            self.webrtc_connected = True
+            
+            # Create data channel for metadata transmission
+            self.metadata_data_channel = peer_connection.createDataChannel("metadata", ordered=True)
+            logger.info("Created metadata data channel")
+            
+            @self.metadata_data_channel.on("open")
+            def on_data_channel_open():
+                logger.info("Metadata data channel opened")
+            
+            @self.metadata_data_channel.on("close")
+            def on_data_channel_close():
+                logger.info("Metadata data channel closed")
+            
+            @self.metadata_data_channel.on("error")
+            def on_data_channel_error(error):
+                logger.error(f"Metadata data channel error: {error}")
             
             @peer_connection.on("connectionstatechange")
             async def on_connectionstatechange():
                 logger.info(f"WebRTC connection state changed to: {peer_connection.connectionState}")
                 if peer_connection.connectionState in ["closed", "failed", "disconnected"]:
+                    # Mark as disconnected
+                    self.webrtc_connected = False
+                    self.metadata_data_channel = None
                     self.local_service.off_illumination()
                     logger.info("Illumination closed")
                     if self.video_track and self.video_track.running:
                         logger.info(f"Connection state is {peer_connection.connectionState}. Stopping video track.")
                         self.video_track.stop()
+                elif peer_connection.connectionState in ["connected"]:
+                    # Mark as connected
+                    self.webrtc_connected = True
             
             @peer_connection.on("track")
             def on_track(track):
@@ -489,7 +562,7 @@ class MirrorMicroscopeService:
                 try:
                     self.local_service.on_illumination()
                     logger.info("Illumination opened")
-                    self.video_track = MicroscopeVideoTrack(self.local_service)
+                    self.video_track = MicroscopeVideoTrack(self.local_service, self)
                     peer_connection.addTrack(self.video_track)
                     logger.info("Added MicroscopeVideoTrack to peer connection")
                 except Exception as e:
@@ -505,6 +578,7 @@ class MirrorMicroscopeService:
                         logger.info("Stopping MicroscopeVideoTrack.")
                         self.video_track.stop()  # Now synchronous
                         self.video_track = None
+                    self.metadata_data_channel = None
 
         ice_servers = await self.fetch_ice_servers()
         if not ice_servers:
@@ -622,6 +696,10 @@ class MirrorMicroscopeService:
         except Exception as e:
             logger.error(f"Failed to stop video streaming: {e}")
             raise e
+
+
+    
+
 
     async def set_video_fps(self, fps=5, context=None):
         """Special method to set video FPS for both WebRTC and local service"""
