@@ -77,9 +77,9 @@ class RoboticArmService:
                 if self.service_id:
                     service = await self.server.get_service(self.service_id)
                     # Try a simple operation to verify service is working
-                    hello_world_result = await service.hello_world()
-                    if hello_world_result != "Hello world":
-                        logger.error(f"Service health check failed: {hello_world_result}")
+                    ping_result = await service.ping()
+                    if ping_result != "pong":
+                        logger.error(f"Service health check failed: {ping_result}")
                         raise Exception("Service not healthy")
                     #print("Service health check passed")
                 else:
@@ -122,7 +122,7 @@ class RoboticArmService:
                 "visibility": "public",
                 "run_in_executor": True
             },
-            "hello_world": self.hello_world,
+            "ping": self.ping,
             "move_sample_from_microscope1_to_incubator": self.move_sample_from_microscope1_to_incubator,
             "move_sample_from_incubator_to_microscope1": self.move_sample_from_incubator_to_microscope1,
             "grab_sample_from_microscope1": self.grab_sample_from_microscope1,
@@ -154,7 +154,7 @@ class RoboticArmService:
         logger.info(f"Robotic arm control service registered at workspace: {server.config.workspace}, id: {svc.id}")
         logger.info(f'You can use this service using the service id: {svc.id}')
         id = svc.id.split(":")[1]
-        logger.info(f"You can also test the service via the HTTP proxy: {self.server_url}/{server.config.workspace}/services/{id}/hello_world")
+        logger.info(f"You can also test the service via the HTTP proxy: {self.server_url}/{server.config.workspace}/services/{id}/ping")
 
         # Health check will be started after setup is complete
 
@@ -192,12 +192,12 @@ class RoboticArmService:
         for task_name in self.task_status:
             self.task_status[task_name] = "not_started"
 
-    def hello_world(self):
-        """Hello world"""
-        task_name = "hello_world"
+    def ping(self):
+        """Ping function for health checks"""
+        task_name = "ping"
         self.task_status[task_name] = "started"
         self.task_status[task_name] = "finished"
-        return "Hello world"
+        return "pong"
 
     @schema_function(skip_self=True)
     def connect(self):

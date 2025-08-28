@@ -96,9 +96,9 @@ class IncubatorService:
                 # Try to get the service status
                 if self.service_id:
                     service = await self.server.get_service(self.service_id)
-                    hello_world_result = await service.hello_world()
-                    if hello_world_result != "Hello world":
-                        logger.error(f"Service health check failed: {hello_world_result}")
+                    ping_result = await service.ping()
+                    if ping_result != "pong":
+                        logger.error(f"Service health check failed: {ping_result}")
                         raise Exception("Service not healthy")
                     # Try a simple operation to verify service is working
                     #await service.get_status()
@@ -143,7 +143,7 @@ class IncubatorService:
                 "visibility": "public",
                 "run_in_executor": True
             },
-            "hello_world": self.hello_world,
+            "ping": self.ping,
             "initialize": self.initialize,
             "put_sample_from_transfer_station_to_slot": self.put_sample_from_transfer_station_to_slot,
             "get_sample_from_slot_to_transfer_station": self.get_sample_from_slot_to_transfer_station,
@@ -259,12 +259,12 @@ class IncubatorService:
             raise e
     
     @schema_function(skip_self=True)
-    def hello_world(self):
-        """Hello world"""
-        task_name = "hello_world"
+    def ping(self):
+        """Ping function for health checks"""
+        task_name = "ping"
         self.task_status[task_name] = "started"
         self.task_status[task_name] = "finished"
-        return "Hello world"
+        return "pong"
     
     @schema_function(skip_self=True)
     def get_slot_information(self, slot: Optional[int] = Field(None, description="Slot number, range: 1-42, or None for all slots")):

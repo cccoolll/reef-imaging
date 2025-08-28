@@ -387,11 +387,11 @@ class OrchestrationSystem:
             
         while True:
             try:
-                # check hello_world
-                hello_world_result = await service.hello_world()
+                # check ping
+                ping_result = await service.ping()
 
-                if hello_world_result != "Hello world": #also retry
-                    logger.error(f"{service_name} service hello_world check failed: {hello_world_result}")
+                if ping_result != "pong": #also retry
+                    logger.error(f"{service_name} service ping check failed: {ping_result}")
                     raise Exception("Service not healthy")
                 
                 # Service is healthy, log success and continue with normal interval

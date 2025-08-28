@@ -156,9 +156,9 @@ class MirrorRoboticArmService:
                     try:
                         service = await self.cloud_server.get_service(self.cloud_service_id)
                         # Try a simple operation to verify service is working
-                        hello_world_result = await asyncio.wait_for(service.hello_world(), timeout=10)
-                        if hello_world_result != "Hello world":
-                            logger.error(f"Cloud service health check failed: {hello_world_result}")
+                        ping_result = await asyncio.wait_for(service.ping(), timeout=10)
+                        if ping_result != "pong":
+                            logger.error(f"Cloud service health check failed: {ping_result}")
                             raise Exception("Cloud service not healthy")
                     except Exception as e:
                         logger.error(f"Cloud service health check failed: {e}")
@@ -176,15 +176,15 @@ class MirrorRoboticArmService:
                     
                     #logger.info("Checking local service health with timeout, if timeout, local service is not healthy...")
                     try:
-                        local_hello_world_result = await asyncio.wait_for(self.local_service.hello_world(), timeout=10)
+                        local_ping_result = await asyncio.wait_for(self.local_service.ping(), timeout=10)
                     except asyncio.TimeoutError:
                         logger.error("Local service health check timed out, assuming it's not healthy")
                         raise Exception("Local service not healthy")
                     
-                    #logger.info(f"Local service response: {local_hello_world_result}")
+                    #logger.info(f"Local service response: {local_ping_result}")
                     
-                    if local_hello_world_result != "Hello world":
-                        logger.error(f"Local service health check failed: {local_hello_world_result}")
+                    if local_ping_result != "pong":
+                        logger.error(f"Local service health check failed: {local_ping_result}")
                         raise Exception("Local service not healthy")
                     
                     #logger.info("Local service health check passed")
@@ -265,7 +265,7 @@ class MirrorRoboticArmService:
                 "visibility": "public",
                 "run_in_executor": True
             },
-            "hello_world": self.hello_world,
+            "ping": self.ping,
         }
         
         # Add all mirrored methods to the service configuration
@@ -301,9 +301,9 @@ class MirrorRoboticArmService:
         
         # Verify local service is working
         try:
-            hello_result = await asyncio.wait_for(self.local_service.hello_world(), timeout=10)
-            if hello_result != "Hello world":
-                raise Exception(f"Local service verification failed: {hello_result}")
+            ping_result = await asyncio.wait_for(self.local_service.ping(), timeout=10)
+            if ping_result != "pong":
+                raise Exception(f"Local service verification failed: {ping_result}")
             logger.info("Local service connection verified successfully")
         except Exception as e:
             logger.error(f"Local service verification failed: {e}")
@@ -318,9 +318,9 @@ class MirrorRoboticArmService:
         
         logger.info("Setup completed successfully")
 
-    def hello_world(self):
-        """Hello world - core service method"""
-        return "Hello world"
+    def ping(self):
+        """Ping function for health checks"""
+        return "pong"
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
