@@ -773,9 +773,6 @@ class OrchestrationSystem:
         # Reset all task status on the services themselves before starting a new cycle
         try:
             logger.info(f"Resetting task statuses on services for task {task_name} (microscope: {allocated_microscope_id})...")
-            await microscope_service.reset_all_task_status()
-            if self.incubator: await self.incubator.reset_all_task_status()
-            if self.robotic_arm: await self.robotic_arm.reset_all_task_status()
             logger.info(f"Service task statuses reset for task {task_name} on {allocated_microscope_id}.")
         except Exception as e:
             logger.error(f"Error resetting task statuses on services for {task_name} on {allocated_microscope_id}: {e}. Proceeding with caution.")
