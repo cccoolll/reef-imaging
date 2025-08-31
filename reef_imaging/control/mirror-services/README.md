@@ -38,22 +38,50 @@ MICROSCOPE_SERVICE_ID=microscope-control-squid-1
 
 ## Running the Services
 
-### Starting All Services
-
-To start all mirror services simultaneously:
-
-```bash
-./start_all_mirror_services.py
-```
-
 ### Starting Individual Services
 
-To start specific services:
+Each mirror service can be run directly as a Python script. You can start them individually in separate terminal sessions:
 
 ```bash
-./start_all_mirror_services.py --microscope-only    # Start only microscope service
-./start_all_mirror_services.py --robotic-arm-only   # Start only robotic arm service
-./start_all_mirror_services.py --incubator-only     # Start only incubator service
+# Terminal 1: Start microscope mirror service
+python mirror_squid_control.py
+
+# Terminal 2: Start robotic arm mirror service  
+python mirror_robotic_arm.py
+
+# Terminal 3: Start incubator mirror service
+python mirror_incubator.py
+```
+
+### Customizing Service IDs
+
+Each service accepts command-line arguments to customize the service IDs:
+
+```bash
+# Custom cloud and local service IDs
+python mirror_squid_control.py --cloud-service-id "my-mirror-microscope" --local-service-id "my-local-microscope"
+
+# Custom robotic arm service IDs
+python mirror_robotic_arm.py --cloud-service-id "my-mirror-robotic-arm" --local-service-id "my-local-robotic-arm"
+
+# Custom incubator service IDs
+python mirror_incubator.py --cloud-service-id "my-mirror-incubator" --local-service-id "my-local-incubator"
+```
+
+### Running Services in Background
+
+For production use, you can run services in the background using `nohup` or `screen`:
+
+```bash
+# Using nohup
+nohup python mirror_squid_control.py > microscope.log 2>&1 &
+nohup python mirror_robotic_arm.py > robotic_arm.log 2>&1 &
+nohup python mirror_incubator.py > incubator.log 2>&1 &
+
+# Using screen (install with: sudo apt-get install screen)
+screen -S microscope -dm python mirror_squid_control.py
+screen -S robotic_arm -dm python mirror_robotic_arm.py
+screen -S incubator -dm python mirror_incubator.py
 ```
 
 ### Service Management
@@ -90,14 +118,6 @@ All services include:
 - Task status tracking
 - Error handling and logging
 - Service health checks every 30 seconds
-
-## Task Status Tracking
-
-Each service maintains status information for all operations:
-- `not_started`: Task hasn't been initiated
-- `started`: Task is in progress
-- `finished`: Task completed successfully
-- `failed`: Task failed with an error
 
 ## Error Handling
 
