@@ -27,7 +27,7 @@ def setup_logging(log_file="orchestrator.log", max_bytes=10*1024*1024, backup_co
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.DEBUG)
 
-    # Rotating file handler
+    # Rotating file handler - this will automatically rotate between orchestrator.log, orchestrator.log.1, orchestrator.log.2, etc.
     file_handler = logging.handlers.RotatingFileHandler(log_file, maxBytes=max_bytes, backupCount=backup_count)
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
@@ -38,10 +38,6 @@ def setup_logging(log_file="orchestrator.log", max_bytes=10*1024*1024, backup_co
     logger.addHandler(console_handler)
 
     return logger
-
-# add date and time to the log file name
-# log_file = f"orchestrator-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log"
-# logger = setup_logging(log_file=log_file)
 
 dotenv.load_dotenv()
 ENV_FILE = dotenv.find_dotenv()
@@ -1303,11 +1299,9 @@ async def main():
     # parser.add_argument('--local', action='store_true', help='Run in local mode using REEF_LOCAL_TOKEN and REEF_LOCAL_WORKSPACE')
     # args = parser.parse_args()
     
-    # Initialize logger here after argument parsing, if args are needed for logging setup
-    # For now, assuming log file name doesn't depend on args.
-    log_file_name = f"orchestrator-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log"
+    # Initialize logger with fixed filename - will automatically rotate between orchestrator.log, orchestrator.log.1, etc.
     global logger
-    logger = setup_logging(log_file=log_file_name)
+    logger = setup_logging(log_file="orchestrator.log")
 
     orchestrator = OrchestrationSystem()
     try:
