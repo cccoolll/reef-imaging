@@ -131,15 +131,6 @@ The system integrates with multiple hardware components:
 docker-compose restart hypha
 ```
 
-## Data Management
-
-REEF Imaging uses the Hypha platform for data management with these key features:
-
-- **Gallery Management**: Create and manage galleries and datasets
-- **File Uploading**: Upload files with robust error handling and retries
-- **Image Processing**: Stitch microscopy images and create multi-resolution pyramids
-- **Treatment Data Handling**: Upload and manage scientific treatment data
-
 ## Documentation
 
 For more detailed information, see the README files in each subdirectory:
