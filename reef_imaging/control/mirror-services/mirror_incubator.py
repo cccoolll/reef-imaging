@@ -258,7 +258,7 @@ class MirrorIncubatorService:
             "name": "Mirror Incubator Control",
             "id": self.cloud_service_id,
             "config": {
-                "visibility": "public",
+                "visibility": "protected",
                 "run_in_executor": True
             },
             "ping": self.ping,

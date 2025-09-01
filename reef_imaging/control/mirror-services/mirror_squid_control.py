@@ -485,7 +485,7 @@ class MirrorMicroscopeService:
             "name": "Mirror Microscope Control Service",
             "id": self.cloud_service_id,
             "config": {
-                "visibility": "public",
+                "visibility": "protected",
                 "run_in_executor": True
             },
             "type": "echo",
@@ -590,7 +590,7 @@ class MirrorMicroscopeService:
                 server,
                 service_id=self.webrtc_service_id,
                 config={
-                    "visibility": "public",
+                    "visibility": "protected",
                     "ice_servers": ice_servers,
                     "on_init": on_init,
                 },

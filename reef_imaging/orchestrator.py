@@ -1042,7 +1042,7 @@ class OrchestrationSystem:
             "name": "Orchestrator Manager",
             "id": self.orchestrator_hypha_service_id,
             "config": {
-                "visibility": "public", 
+                "visibility": "protected", 
                 "run_in_executor": True,
             },
             "hello_orchestrator": self.hello_orchestrator,

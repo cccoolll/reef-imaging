@@ -99,7 +99,7 @@ class RoboticArmService:
             "name": "Robotic Arm Control",
             "id": self.service_id,  # Use the defined service ID
             "config": {
-                "visibility": "public",
+                "visibility": "protected",
                 "run_in_executor": True
             },
             "ping": self.ping,
