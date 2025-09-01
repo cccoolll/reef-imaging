@@ -327,13 +327,32 @@ class MirrorMicroscopeService:
                     success = await self.connect_to_local_service()
                     if not success or self.local_service is None:
                         raise Exception("Failed to connect to local service")
-                
+
                 # Forward the call to the local service
                 result = await local_method(*args, **kwargs)
                 return result
             except Exception as e:
                 logger.error(f"Failed to call {method_name}: {e}")
                 raise e
+
+        # Check if the original method has schema information
+        if hasattr(local_method, '__schema__'):
+            # Preserve the schema information from the original method
+            original_schema = getattr(local_method, '__schema__')
+            
+            # Handle case where schema might be None
+            if original_schema is not None:
+                logger.info(f"Preserving schema for method {method_name}: {original_schema}")
+                
+                # Create a new function with the same signature and schema
+                # We need to manually copy the schema information since we can't use the decorator directly
+                mirror_method.__schema__ = original_schema
+                mirror_method.__doc__ = original_schema.get('description', f"Mirror of {method_name}")
+            else:
+                logger.debug(f"Schema is None for method {method_name}, using basic mirror")
+        else:
+            # No schema information available, return the basic mirror method
+            logger.debug(f"No schema information found for method {method_name}, using basic mirror")
         
         return mirror_method
 
