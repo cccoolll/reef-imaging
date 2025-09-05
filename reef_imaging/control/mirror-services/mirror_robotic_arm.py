@@ -284,14 +284,14 @@ class MirrorRoboticArmService:
                 "visibility": "protected",
                 "run_in_executor": True
             },
-            "ping": self.ping,
+            "type": "echo",
         }
         
         # Add all mirrored methods to the service configuration
         service_config.update(self.mirrored_methods)
         
         # Register the service
-        self.cloud_service = await server.register_service(service_config)
+        self.cloud_service = await server.register_service(service_config,overwrite=True)
 
         logger.info(
             f"Mirror robotic arm service (service_id={self.cloud_service_id}) started successfully with {len(self.mirrored_methods)} mirrored methods, available at {self.cloud_server_url}/services"
