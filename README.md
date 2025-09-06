@@ -46,8 +46,7 @@ conda activate reef-imaging
 git clone git@github.com:aicell-lab/squid-control.git
 pip install -e squid-control
 
-# Install requirements and the package
-pip install -r requirements.txt
+# Install the package and its dependencies
 pip install -e .
 ```
 

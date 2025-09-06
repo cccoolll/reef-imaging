@@ -1,6 +1,0 @@
-hypha-rpc==0.20.79
-watchdog==6.0.0
-logging==0.5.1
-numcodecs==0.13.1
-av==11.0.0
-aiortc==1.13.0
