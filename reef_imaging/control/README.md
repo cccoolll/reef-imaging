@@ -17,7 +17,7 @@ Each component exposes a standardized API through Hypha services, allowing orche
 
 ### Microscope Control (`squid-control/`)
 
-The SQUID microscope control service manages imaging, stage positioning, and illumination.
+The SQUID microscope control service manages imaging, stage positioning, and illumination. The `squid_control` package now includes built-in mirror functionality, eliminating the need for a separate mirror service.
 
 - **Core Features:**
   - Stage movement (X/Y/Z positioning)
@@ -25,6 +25,7 @@ The SQUID microscope control service manages imaging, stage positioning, and ill
   - Auto-focus capabilities (contrast-based and reflection-based)
   - Well plate scanning with specified parameters
   - Image acquisition and storage
+  - Built-in mirror functionality for cloud/local operation
 
 - **Main File:** `start_hypha_service_squid_control.py`
 
@@ -69,9 +70,10 @@ These services act as proxies between the cloud Hypha server and local hardware 
   - Synchronized operation between cloud and local systems
 
 - **Main Files:**
-  - `mirror_squid_control.py` - Microscope mirror service
   - `mirror_robotic_arm.py` - Robotic arm mirror service
   - `mirror_incubator.py` - Incubator mirror service
+
+**Note**: The microscope mirror service (`mirror_squid_control.py`) has been removed. The `squid_control` package now includes built-in mirror functionality, eliminating the need for a separate mirror service.
 
 ## Service Health Monitoring
 

@@ -4,20 +4,17 @@ This directory contains mirror services that proxy requests from the cloud serve
 
 ## Services Overview
 ![mirror sercies flow](docs/mirror_services_flow.png)
-1. **Mirror Microscope Control Service** (`mirror_squid_control.py`)
-   - Mirrors the local microscope control service
-   - Handles imaging, stage movement, and microscope settings
-   - Provides status monitoring and health checks
-
-2. **Mirror Robotic Arm Service** (`mirror_robotic_arm.py`)
+1. **Mirror Robotic Arm Service** (`mirror_robotic_arm.py`)
    - Mirrors the local robotic arm control service
    - Manages sample transfer between microscope and incubator
    - Provides movement control and status monitoring
 
-3. **Mirror Incubator Service** (`mirror_incubator.py`)
+2. **Mirror Incubator Service** (`mirror_incubator.py`)
    - Mirrors the local incubator control service
    - Handles sample storage and environmental control
    - Monitors temperature, CO2 levels, and sample status
+
+**Note**: The microscope control mirror service (`mirror_squid_control.py`) has been removed. The `squid_control` package now includes built-in mirror functionality, eliminating the need for a separate mirror service. See the main project README for information on using the `squid_control` package with mirror features.
 
 ## Prerequisites
 
@@ -43,24 +40,20 @@ MICROSCOPE_SERVICE_ID=microscope-control-squid-1
 Each mirror service can be run directly as a Python script. You can start them individually in separate terminal sessions:
 
 ```bash
-# Terminal 1: Start microscope mirror service
-python mirror_squid_control.py
-
-# Terminal 2: Start robotic arm mirror service  
+# Terminal 1: Start robotic arm mirror service  
 python mirror_robotic_arm.py
 
-# Terminal 3: Start incubator mirror service
+# Terminal 2: Start incubator mirror service
 python mirror_incubator.py
 ```
+
+**Note**: The microscope mirror service is no longer needed as the `squid_control` package includes built-in mirror functionality.
 
 ### Customizing Service IDs
 
 Each service accepts command-line arguments to customize the service IDs:
 
 ```bash
-# Custom cloud and local service IDs
-python mirror_squid_control.py --cloud-service-id "my-mirror-microscope" --local-service-id "my-local-microscope"
-
 # Custom robotic arm service IDs
 python mirror_robotic_arm.py --cloud-service-id "my-mirror-robotic-arm" --local-service-id "my-local-robotic-arm"
 
@@ -68,21 +61,23 @@ python mirror_robotic_arm.py --cloud-service-id "my-mirror-robotic-arm" --local-
 python mirror_incubator.py --cloud-service-id "my-mirror-incubator" --local-service-id "my-local-incubator"
 ```
 
+**Note**: Microscope mirror service customization is now handled through the `squid_control` package configuration.
+
 ### Running Services in Background
 
 For production use, you can run services in the background using `nohup` or `screen`:
 
 ```bash
 # Using nohup
-nohup python mirror_squid_control.py > microscope.log 2>&1 &
 nohup python mirror_robotic_arm.py > robotic_arm.log 2>&1 &
 nohup python mirror_incubator.py > incubator.log 2>&1 &
 
 # Using screen (install with: sudo apt-get install screen)
-screen -S microscope -dm python mirror_squid_control.py
 screen -S robotic_arm -dm python mirror_robotic_arm.py
 screen -S incubator -dm python mirror_incubator.py
 ```
+
+**Note**: Microscope mirror service is no longer needed as the `squid_control` package handles mirroring internally.
 
 ### Service Management
 
@@ -98,16 +93,18 @@ screen -S incubator -dm python mirror_incubator.py
 
 ## Service IDs
 
-- Mirror Microscope Service: `mirror-squid-control`
 - Mirror Robotic Arm Service: `mirror-robotic-arm-control`
 - Mirror Incubator Service: `mirror-incubator-control`
+
+**Note**: Microscope mirror service ID is now managed by the `squid_control` package.
 
 ## Logging
 
 Each service maintains its own log file:
-- `mirror_squid_control_service.log`
 - `mirror_robotic_arm_service.log`
 - `mirror_incubator_service.log`
+
+**Note**: Microscope mirror service logging is now handled by the `squid_control` package.
 
 Log files use rotating file handlers with a maximum size of 100KB and keep 3 backup files.
 

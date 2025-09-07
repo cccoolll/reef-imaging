@@ -20,11 +20,11 @@ Check out our system demonstration video:
 ## Project Structure
 
 - **reef_imaging/** - Main package
-  - **control/** - Hardware control modules
-    - **dorna-control/** - Control for Dorna robotic arm
-    - **cytomat-control/** - Control for Cytomat incubator
-    - **squid-control/** - Control for SQUID microscope
-    - **mirror-services/** - Services for mirroring data between cloud and local systems
+- **control/** - Hardware control modules
+  - **dorna-control/** - Control for Dorna robotic arm
+  - **cytomat-control/** - Control for Cytomat incubator
+  - **squid-control/** - Control for SQUID microscope (includes built-in mirror functionality)
+  - **mirror-services/** - Services for mirroring data between cloud and local systems (robotic arm and incubator only)
   - **hypha_tools/** - Utilities for working with the Hypha platform
     - **artifact_manager/** - Tools for interacting with Hypha's artifact management system
     - **automated_treatment_uploader.py** - Uploads time-lapse experiment data
@@ -42,7 +42,7 @@ cd reef-imaging
 conda create -n reef-imaging python=3.11 -y
 conda activate reef-imaging
 
-# Install squid-control in editable mode
+# Install squid-control in editable mode (includes built-in mirror functionality)
 git clone git@github.com:aicell-lab/squid-control.git
 pip install -e squid-control
 
@@ -119,10 +119,16 @@ REEF_LOCAL_WORKSPACE=your_local_workspace
 
 The system integrates with multiple hardware components:
 
-- **Microscope Control**: Manages SQUID microscope for imaging, stage positioning, and illumination
+- **Microscope Control**: Manages SQUID microscope for imaging, stage positioning, and illumination (includes built-in mirror functionality)
 - **Robotic Arm Control**: Handles sample transfer between microscope and incubator
 - **Incubator Control**: Manages sample storage and environmental conditions
-- **Mirror Services**: Proxies requests between cloud and local systems
+- **Mirror Services**: Proxies requests between cloud and local systems (for robotic arm and incubator only)
+
+### Using the squid_control Package
+
+The `squid_control` package now includes built-in mirror functionality, eliminating the need for a separate `mirror_squid_control.py` service. This simplifies the setup and provides better integration between local and cloud operations.
+
+For more information about the `squid_control` package and its mirror features, visit: https://github.com/aicell-lab/squid-control
 
 ## Restart Hypha
 
