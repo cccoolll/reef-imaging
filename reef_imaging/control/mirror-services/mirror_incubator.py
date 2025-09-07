@@ -107,13 +107,32 @@ class MirrorIncubatorService:
                     success = await self.connect_to_local_service()
                     if not success or self.local_service is None:
                         raise Exception("Failed to connect to local service")
-                
+
                 # Forward the call to the local service
                 result = await local_method(*args, **kwargs)
                 return result
             except Exception as e:
                 logger.error(f"Failed to call {method_name}: {e}")
                 raise e
+
+        # Check if the original method has schema information
+        if hasattr(local_method, '__schema__'):
+            # Preserve the schema information from the original method
+            original_schema = getattr(local_method, '__schema__')
+            
+            # Handle case where schema might be None
+            if original_schema is not None:
+                logger.info(f"Preserving schema for method {method_name}: {original_schema}")
+                
+                # Create a new function with the same signature and schema
+                # We need to manually copy the schema information since we can't use the decorator directly
+                mirror_method.__schema__ = original_schema
+                mirror_method.__doc__ = original_schema.get('description', f"Mirror of {method_name}")
+            else:
+                logger.debug(f"Schema is None for method {method_name}, using basic mirror")
+        else:
+            # No schema information available, return the basic mirror method
+            logger.debug(f"No schema information found for method {method_name}, using basic mirror")
         
         return mirror_method
 
@@ -157,9 +176,9 @@ class MirrorIncubatorService:
                     try:
                         service = await self.cloud_server.get_service(self.cloud_service_id)
                         # Try a simple operation to verify service is working
-                        hello_world_result = await asyncio.wait_for(service.hello_world(), timeout=10)
-                        if hello_world_result != "Hello world":
-                            logger.error(f"Cloud service health check failed: {hello_world_result}")
+                        ping_result = await asyncio.wait_for(service.ping(), timeout=10)
+                        if ping_result != "pong":
+                            logger.error(f"Cloud service health check failed: {ping_result}")
                             raise Exception("Cloud service not healthy")
                     except Exception as e:
                         logger.error(f"Cloud service health check failed: {e}")
@@ -176,11 +195,11 @@ class MirrorIncubatorService:
                             raise Exception("Failed to connect to local service")
                     
                     #logger.info("Checking local service health...")
-                    local_hello_world_result = await asyncio.wait_for(self.local_service.hello_world(), timeout=10)
-                    #logger.info(f"Local service response: {local_hello_world_result}")
+                    local_ping_result = await asyncio.wait_for(self.local_service.ping(), timeout=10)
+                    #logger.info(f"Local service response: {local_ping_result}")
                     
-                    if local_hello_world_result != "Hello world":
-                        logger.error(f"Local service health check failed: {local_hello_world_result}")
+                    if local_ping_result != "pong":
+                        logger.error(f"Local service health check failed: {local_ping_result}")
                         raise Exception("Local service not healthy")
                     
                     #logger.info("Local service health check passed")
@@ -258,17 +277,17 @@ class MirrorIncubatorService:
             "name": "Mirror Incubator Control",
             "id": self.cloud_service_id,
             "config": {
-                "visibility": "public",
+                "visibility": "protected",
                 "run_in_executor": True
             },
-            "hello_world": self.hello_world,
+            "type": "echo",
         }
         
         # Add all mirrored methods to the service configuration
         service_config.update(self.mirrored_methods)
         
         # Register the service
-        self.cloud_service = await server.register_service(service_config)
+        self.cloud_service = await server.register_service(service_config,overwrite=True)
 
         logger.info(
             f"Mirror incubator service (service_id={self.cloud_service_id}) started successfully with {len(self.mirrored_methods)} mirrored methods, available at {self.cloud_server_url}/services"
@@ -297,9 +316,9 @@ class MirrorIncubatorService:
         
         # Verify local service is working
         try:
-            hello_result = await asyncio.wait_for(self.local_service.hello_world(), timeout=10)
-            if hello_result != "Hello world":
-                raise Exception(f"Local service verification failed: {hello_result}")
+            ping_result = await asyncio.wait_for(self.local_service.ping(), timeout=10)
+            if ping_result != "pong":
+                raise Exception(f"Local service verification failed: {ping_result}")
             logger.info("Local service connection verified successfully")
         except Exception as e:
             logger.error(f"Local service verification failed: {e}")
@@ -314,9 +333,9 @@ class MirrorIncubatorService:
         
         logger.info("Setup completed successfully")
 
-    def hello_world(self):
-        """Hello world - core service method"""
-        return "Hello world"
+    def ping(self):
+        """Ping function for health checks"""
+        return "pong"
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

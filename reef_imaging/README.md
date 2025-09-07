@@ -14,8 +14,8 @@ A platform for automated microscope control, image acquisition, data management,
 - **control/** - Hardware control modules
   - **dorna-control/** - Control for Dorna robotic arm
   - **cytomat-control/** - Control for Cytomat incubator
-  - **squid-control/** - Control for SQUID microscope
-  - **mirror-services/** - Services for mirroring data
+  - **squid-control/** - Control for SQUID microscope (includes built-in mirror functionality)
+  - **mirror-services/** - Services for mirroring data (robotic arm and incubator only)
 
 ### Data Management
 

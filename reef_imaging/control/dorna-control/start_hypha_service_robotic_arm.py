@@ -47,27 +47,7 @@ class RoboticArmService:
         self.server = None
         self.service_id = "robotic-arm-control" + ("-simulation" if simulation else "")
         self.setup_task = None
-        # Add task status tracking
-        self.task_status = {
-            "move_sample_from_microscope1_to_incubator": "not_started",
-            "move_sample_from_incubator_to_microscope1": "not_started",
-            "grab_sample_from_microscope1": "not_started",
-            "grab_sample_from_incubator": "not_started",
-            "put_sample_on_microscope1": "not_started",
-            "put_sample_on_incubator": "not_started",
-            "transport_from_incubator_to_microscope1": "not_started",
-            "transport_from_microscope1_to_incubator": "not_started",
-            "connect": "not_started",
-            "disconnect": "not_started",
-            "halt": "not_started",
-            "set_alarm": "not_started",
-            "get_all_joints": "not_started",
-            "get_all_positions": "not_started",
-            "light_on": "not_started",
-            "light_off": "not_started",
-            "incubator_to_microscope": "not_started",
-            "microscope_to_incubator": "not_started"
-        }
+
 
     async def check_service_health(self):
         """Check if the service is healthy and rerun setup if needed"""
@@ -77,9 +57,9 @@ class RoboticArmService:
                 if self.service_id:
                     service = await self.server.get_service(self.service_id)
                     # Try a simple operation to verify service is working
-                    hello_world_result = await service.hello_world()
-                    if hello_world_result != "Hello world":
-                        logger.error(f"Service health check failed: {hello_world_result}")
+                    ping_result = await service.ping()
+                    if ping_result != "pong":
+                        logger.error(f"Service health check failed: {ping_result}")
                         raise Exception("Service not healthy")
                     #print("Service health check passed")
                 else:
@@ -119,10 +99,10 @@ class RoboticArmService:
             "name": "Robotic Arm Control",
             "id": self.service_id,  # Use the defined service ID
             "config": {
-                "visibility": "public",
+                "visibility": "protected",
                 "run_in_executor": True
             },
-            "hello_world": self.hello_world,
+            "ping": self.ping,
             "move_sample_from_microscope1_to_incubator": self.move_sample_from_microscope1_to_incubator,
             "move_sample_from_incubator_to_microscope1": self.move_sample_from_incubator_to_microscope1,
             "grab_sample_from_microscope1": self.grab_sample_from_microscope1,
@@ -136,11 +116,7 @@ class RoboticArmService:
             "halt": self.halt,
             "get_all_joints": self.get_all_joints,
             "get_all_positions": self.get_all_positions,
-            # Add status functions
-            "get_task_status": self.get_task_status,
-            "get_all_task_status": self.get_all_task_status,
-            "reset_task_status": self.reset_task_status,
-            "reset_all_task_status": self.reset_all_task_status,
+
             "set_alarm": self.set_alarm,
             "light_on": self.light_on,
             "light_off": self.light_off,
@@ -154,7 +130,7 @@ class RoboticArmService:
         logger.info(f"Robotic arm control service registered at workspace: {server.config.workspace}, id: {svc.id}")
         logger.info(f'You can use this service using the service id: {svc.id}')
         id = svc.id.split(":")[1]
-        logger.info(f"You can also test the service via the HTTP proxy: {self.server_url}/{server.config.workspace}/services/{id}/hello_world")
+        logger.info(f"You can also test the service via the HTTP proxy: {self.server_url}/{server.config.workspace}/services/{id}/ping")
 
         # Health check will be started after setup is complete
 
@@ -172,32 +148,9 @@ class RoboticArmService:
         self.server = server
         await self.start_hypha_service(server)
 
-    def get_task_status(self, task_name):
-        """Get the status of a specific task"""
-        return self.task_status.get(task_name, "unknown")
-    
-    @schema_function(skip_self=True)
-    def get_all_task_status(self):
-        """Get the status of all tasks"""
-        logger.info(f"Task status: {self.task_status}")
-        return self.task_status
-
-    def reset_task_status(self, task_name):
-        """Reset the status of a specific task"""
-        if task_name in self.task_status:
-            self.task_status[task_name] = "not_started"
-    
-    def reset_all_task_status(self):
-        """Reset the status of all tasks"""
-        for task_name in self.task_status:
-            self.task_status[task_name] = "not_started"
-
-    def hello_world(self):
-        """Hello world"""
-        task_name = "hello_world"
-        self.task_status[task_name] = "started"
-        self.task_status[task_name] = "finished"
-        return "Hello world"
+    def ping(self):
+        """Ping function for health checks"""
+        return "pong"
 
     @schema_function(skip_self=True)
     def connect(self):
@@ -205,16 +158,13 @@ class RoboticArmService:
         Connect and occupy the robot, so that it can be controlled.
         Returns: bool
         """
-        self.task_status["connect"] = "started"
         try:
             if not self.simulation:
                 self.robot.connect(self.ip)
             self.connected = True
-            self.task_status["connect"] = "finished"
             logger.info("Connected to robot")
             return True
         except Exception as e:
-            self.task_status["connect"] = "failed"
             logger.error(f"Failed to connect: {e}")
             raise e
 
@@ -224,16 +174,13 @@ class RoboticArmService:
         Disconnect the robot, so that it can be used by other clients.
         Returns: bool
         """
-        self.task_status["disconnect"] = "started"
         try:
             if not self.simulation:
                 self.robot.close()
             self.connected = False
-            self.task_status["disconnect"] = "finished"
             logger.info("Disconnected from robot")
             return True
         except Exception as e:
-            self.task_status["disconnect"] = "failed"
             logger.error(f"Failed to disconnect: {e}")
             raise e
 
@@ -267,7 +214,6 @@ class RoboticArmService:
         Get the current position of all joints
         Returns: dict
         """
-        self.task_status["get_all_joints"] = "started"
         try:
             if not self.connected:
                 self.connect()
@@ -276,10 +222,8 @@ class RoboticArmService:
             else:
                 time.sleep(10)
                 result = {"joints": "Simulated"}
-            self.task_status["get_all_joints"] = "finished"
             return result
         except Exception as e:
-            self.task_status["get_all_joints"] = "failed"
             logger.error(f"Failed to get all joints: {e}")
             raise e
 
@@ -289,7 +233,6 @@ class RoboticArmService:
         Get the current position of all joints
         Returns: dict
         """
-        self.task_status["get_all_positions"] = "started"
         try:
             if not self.connected:
                 self.connect()
@@ -298,10 +241,8 @@ class RoboticArmService:
             else:
                 time.sleep(10)
                 result = {"positions": "Simulated"}
-            self.task_status["get_all_positions"] = "finished"
             return result
         except Exception as e:
-            self.task_status["get_all_positions"] = "failed"
             logger.error(f"Failed to get all positions: {e}")
             raise e
 
@@ -311,18 +252,14 @@ class RoboticArmService:
         Move sample from microscope1 to incubator, the microscope need to be homed before
         Returns: bool
         """
-        task_name = "move_sample_from_microscope1_to_incubator"
-        self.task_status[task_name] = "started"
         self.set_motor(1)
         try:
             if not self.simulation:
                 self.play_script("paths/microscope1_to_incubator.txt")
             self.play_script("paths/microscope1_to_incubator.txt")
             logger.info("Sample moved from microscope1 to incubator")
-            self.task_status[task_name] = "finished"
             return True
         except Exception as e:
-            self.task_status[task_name] = "failed"
             logger.error(f"Failed to move sample from microscope1 to incubator: {e}")
             raise e
 
@@ -332,16 +269,12 @@ class RoboticArmService:
         Move sample from incubator to microscope1, microscope need to be homed before
         Returns: bool
         """
-        task_name = "move_sample_from_incubator_to_microscope1"
-        self.task_status[task_name] = "started"
         self.set_motor(1)
         try:
             self.play_script("paths/incubator_to_microscope1.txt")
             logger.info("Sample moved from incubator to microscope1")
-            self.task_status[task_name] = "finished"
             return True
         except Exception as e:
-            self.task_status[task_name] = "failed"
             logger.error(f"Failed to move sample from incubator to microscope1: {e}")
             raise e
 
@@ -351,16 +284,12 @@ class RoboticArmService:
         Transport a sample from microscope1 to the incubator
         Returns: bool
         """
-        task_name = "grab_sample_from_microscope1"
-        self.task_status[task_name] = "started"
         self.set_motor(1)
         try:
             self.play_script("paths/grab_from_microscope1.txt")
             logger.info("Sample grabbed from microscope1")
-            self.task_status[task_name] = "finished"
             return True
         except Exception as e:
-            self.task_status[task_name] = "failed"
             logger.error(f"Failed to grab sample from microscope1: {e}")
             raise e
 
@@ -370,16 +299,12 @@ class RoboticArmService:
         Grab a sample from the incubator
         Returns: bool
         """
-        task_name = "grab_sample_from_incubator"
-        self.task_status[task_name] = "started"
         self.set_motor(1)
         try:
             self.play_script("paths/grab_from_incubator.txt")
             logger.info("Sample grabbed from incubator")
-            self.task_status[task_name] = "finished"
             return True
         except Exception as e:
-            self.task_status[task_name] = "failed"
             logger.error(f"Failed to grab sample from incubator: {e}")
             raise e
 
@@ -389,16 +314,12 @@ class RoboticArmService:
         Place a sample on microscope1
         Returns: bool
         """
-        task_name = "put_sample_on_microscope1"
-        self.task_status[task_name] = "started"
         self.set_motor(1)
         try:
             self.play_script("paths/put_on_microscope1.txt")
             logger.info("Sample placed on microscope1")
-            self.task_status[task_name] = "finished"
             return True
         except Exception as e:
-            self.task_status[task_name] = "failed"
             logger.error(f"Failed to put sample on microscope1: {e}")
             raise e
 
@@ -408,16 +329,12 @@ class RoboticArmService:
         Place a sample on the incubator.
         Returns: bool
         """
-        task_name = "put_sample_on_incubator"
-        self.task_status[task_name] = "started"
         self.set_motor(1)
         try:
             self.play_script("paths/put_on_incubator.txt")
             logger.info("Sample placed on incubator")
-            self.task_status[task_name] = "finished"
             return True
         except Exception as e:
-            self.task_status[task_name] = "failed"
             logger.error(f"Failed to put sample on incubator: {e}")
             raise e
 
@@ -429,16 +346,12 @@ class RoboticArmService:
         """
         if not self.connected:
             self.connect()
-        task_name = "transport_from_incubator_to_microscope1"
-        self.task_status[task_name] = "started"
         self.set_motor(1)
         try:
             self.play_script("paths/transport_from_incubator_to_microscope1.txt")
             logger.info("Sample moved from incubator to microscope1")
-            self.task_status[task_name] = "finished"
             return True
         except Exception as e:
-            self.task_status[task_name] = "failed"
             logger.error(f"Failed to transport sample from incubator to microscope1: {e}")
             raise e
 
@@ -450,16 +363,12 @@ class RoboticArmService:
         """
         if not self.connected:
             self.connect()
-        task_name = "transport_from_microscope1_to_incubator"
-        self.task_status[task_name] = "started"
         self.set_motor(1)
         try:
             self.play_script("paths/transport_from_microscope1_to_incubator.txt")
             logger.info("Sample moved from microscope1 to incubator")
-            self.task_status[task_name] = "finished"
             return True
         except Exception as e:
-            self.task_status[task_name] = "failed"
             logger.error(f"Failed to transport sample from microscope1 to incubator: {e}")
             raise e
     
@@ -471,8 +380,6 @@ class RoboticArmService:
         """
         if not self.connected:
             self.connect()
-        task_name = "incubator_to_microscope"
-        self.task_status[task_name] = "started"
         self.set_motor(1)
         try:
             if microscope_id == 1:
@@ -489,10 +396,8 @@ class RoboticArmService:
                 logger.error(f"Invalid microscope ID: {microscope_id}")
                 raise Exception(f"Invalid microscope ID: {microscope_id}")
             
-            self.task_status[task_name] = "finished"
             return True
         except Exception as e:
-            self.task_status[task_name] = "failed"
             logger.error(f"Failed to move sample from incubator to microscope {microscope_id}: {e}")
             raise e
     
@@ -504,8 +409,6 @@ class RoboticArmService:
         """
         if not self.connected:
             self.connect()
-        task_name = "microscope_to_incubator"
-        self.task_status[task_name] = "started"
         self.set_motor(1)
         try:
             if microscope_id == 1:
@@ -522,10 +425,8 @@ class RoboticArmService:
                 logger.error(f"Invalid microscope ID: {microscope_id}")
                 raise Exception(f"Invalid microscope ID: {microscope_id}")
                 
-            self.task_status[task_name] = "finished"
             return True
         except Exception as e:
-            self.task_status[task_name] = "failed"
             logger.error(f"Failed to move sample from microscope {microscope_id} to incubator: {e}")
             raise e
 
@@ -535,17 +436,13 @@ class RoboticArmService:
         Halt/stop the robot, stop all the movements
         Returns: bool
         """
-        task_name = "halt"
-        self.task_status[task_name] = "started"
         try:
             if not self.connected:
                 self.connect()
             self.robot.halt()
             logger.info("Robot halted")
-            self.task_status[task_name] = "finished"
             return True
         except Exception as e:
-            self.task_status[task_name] = "failed"
             logger.error(f"Failed to halt robot: {e}")
             raise e
     
@@ -554,16 +451,12 @@ class RoboticArmService:
         """
         Set the alarm state
         """
-        task_name = "set_alarm"
-        self.task_status[task_name] = "started"
         try:
             if not self.connected:
                 self.connect()
             self.robot.set_alarm(state)
-            self.task_status[task_name] = "finished"
             return True
         except Exception as e:
-            self.task_status[task_name] = "failed"
             logger.error(f"Failed to set alarm: {e}")
             raise e
 
@@ -572,16 +465,12 @@ class RoboticArmService:
         """
         Turn on the light
         """
-        task_name = "light_on"
-        self.task_status[task_name] = "started"
         try:
             if not self.connected:
                 self.connect()
             self.robot.set_output(7, 0)
-            self.task_status[task_name] = "finished"
             return True
         except Exception as e:
-            self.task_status[task_name] = "failed"
             logger.error(f"Failed to turn on light: {e}")
             raise e
 
@@ -590,16 +479,12 @@ class RoboticArmService:
         """
         Turn off the light
         """
-        task_name = "light_off"
-        self.task_status[task_name] = "started"
         try:
             if not self.connected:
                 self.connect()
             self.robot.set_output(7, 1)
-            self.task_status[task_name] = "finished"
             return True
         except Exception as e:
-            self.task_status[task_name] = "failed"
             logger.error(f"Failed to turn off light: {e}")
             raise e
 

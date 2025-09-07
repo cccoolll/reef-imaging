@@ -27,7 +27,7 @@ def setup_logging(log_file="orchestrator.log", max_bytes=10*1024*1024, backup_co
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.DEBUG)
 
-    # Rotating file handler
+    # Rotating file handler - this will automatically rotate between orchestrator.log, orchestrator.log.1, orchestrator.log.2, etc.
     file_handler = logging.handlers.RotatingFileHandler(log_file, maxBytes=max_bytes, backupCount=backup_count)
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
@@ -38,10 +38,6 @@ def setup_logging(log_file="orchestrator.log", max_bytes=10*1024*1024, backup_co
     logger.addHandler(console_handler)
 
     return logger
-
-# add date and time to the log file name
-# log_file = f"orchestrator-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log"
-# logger = setup_logging(log_file=log_file)
 
 dotenv.load_dotenv()
 ENV_FILE = dotenv.find_dotenv()
@@ -387,11 +383,11 @@ class OrchestrationSystem:
             
         while True:
             try:
-                # check hello_world
-                hello_world_result = await service.hello_world()
+                # check ping
+                ping_result = await service.ping()
 
-                if hello_world_result != "Hello world": #also retry
-                    logger.error(f"{service_name} service hello_world check failed: {hello_world_result}")
+                if ping_result != "pong": #also retry
+                    logger.error(f"{service_name} service ping check failed: {ping_result}")
                     raise Exception("Service not healthy")
                 
                 # Service is healthy, log success and continue with normal interval
@@ -773,9 +769,6 @@ class OrchestrationSystem:
         # Reset all task status on the services themselves before starting a new cycle
         try:
             logger.info(f"Resetting task statuses on services for task {task_name} (microscope: {allocated_microscope_id})...")
-            await microscope_service.reset_all_task_status()
-            if self.incubator: await self.incubator.reset_all_task_status()
-            if self.robotic_arm: await self.robotic_arm.reset_all_task_status()
             logger.info(f"Service task statuses reset for task {task_name} on {allocated_microscope_id}.")
         except Exception as e:
             logger.error(f"Error resetting task statuses on services for {task_name} on {allocated_microscope_id}: {e}. Proceeding with caution.")
@@ -899,7 +892,7 @@ class OrchestrationSystem:
                     await self._update_task_state_and_write_config(self.active_task_name, status="error")
                     self.active_task_name = None
                     await asyncio.sleep(ORCHESTRATOR_LOOP_SLEEP)
-                    continue
+                    raise Exception(f"Failed to setup/verify connections for task {self.active_task_name} (microscope {allocated_microscope_id}): {setup_error}")
                 
                 # After setup_connections, check again for the specific microscope
                 target_microscope_service = self.microscope_services.get(allocated_microscope_id)
@@ -908,7 +901,7 @@ class OrchestrationSystem:
                     await self._update_task_state_and_write_config(self.active_task_name, status="error")
                     self.active_task_name = None
                     await asyncio.sleep(ORCHESTRATOR_LOOP_SLEEP)
-                    continue
+                    raise Exception(f"Microscope {allocated_microscope_id} for task {self.active_task_name} is not available/connected even after setup_connections attempt.")
 
                 logger.info(f"Starting cycle for task: {self.active_task_name} on microscope {allocated_microscope_id}, time point: {current_pending_tp_to_process.isoformat()}")
                 await self._update_task_state_and_write_config(self.active_task_name, status="active")
@@ -971,9 +964,23 @@ class OrchestrationSystem:
                     self.transport_queue.task_done()
                     continue
 
+                # Ensure connections are set up before checking for microscope service
+                if not self.incubator or not self.robotic_arm or microscope_id_for_transport not in self.microscope_services:
+                    logger.info(f"Essential services or microscope {microscope_id_for_transport} not ready for transport operation {action}. Running setup_connections.")
+                    try:
+                        await self.setup_connections()
+                        logger.info(f"Connection setup completed for transport operation {action} on microscope {microscope_id_for_transport}")
+                    except Exception as setup_error:
+                        error_msg = f"Failed to setup connections for transport operation {action} on microscope {microscope_id_for_transport}: {setup_error}"
+                        logger.error(error_msg)
+                        if future_to_resolve: future_to_resolve.set_exception(Exception(error_msg))
+                        self.transport_queue.task_done()
+                        continue
+
+                # Check again for the specific microscope after setup_connections
                 target_microscope_service = self.microscope_services.get(microscope_id_for_transport)
                 if not target_microscope_service:
-                    error_msg = f"Microscope service {microscope_id_for_transport} not connected for transport operation {action}."
+                    error_msg = f"Microscope service {microscope_id_for_transport} not connected for transport operation {action} even after setup_connections attempt."
                     logger.error(error_msg)
                     if future_to_resolve: future_to_resolve.set_exception(Exception(error_msg))
                     self.transport_queue.task_done()
@@ -1045,7 +1052,7 @@ class OrchestrationSystem:
             "name": "Orchestrator Manager",
             "id": self.orchestrator_hypha_service_id,
             "config": {
-                "visibility": "public", 
+                "visibility": "protected", 
                 "run_in_executor": True,
             },
             "hello_orchestrator": self.hello_orchestrator,
@@ -1306,11 +1313,9 @@ async def main():
     # parser.add_argument('--local', action='store_true', help='Run in local mode using REEF_LOCAL_TOKEN and REEF_LOCAL_WORKSPACE')
     # args = parser.parse_args()
     
-    # Initialize logger here after argument parsing, if args are needed for logging setup
-    # For now, assuming log file name doesn't depend on args.
-    log_file_name = f"orchestrator-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log"
+    # Initialize logger with fixed filename - will automatically rotate between orchestrator.log, orchestrator.log.1, etc.
     global logger
-    logger = setup_logging(log_file=log_file_name)
+    logger = setup_logging(log_file="orchestrator.log")
 
     orchestrator = OrchestrationSystem()
     try:

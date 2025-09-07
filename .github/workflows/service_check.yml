@@ -15,40 +15,25 @@ jobs:
 
     - name: Check Incubator Control Service
       run: |
-        response=$(curl -s -f https://hypha.aicell.io/reef-imaging/services/mirror-incubator-control/hello_world || echo "Service unreachable")
-        if [[ "$response" != "Hello world" && "$response" != "\"Hello world\"" ]]; then
+        response=$(curl -s -f https://hypha.aicell.io/reef-imaging/services/mirror-incubator-control/ping || echo "Service unreachable")
+        if [[ "$response" != "pong" && "$response" != "\"pong\"" ]]; then
           echo "Incubator Control Service is down: $response" >> error.log
-        fi
-        
-        task_status=$(curl -s -f https://hypha.aicell.io/reef-imaging/services/mirror-incubator-control/get_all_task_status || echo "{}")
-        if echo "$task_status" | grep -q "failed"; then
-          echo "Incubator Control Service has failed tasks" >> error.log
         fi
 
     - name: Check Microscope Control Service
       run: |
-        response=$(curl -s -f https://hypha.aicell.io/reef-imaging/services/mirror-microscope-control-squid-1/hello_world || echo "Service unreachable")
-        if [[ "$response" != "Hello world" && "$response" != "\"Hello world\"" ]]; then
+        response=$(curl -s -f https://hypha.aicell.io/reef-imaging/services/mirror-microscope-control-squid-1/ping || echo "Service unreachable")
+        if [[ "$response" != "pong" && "$response" != "\"pong\"" ]]; then
           echo "Microscope Control Service is down: $response" >> error.log
-        fi
-        
-        task_status=$(curl -s -f https://hypha.aicell.io/reef-imaging/services/mirror-microscope-control-squid-1/get_all_task_status || echo "{}")
-        if echo "$task_status" | grep -q "failed"; then
-          echo "Microscope Control Service has failed tasks" >> error.log
         fi
 
     - name: Check Robotic Arm Control Service
       run: |
-        response=$(curl -s -f https://hypha.aicell.io/reef-imaging/services/mirror-robotic-arm-control/hello_world || echo "Service unreachable")
-        if [[ "$response" != "Hello world" && "$response" != "\"Hello world\"" ]]; then
+        response=$(curl -s -f https://hypha.aicell.io/reef-imaging/services/mirror-robotic-arm-control/ping || echo "Service unreachable")
+        if [[ "$response" != "pong" && "$response" != "\"pong\"" ]]; then
           echo "Robotic Arm Control Service is down: $response" >> error.log
         fi
         
-        task_status=$(curl -s -f https://hypha.aicell.io/reef-imaging/services/mirror-robotic-arm-control/get_all_task_status || echo "{}")
-        if echo "$task_status" | grep -q "failed"; then
-          echo "Robotic Arm Control Service has failed tasks" >> error.log
-        fi
-
     - name: Exit with error if any services are down
       run: |
         if [ -s error.log ]; then

@@ -38,7 +38,7 @@ async def start_server(server_url):
         "name": "Incubator Control",
         "id": "incubator-control",
         "config": {
-            "visibility": "public"
+            "visibility": "protected"
         },
         "initialize": initialize,
         "put_sample_from_transfer_station_to_slot": put_sample_from_transfer_station_to_slot,
